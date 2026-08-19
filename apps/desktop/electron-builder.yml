@@ -1,0 +1,13 @@
+asar: true
+asarUnpack:
+  - '**/*.node'
+  - '**/helpers/**'
+files:
+  - dist/**
+  - packages/**
+  - package.json
+  - node_modules/**
+mac:
+  target: [dir]
+win:
+  target: [dir]

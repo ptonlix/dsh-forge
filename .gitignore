@@ -1,0 +1,8 @@
+artifacts/
+node_modules/
+.pnpm-store/
+dist/
+
+# AI
+.serena/
+

@@ -1,0 +1,4 @@
+- insert:
+    target: 'dsh.base'
+    value:
+      service: dsh-base

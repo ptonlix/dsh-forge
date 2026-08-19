@@ -1,0 +1,12 @@
+{
+  "name": "@fixture/third-party",
+  "version": "1.0.0",
+  "license": "MIT",
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "dependencies": {
+    "@fixture/git-plugin": "github:fixture/git-plugin#0123456789abcdef0123456789abcdef01234567&path:packages/plugin"
+  },
+  "peerDependencies": { "@deepseek-ai/cordis": "4.0.1" },
+  "scripts": { "prepare": "node build.js" },
+  "pnpm": { "allowBuilds": ["@fixture/git-plugin"] }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "@dsh-forge/desktop-layer",
+  "version": "0.1.0",
+  "license": "MIT",
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "dependencies": { "@dsh-forge/desktop-plugin": "file:../../desktop-plugin" },
+  "peerDependencies": { "@deepseek-ai/cordis": "4.0.1" }
+}

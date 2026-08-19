@@ -1,0 +1,4 @@
+- insert:
+    target: 'dsh.thirdParty'
+    value:
+      injection: fixture-plugin

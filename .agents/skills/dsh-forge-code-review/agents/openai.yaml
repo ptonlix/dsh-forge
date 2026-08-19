@@ -1,0 +1,4 @@
+interface:
+  display_name: "DSH Forge 代码审查"
+  short_description: "优先发现正确性和安全问题"
+  default_prompt: "使用 $dsh-forge-code-review 审查指定变更，按严重程度报告有证据的问题。"

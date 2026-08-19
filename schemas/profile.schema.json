@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dsh-forge/profile@1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "runtime", "bundles"],
+  "properties": {
+    "schema": { "const": "dsh-forge/profile@1" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$" },
+    "runtime": { "type": "object" },
+    "bundles": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^@[a-z0-9._-]+/[a-z0-9._-]+$" } }
+  }
+}

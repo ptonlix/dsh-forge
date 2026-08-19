@@ -1,0 +1,4 @@
+- insert:
+    target: 'dsh.web'
+    value:
+      readiness: /health

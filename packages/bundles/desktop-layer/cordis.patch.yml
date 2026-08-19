@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-forge-desktop-services
+      name: '@dsh-forge/desktop-plugin'

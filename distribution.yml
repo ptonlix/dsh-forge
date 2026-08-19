@@ -1,0 +1,21 @@
+schema: dsh-forge/distribution@1
+id: dsh-forge-official
+name: DSH Forge
+packageScope: '@dsh-forge'
+applicationId: ai.dshforge.desktop
+version: 0.1.0
+defaultProfile: official
+channel: stable
+platforms:
+  - os: darwin
+    architectures: [arm64, x64]
+  - os: win32
+    architectures: [x64]
+updates:
+  enabled: false
+  channel: stable
+  metadataUrl: https://updates.invalid/dsh-forge/stable.json
+  trustRoot: dsh-forge-dev-root-v1
+branding:
+  productName: DSH Forge
+  publisher: DSH Forge Team

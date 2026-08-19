@@ -1,0 +1,4 @@
+schema: dsh-forge/profile@1
+name: INVALID_NAME
+runtime: {}
+bundles: []

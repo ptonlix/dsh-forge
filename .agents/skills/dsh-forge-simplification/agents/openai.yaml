@@ -1,0 +1,4 @@
+interface:
+  display_name: "DSH Forge 简化审计"
+  short_description: "用调用方证据识别可删除表面"
+  default_prompt: "使用 $dsh-forge-simplification 审计指定范围，提出有生产证据的简化候选。"

@@ -1,0 +1,24 @@
+schema: dsh-forge/catalog@1
+entries:
+  - schema: dsh-forge/catalog@1
+    id: official-desktop
+    tier: L0
+    packageName: '@dsh-forge/desktop-plugin'
+    version: 0.1.0
+    source:
+      kind: workspace
+      path: packages/desktop-plugin
+    integrity: sha256-f5123e6c7785fc9a36b40223345b23d7555cd84652acbeb2a3788d88436eaf1a
+    license: MIT
+    maintainer: DSH Forge Team
+    dependencies: []
+    scripts: []
+    capabilities: [desktopProfiles, desktopPnpm]
+    verifiedOn: [darwin-arm64, darwin-x64, win32-x64]
+    verifiedAt: 2026-08-18
+    executionMode: trusted-in-process
+    hostSupport: [desktop-protocol-1]
+    pluginRequest: [desktopProfiles, desktopPnpm]
+    grant: required
+    audit: reviewed
+    enforcement: unavailable

@@ -1,0 +1,9 @@
+schema: dsh-forge/distribution@1
+id: fixture-valid
+name: Fixture
+packageScope: '@fixture'
+applicationId: ai.fixture.desktop
+version: 0.1.0
+defaultProfile: official
+platforms: []
+unexpected: true

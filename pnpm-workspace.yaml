@@ -1,0 +1,12 @@
+packages:
+  - apps/*
+  - packages/*
+  - packages/bundles/*
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@google/genai': false
+  koffi: true
+  node-pty: true
+  protobufjs: false
+  esbuild: true
+  electron-winstaller: true

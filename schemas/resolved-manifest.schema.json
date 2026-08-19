@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dsh-forge/resolved-manifest@1",
+  "type": "object",
+  "required": ["schema", "inputDigest", "tools", "distribution", "profile", "bundles"],
+  "properties": {
+    "schema": { "const": "dsh-forge/resolved-manifest@1" },
+    "inputDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "bundles": { "type": "array" }
+  }
+}

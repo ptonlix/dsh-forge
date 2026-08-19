@@ -1,0 +1,5 @@
+schema: dsh-forge/profile@1
+name: fixture
+runtime: {}
+bundles: []
+plugins: []

@@ -1,0 +1,6 @@
+{
+  "name": "@fixture/git-plugin",
+  "version": "2.0.0",
+  "license": "BSD-2-Clause",
+  "main": "dist/index.js"
+}

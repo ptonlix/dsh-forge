@@ -1,0 +1,4 @@
+interface:
+  display_name: "DSH Forge 文档规范"
+  short_description: "维护文档层级、链接和验证边界"
+  default_prompt: "使用 $dsh-forge-doc-standards 审查指定范围内的文档放置、结构、链接和验证。"

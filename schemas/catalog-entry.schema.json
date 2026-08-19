@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dsh-forge/catalog@1",
+  "type": "object",
+  "required": ["schema", "id", "tier", "packageName", "version", "source", "executionMode"],
+  "properties": {
+    "schema": { "const": "dsh-forge/catalog@1" },
+    "tier": { "enum": ["L0", "L1", "L2"] },
+    "executionMode": { "const": "trusted-in-process" }
+  }
+}

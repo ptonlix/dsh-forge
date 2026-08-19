@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dsh-forge/bundle-manifest@1",
+  "type": "object",
+  "required": ["name", "version", "license", "dsh"],
+  "properties": {
+    "name": { "type": "string" },
+    "version": { "type": "string" },
+    "license": { "type": "string" },
+    "dsh": { "type": "object", "required": ["bundle"] }
+  }
+}
