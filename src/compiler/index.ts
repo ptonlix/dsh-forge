@@ -52,6 +52,17 @@ export interface BundleCollectionProfile {
   readonly runtime: Pick<Profile['runtime'], 'cordisVersion'>;
 }
 
+/**
+ * bundle 解析的可选测试边界。
+ *
+ * 正式编译只从 workspace 和已安装的 DSH runtime 闭包解析 bundle；测试若需要
+ * 构造不完整或带恶意输入的本地 package，必须显式传入夹具根目录，避免生产
+ * 代码隐式依赖 tests/ 目录。
+ */
+export interface BundleResolutionOptions {
+  readonly fixtureRoot?: string;
+}
+
 export interface ResolvedManifest {
   readonly schema: 'dsh-forge/resolved-manifest@1';
   readonly inputDigest: string;
@@ -128,12 +139,18 @@ export function resolvePackageDirectory(name: string, root = repoRoot()): string
   return null;
 }
 
-/** 定位 bundle；找不到时抛出带 bundle 名称的稳定业务错误。 */
-export function bundleDirectory(name: string, root = repoRoot()): string {
+/**
+ * 定位 bundle；找不到时抛出带 bundle 名称的稳定业务错误。
+ *
+ * fixtureRoot 只用于测试构造的本地 package，正式调用不应设置该选项。
+ */
+export function bundleDirectory(name: string, root = repoRoot(), options: BundleResolutionOptions = {}): string {
   const local = resolvePackageDirectory(name, root);
   if (local) return local;
-  const fixture = path.join(root, 'fixtures/bundles', name.slice(name.lastIndexOf('/') + 1));
-  if (fs.existsSync(path.join(fixture, 'package.json'))) return fixture;
+  if (options.fixtureRoot) {
+    const fixture = path.join(path.resolve(options.fixtureRoot), 'bundles', name.slice(name.lastIndexOf('/') + 1));
+    if (fs.existsSync(path.join(fixture, 'package.json'))) return fs.realpathSync(fixture);
+  }
   fail(`无法定位 bundle: ${name}`, 'BUNDLE_MISSING', { name });
 }
 
@@ -179,12 +196,16 @@ function allowsVersion(range: string, version: string): boolean {
   return true;
 }
 
-function packageSource(directory: string, root: string): PackageSource {
+function packageSource(directory: string, root: string, workspaceRoots: readonly string[]): PackageSource {
   const relative = path.relative(root, directory);
   const workspace =
     relative &&
     !relative.startsWith(`..${path.sep}`) &&
-    (relative.startsWith(`packages${path.sep}`) || relative.startsWith(`fixtures${path.sep}`));
+    !path.isAbsolute(relative) &&
+    workspaceRoots.some((workspaceRoot) => {
+      const child = path.relative(workspaceRoot, directory);
+      return child && !child.startsWith(`..${path.sep}`) && !path.isAbsolute(child);
+    });
   return workspace
     ? { kind: 'workspace', path: relative, integrity: `sha256-${sha256File(path.join(directory, 'package.json'))}` }
     : {
@@ -229,7 +250,11 @@ function dependencyNames(pkg: DependencyPackage): string[] {
   ];
 }
 
-function collectDependencyClosure(bundleDirectories: readonly string[], root: string): DependencyClosureEntry[] {
+function collectDependencyClosure(
+  bundleDirectories: readonly string[],
+  root: string,
+  workspaceRoots: readonly string[],
+): DependencyClosureEntry[] {
   const queue = bundleDirectories.slice();
   const seen = new Map();
   while (queue.length) {
@@ -244,7 +269,7 @@ function collectDependencyClosure(bundleDirectories: readonly string[], root: st
       name: pkg.name,
       version: typeof pkg.version === 'string' ? pkg.version : null,
       license: typeof pkg.license === 'string' ? pkg.license : 'NOASSERTION',
-      source: packageSource(directory, root),
+      source: packageSource(directory, root, workspaceRoots),
       scripts: Object.keys(scripts)
         .filter((name) => LIFECYCLE_SCRIPTS.has(name))
         .filter((name) => typeof scripts[name] === 'string')
@@ -280,10 +305,16 @@ function readBuildPolicy(root: string): Map<string, boolean> {
 }
 
 /** 收集 profile bundle、依赖闭包和构建授权，返回可审计的编译输入集合。 */
-export function collectBundles(profile: BundleCollectionProfile, root: string): CollectedBundles {
+export function collectBundles(
+  profile: BundleCollectionProfile,
+  root: string,
+  options: BundleResolutionOptions = {},
+): CollectedBundles {
+  const workspaceRoots = [path.join(root, 'packages')];
+  if (options.fixtureRoot) workspaceRoots.push(path.resolve(options.fixtureRoot));
   const peerVersions = new Map();
   const bundles = profile.bundles.map((name) => {
-    const directory = bundleDirectory(name, root);
+    const directory = bundleDirectory(name, root, options);
     const manifest = parseBundleManifest(directory);
     if (manifest.name !== name)
       fail(`bundle 名称不匹配: profile 声明 ${name}，实际为 ${manifest.name}`, 'BUNDLE_IDENTITY');
@@ -306,11 +337,12 @@ export function collectBundles(profile: BundleCollectionProfile, root: string): 
       peerVersions.set(peer, range);
     }
     for (const spec of Object.values(manifest.dependencies)) normalizeGit(spec);
-    return { ...manifest, source: packageSource(directory, root) };
+    return { ...manifest, source: packageSource(directory, root, workspaceRoots) };
   });
   const dependencyClosure = collectDependencyClosure(
     bundles.map((bundle) => bundle.sourceDirectory),
     root,
+    workspaceRoots,
   );
   const policy = readBuildPolicy(root);
   const requestedBuilds = new Set(bundles.flatMap((bundle) => bundle.allowBuilds || []));
@@ -391,9 +423,11 @@ function profileDependencySpec(bundle: Bundle, profileDir: string): string {
   return `file:${relative || '.'}`;
 }
 
-function profileLocalDependency(bundle: Bundle): boolean {
-  // DSH 先从发行包安装锚点解析内置 bundle；只有 profile 外置 bundle 才进入 profile 的 pnpm 依赖。
-  return bundle.source.kind !== 'installed' && bundle.source.path.startsWith(`fixtures${path.sep}`);
+function profileLocalDependency(bundle: Bundle, fixtureRoot: string | undefined): boolean {
+  // DSH 先从发行包安装锚点解析内置 bundle；只有显式测试夹具才进入 profile 的 file 依赖。
+  if (!fixtureRoot || bundle.source.kind === 'installed') return false;
+  const relative = path.relative(path.resolve(fixtureRoot), bundle.sourceDirectory);
+  return Boolean(relative && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function pnpmCommand(root: string): string {
@@ -457,16 +491,19 @@ export function compileProfile({
   distributionFile = path.join(root, 'distribution.yml'),
   profileFile = null,
   artifactsDir = path.join(root, 'artifacts'),
+  fixtureRoot,
 }: {
   root?: string;
   distributionFile?: string;
   profileFile?: string | null;
   artifactsDir?: string;
+  /** 仅测试使用的本地 bundle 夹具根目录。 */
+  fixtureRoot?: string;
 } = {}): CompiledProfile {
   const distribution = parseDistribution(distributionFile, { profilesRoot: path.join(root, 'profiles') });
   const profile = parseProfile(profileFile || path.join(root, 'profiles', distribution.defaultProfile, 'profile.yml'));
   const profilePatch = readPatch(profile.patchFile);
-  const collected = collectBundles(profile, root);
+  const collected = collectBundles(profile, root, { fixtureRoot });
   const input = inputSummary(
     distribution,
     profile,
@@ -482,7 +519,7 @@ export function compileProfile({
 
   const dependencies = Object.fromEntries(
     collected.bundles
-      .filter(profileLocalDependency)
+      .filter((bundle) => profileLocalDependency(bundle, fixtureRoot))
       .map((bundle) => [bundle.name, profileDependencySpec(bundle, profileDir)]),
   );
   writeJson(path.join(profileDir, 'package.json'), {

@@ -1,4 +1,4 @@
-/** compiler/schema 契约测试：使用真实 fixtures，同时覆盖漂移、来源和构建授权失败。 */
+/** compiler/schema 契约测试：使用 tests/fixtures，同时覆盖漂移、来源和构建授权失败。 */
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -11,7 +11,7 @@ import {
   projectDistributionIdentity,
   ForgeError,
 } from '../src/core/schema.ts';
-import { collectBundles, compileProfile, verifyProfile } from '../src/compiler/index.ts';
+import { bundleDirectory, collectBundles, compileProfile, verifyProfile } from '../src/compiler/index.ts';
 import { assertResolvedManifest } from './helpers.ts';
 
 const root = path.resolve(__dirname, '..');
@@ -56,14 +56,28 @@ test('schema 拒绝未知字段、顶层 plugins、非法 profile 名与未解�
 
 test('仓库失败夹具可被解析器稳定拒绝', () => {
   throwsCode(
-    () => parseDistribution(path.join(root, 'fixtures/invalid/distribution-unknown-field.yml')),
+    () => parseDistribution(path.join(root, 'tests/fixtures/invalid/distribution-unknown-field.yml')),
     'SCHEMA_UNKNOWN_FIELD',
   );
-  throwsCode(() => parseProfile(path.join(root, 'fixtures/invalid/profile-plugins.yml')), 'SCHEMA_FORBIDDEN_FIELD');
+  throwsCode(
+    () => parseProfile(path.join(root, 'tests/fixtures/invalid/profile-plugins.yml')),
+    'SCHEMA_FORBIDDEN_FIELD',
+  );
+});
+
+test('正式 bundle 解析不隐式读取测试夹具', () => {
+  assert.throws(
+    () => bundleDirectory('@fixture/third-party', root),
+    (error: unknown) => error instanceof ForgeError && error.code === 'BUNDLE_MISSING',
+  );
+  assert.equal(
+    bundleDirectory('@fixture/third-party', root, { fixtureRoot: path.join(root, 'tests/fixtures') }),
+    fs.realpathSync(path.join(root, 'tests/fixtures/bundles/third-party')),
+  );
 });
 
 test('Git monorepo 依赖、许可证与 allowBuilds 事实被保留', () => {
-  const manifest = parseBundleManifest(path.join(root, 'fixtures/bundles/third-party'));
+  const manifest = parseBundleManifest(path.join(root, 'tests/fixtures/bundles/third-party'));
   assert.equal(manifest.license, 'MIT');
   assert.deepEqual(manifest.allowBuilds, ['@fixture/git-plugin']);
   assert.match(manifest.dependencies['@fixture/git-plugin']!, /#[0-9a-f]{40}&path:packages\/plugin$/);
@@ -127,7 +141,8 @@ test('解析器拒绝非法 profile 名', () => {
 
 test('依赖闭包要求显式 allowBuilds，并拒绝重复 peer', () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-bundles-'));
-  const bundles = path.join(temp, 'fixtures', 'bundles');
+  const fixtureRoot = path.join(temp, 'tests', 'fixtures');
+  const bundles = path.join(fixtureRoot, 'bundles');
   fs.mkdirSync(bundles, { recursive: true });
   fs.writeFileSync(path.join(temp, 'pnpm-workspace.yaml'), 'allowBuilds: {}\n');
   const writeBundle = (name: string, peer: string | null, script: boolean): void => {
@@ -150,15 +165,15 @@ test('依赖闭包要求显式 allowBuilds，并拒绝重复 peer', () => {
   writeBundle('a', null, true);
   const profile = { bundles: ['@fixture/a'], runtime: { cordisVersion: '4.0.1' } };
   assert.throws(
-    () => collectBundles(profile, temp),
+    () => collectBundles(profile, temp, { fixtureRoot }),
     (error: unknown) => error instanceof ForgeError && error.code === 'ALLOW_BUILDS_REQUIRED',
   );
   fs.writeFileSync(path.join(temp, 'pnpm-workspace.yaml'), "allowBuilds:\n  '@fixture/a': true\n");
-  assert.equal(collectBundles(profile, temp).allowBuilds.includes('@fixture/a'), true);
+  assert.equal(collectBundles(profile, temp, { fixtureRoot }).allowBuilds.includes('@fixture/a'), true);
   writeBundle('a', '^1.0.0', true);
   writeBundle('b', '^2.0.0', false);
   assert.throws(
-    () => collectBundles({ ...profile, bundles: ['@fixture/a', '@fixture/b'] }, temp),
+    () => collectBundles({ ...profile, bundles: ['@fixture/a', '@fixture/b'] }, temp, { fixtureRoot }),
     (error: unknown) => error instanceof ForgeError && error.code === 'PEER_DUPLICATE',
   );
   fs.rmSync(temp, { recursive: true, force: true });
