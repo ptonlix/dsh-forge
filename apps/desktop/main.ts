@@ -8,9 +8,10 @@ import { compileProfile } from '@dsh-forge/profile-toolchain/compiler';
 import { fail } from '@dsh-forge/profile-toolchain/core/errors';
 import { createDesktopServices } from '@dsh-forge/desktop-plugin';
 import { GenerationManager } from './runtime/generation.ts';
+import { ensureManagedProfile } from './runtime/managed-profile.ts';
 import { ProfileStateStore } from './runtime/state-store.ts';
 import { errorMessage } from './runtime/types.ts';
-import type { GenerationLike, ProfileSummary } from './runtime/types.ts';
+import type { GenerationLike, ProfileState, ProfileSummary, StateStore } from './runtime/types.ts';
 
 /**
  * Electron 主进程与 DSH Host 的适配层。
@@ -81,6 +82,8 @@ interface LauncherGenerationState {
 interface LauncherOptions {
   readonly userData: string;
   readonly profiles: readonly DesktopProfile[];
+  /** 显式启动或打包应用绑定的 profile，优先于持久化恢复状态。 */
+  readonly startupProfile?: string;
   readonly host: { start(options: HostStartOptions): Promise<HostInstance> };
   readonly windowFactory: WindowFactory;
   probe(url: string): Promise<void>;
@@ -174,35 +177,26 @@ export async function probeLoopback(url: string, deadlineMs: number): Promise<vo
   throw new Error(`Host HTTP readiness 超时: ${errorMessage(lastError || 'unknown error')}`);
 }
 
-function copyProfileTemplate(source: string, destination: string): string {
-  if (fs.existsSync(path.join(destination, 'package.json'))) return destination;
-  fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
-  fs.cpSync(source, destination, {
-    recursive: true,
-    dereference: true,
-    filter: (sourcePath) => path.basename(sourcePath) !== 'node_modules',
-  });
-  return destination;
+function developmentProfileTemplate(root: string, profileName: string): string {
+  return compileProfile({ root, profileName }).profileDir;
 }
 
-function developmentProfileTemplate(root: string): string {
-  return compileProfile({ root }).profileDir;
-}
-
-/** 将官方 profile 模板复制到用户目录，明确排除 node_modules，避免复制安装状态。 */
-export function ensureOfficialProfile({
+/** 将发行版 profile 安装到共享 DSH Home 的受管命名空间。 */
+export function ensureDistributionProfile({
   root,
-  home,
+  dshHome,
   profileTemplate,
-  profileName = 'official',
+  distributionId,
+  sourceProfile,
 }: {
   readonly root: string;
-  readonly home: string;
+  readonly dshHome: string;
   readonly profileTemplate: string | null;
-  readonly profileName?: string;
-}): string {
-  const source = profileTemplate || developmentProfileTemplate(root);
-  return copyProfileTemplate(source, path.join(home, 'profiles', profileName));
+  readonly distributionId: string;
+  readonly sourceProfile: string;
+}): { readonly directory: string; readonly profileName: string } {
+  const source = profileTemplate || developmentProfileTemplate(root, sourceProfile);
+  return ensureManagedProfile({ source, dshHome, distributionId, sourceProfile });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -210,12 +204,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** 扫描用户 profile；不可验证或持久化 desktop layer 的目录只能展示，不能选择。 */
-export function listProfiles(home: string, defaultProfile = 'official'): DesktopProfile[] {
+export function listProfiles(home: string, defaultProfile = 'dsh-forge-official'): DesktopProfile[] {
   const root = path.join(home, 'profiles');
   if (!fs.existsSync(root)) return [];
   return fs
     .readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name !== 'node_modules')
+    .filter((entry) => entry.isDirectory() && entry.name !== 'node_modules' && !entry.name.startsWith('.'))
     .map((entry): DesktopProfile => {
       const directory = path.join(root, entry.name);
       try {
@@ -251,6 +245,56 @@ export function listProfiles(home: string, defaultProfile = 'official'): Desktop
       }
     })
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+/** 判断 profile 是否可被当前 Desktop generation 选择。 */
+function isSelectableProfile(profile: ProfileSummary | undefined): profile is ProfileSummary {
+  return Boolean(profile && profile.exists !== false && profile.selectable && !profile.error);
+}
+
+/**
+ * 清理不再存在或不可选择的启动状态，并返回本次应启动的 profile。
+ *
+ * profile-state 是跨发行版本持久化的数据，不能直接信任其 profile 名称。旧版本
+ * 留下的名称会在此处被原子清除，而非让 generation 进入 prepare 后才失败；状态
+ * 文件本身保留，仍作为诊断和未来成功启动的持久化容器。
+ */
+export function resolveStartupProfile(
+  stateStore: Pick<StateStore, 'load' | 'save'>,
+  profiles: readonly ProfileSummary[],
+  fallback: string,
+  preferredProfile?: string,
+): string {
+  const selectable = new Set(profiles.filter(isSelectableProfile).map((profile) => profile.name));
+  if (!selectable.has(fallback)) fail(`默认 profile 不可选择: ${fallback}`, 'PROFILE_UNSELECTABLE');
+
+  const profileExists = (name: string | null): boolean => name !== null && selectable.has(name);
+  const state = stateStore.load();
+  const invalidPending = Boolean(state.pending && !profileExists(state.pending.profile));
+  const invalidActive = !profileExists(state.active) && state.active !== null;
+  const invalidLastKnownGood = !profileExists(state.lastKnownGood) && state.lastKnownGood !== null;
+  const invalidFailure = Boolean(state.lastFailure?.target && !profileExists(state.lastFailure.target));
+  const invalidManualRecovery = Boolean(state.manualRecovery && !profileExists(state.manualRecovery.target));
+  const requiresRepair =
+    invalidPending || invalidActive || invalidLastKnownGood || invalidFailure || invalidManualRecovery;
+  let repaired: ProfileState = state;
+  if (requiresRepair) {
+    repaired = stateStore.save({
+      ...state,
+      pending: invalidPending ? null : state.pending,
+      active: invalidActive ? null : state.active,
+      lastKnownGood: invalidLastKnownGood ? null : state.lastKnownGood,
+      // 旧 generation 仅对旧 profile 有意义，不能与清理后的选择混用。
+      generationId: null,
+      lastFailure: invalidFailure ? null : state.lastFailure,
+      manualRecovery: invalidManualRecovery ? null : state.manualRecovery,
+    });
+  }
+  if (preferredProfile) {
+    if (!selectable.has(preferredProfile)) fail(`指定 profile 不可选择: ${preferredProfile}`, 'PROFILE_UNSELECTABLE');
+    return preferredProfile;
+  }
+  return repaired.pending?.profile || repaired.active || repaired.lastKnownGood || fallback;
 }
 
 async function loadAppBoot(runtimeRequire: RuntimeRequire): Promise<DshAppBoot> {
@@ -330,6 +374,7 @@ export async function startDshHost({
 export function createDesktopLauncher({
   userData,
   profiles,
+  startupProfile,
   host,
   windowFactory,
   probe,
@@ -342,6 +387,11 @@ export function createDesktopLauncher({
   let windowRef: RendererWindow | null = null;
   const generationStates = new WeakMap<GenerationLike, LauncherGenerationState>();
   const store = new ProfileStateStore(path.join(userData, 'dsh-forge'));
+  const fallback =
+    profiles.find((profile) => profile.default && isSelectableProfile(profile))?.name ||
+    profiles.find(isSelectableProfile)?.name;
+  if (!fallback) fail('没有可启动的 desktop profile', 'PROFILE_UNSELECTABLE');
+  const initialProfile = resolveStartupProfile(store, profiles, fallback, startupProfile);
   const manager = new GenerationManager({
     stateStore: store,
     profiles,
@@ -406,14 +456,9 @@ export function createDesktopLauncher({
       },
     },
   });
-  const fallback =
-    profiles.find((profile) => profile.default && profile.selectable)?.name ||
-    profiles.find((profile) => profile.selectable)?.name;
-  if (!fallback) fail('没有可启动的 desktop profile', 'PROFILE_UNSELECTABLE');
   return Object.freeze({
     manager,
-    start: () =>
-      manager.select(store.load().pending?.profile || store.load().active || store.load().lastKnownGood || fallback),
+    start: () => manager.select(initialProfile),
     show: () => windowRef?.show(),
     hide: () => manager.hideWindow(),
     retry: () => manager.retry(),

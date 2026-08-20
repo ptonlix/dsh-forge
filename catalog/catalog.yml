@@ -1,7 +1,7 @@
 schema: dsh-forge/catalog@1
 entries:
   - schema: dsh-forge/catalog@1
-    id: official-desktop
+    id: dsh-forge-official-desktop
     tier: L0
     packageName: '@dsh-forge/desktop-plugin'
     version: 0.1.0

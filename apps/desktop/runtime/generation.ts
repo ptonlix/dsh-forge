@@ -122,7 +122,8 @@ export class GenerationManager {
       fail(`已有其他 profile 选择等待处理: ${this.pendingSelection.profile}`, 'PROFILE_SELECTION_BUSY');
     }
     const target = this.profiles.find((profile) => profile.name === profileName);
-    if (target && target.selectable === false) fail(`profile 不可选择: ${profileName}`, 'PROFILE_UNSELECTABLE');
+    if (!target || target.selectable === false || target.exists === false || target.error)
+      fail(`profile 不可选择: ${profileName}`, 'PROFILE_UNSELECTABLE');
     const previous = this.state.pending;
     if (previous && previous.profile !== profileName)
       fail(`已有 pending profile: ${previous.profile}`, 'PROFILE_SELECTION_BUSY');

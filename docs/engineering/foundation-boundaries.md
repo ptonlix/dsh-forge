@@ -24,8 +24,8 @@
 
 ```sh
 pnpm run check
-pnpm run profile:verify -- official
-pnpm run dump-config -- official
+pnpm run profile:verify -- dsh-forge-official
+pnpm run dump-config -- dsh-forge-official
 pnpm run catalog:verify
 pnpm run package:inspect
 pnpm run boundaries:check

@@ -1,5 +1,5 @@
 schema: dsh-forge/profile@1
-name: official
+name: dsh-forge-official
 runtime:
   dshPackageFamily: '@deepseek-ai/dsh'
   dshVersion: 0.1.0-rc.7

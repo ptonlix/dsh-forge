@@ -87,12 +87,20 @@ renderer 必须启用 Chromium sandbox 和 context isolation，关闭 Node integ
 ### 3.1 启动生命周期
 
 1. Electron 启动器获取单实例锁并解析用户选择的发行版。
-2. 启动器准备 Node、pnpm、DSH_HOME 和 profile 目录，但不修改系统环境变量。
+2. 启动器解析 Node、pnpm、共享 DSH Home 和发行 profile 目录，但不修改系统环境变量。
 3. 启动器提供 `desktopRuntime` 和启动事实，然后创建 Host Cordis generation。
 4. Loader 按序加载官方 bundle、发行版 bundle、desktop layer 和用户补丁。
 5. Web Host 绑定 loopback 随机端口，启动器等待规范 URL 和 readiness probe。
 6. Electron 创建窗口并加载该 URL；窗口成功加载后提交 last-known-good generation。
 7. 关闭窗口只隐藏窗口；明确退出、信号或 generation 失败才会停止 Host。
+
+### 3.1.1 共享 DSH Home 与发行 profile
+
+DSH 的用户数据根目录遵循上游优先级：显式配置路径、`DSH_HOME`、`~/.dsh`。Desktop 只读取该结果并将其显式传给 Host；不得重写 `process.env.DSH_HOME`，也不得把会话、凭据、设置或存储复制到 Electron 的 `userData` 目录。
+
+Electron 的 `userData` 只保存窗口、Chromium 数据和启动器 generation 状态。Desktop 不读取、迁移或复制任何历史私有 DSH Home；所有 DSH 会话、凭据、设置、存储和 profile 都只通过共享 Home 访问。
+
+官方发行版的 `defaultProfile` 与发行版 ID 均为 `dsh-forge-official`；该名称既是仓库编译源目录，也是共享 DSH Home 中的受管 profile 目录 `~/.dsh/profiles/dsh-forge-official`。开发态通过 `--profile <name>` 选择 `profiles/<name>/` 后，启动器会编译该 profile 并安装到 `~/.dsh/profiles/<name>`；只更新带有当前发行版归属和来源 profile 标记的目录，无法证明归属的同名目录必须拒绝覆盖。打包应用只包含构建时选定的一个 profile，并从随包的 resolved manifest 读取其名称，不能在启动时切换到未随包交付的 profile。用户自定义 profile 仍位于 `~/.dsh/profiles/<name>`，用户覆盖继续通过共享 Home 的 `cordis.patch.yml` 生效。
 
 ### 3.2 重启边界
 
@@ -261,7 +269,7 @@ profiles/developer/
 
 包含 GitHub 源码依赖时，编译器还必须生成 profile 专属的 `pnpm-workspace.yaml`，把经过审核的构建脚本写入 `allowBuilds`；用户修改授权后必须重新解析、锁定并验证 profile。
 
-`profiles/official/` 是本仓库维护的参考发行版；Fork 用户创建 `profiles/<name>/`，通过复制官方 profile 并替换自己的 bundle 和插件形成组合，不直接改写 `official`。每个 Fork profile 都必须可以独立执行 `profile:resolve`、`profile:verify` 和安装包冒烟。
+`profiles/dsh-forge-official/` 是本仓库维护的参考发行版；Fork 用户创建 `profiles/<name>/`，通过复制发行 profile 并替换自己的 bundle 和插件形成组合，不直接改写 `dsh-forge-official`。每个 Fork profile 都必须可以独立执行 `profile:resolve`、`profile:verify` 和安装包冒烟。
 
 ### 4.6 `catalog`、`tools` 和 `templates`
 
@@ -285,7 +293,7 @@ name: DSH Forge
 packageScope: '@dsh-forge'
 applicationId: ai.dshforge.desktop
 version: 0.1.0
-defaultProfile: official
+defaultProfile: dsh-forge-official
 channel: stable
 platforms:
   - os: darwin
@@ -324,12 +332,12 @@ Fork 用户应优先修改 `distribution.yml` 和 `profiles/<name>/`。需要新
 
 ## 5. Profile 组合模型
 
-`profiles/official/profile.yml` 的组合源文件结构如下：
+`profiles/dsh-forge-official/profile.yml` 的组合源文件结构如下：
 
 <!-- dsh-forge-example:profile -->
 ```yaml
 schema: dsh-forge/profile@1
-name: official
+name: dsh-forge-official
 runtime:
   dshPackageFamily: '@deepseek-ai/dsh'
   dshVersion: 0.1.0-rc.7
@@ -448,11 +456,24 @@ interface DesktopPnpm {
 profile 工具命令支持显式 profile；省略名称时使用 `distribution.yml` 的 `defaultProfile`：
 
 ```text
-pnpm run profile:resolve -- official
-pnpm run profile:verify -- official
-pnpm run package:desktop -- official
-pnpm run package:inspect -- official
+pnpm run profile:resolve -- dsh-forge-official
+pnpm run profile:verify -- dsh-forge-official
+pnpm run package:desktop -- dsh-forge-official
+pnpm run package:inspect -- dsh-forge-official
 ```
+
+例如新增 `profiles/developer/profile.yml` 后，可使用以下命令启动、验证并打包该 profile：
+
+```text
+pnpm dev -- --profile developer
+pnpm run profile:resolve -- developer
+pnpm run profile:verify -- developer
+pnpm run package:desktop -- developer
+pnpm run package:inspect -- developer
+pnpm run package:smoke -- developer
+```
+
+开发启动会自动生成或更新 `~/.dsh/profiles/developer`；已存在但不带 DSH Forge 归属标记的同名目录不会被覆盖。打包应用则将 `developer` 固定在产物中，启动时自动生成或更新同名受管 profile。
 
 安装包必须包含固定版本的 DSH runtime、Node runtime、已解析插件依赖和 profile 生成物。源码仓库不复制第三方插件源码；发行包仍然需要物理包含运行所需的依赖。
 
@@ -534,7 +555,7 @@ pnpm run package:inspect -- official
 本仓库的公共维护面和官方发行版必须保持可分离：
 
 - 公共维护面包括 `apps/desktop` 的通用启动流程、`packages/desktop-plugin` 的公开 service、bundle manifest、profile 编译器、模板和构建工具。
-- 官方发行版包括 `distribution.yml` 的默认身份、`profiles/official/`、官方精选 bundle 和官方 catalog 快照。
+- 官方发行版包括 `distribution.yml` 的默认身份、`profiles/dsh-forge-official/`、官方精选 bundle 和官方 catalog 快照。
 - Fork 发行版拥有自己的 `distribution.yml`、`profiles/<name>/`、品牌资源、可选 bundle、插件 catalog 和签名配置。
 
 Fork 用户按以下范围选择修改方式：
@@ -561,7 +582,7 @@ Fork 不得把 `artifacts/`、生成的 profile 目录或第三方插件源码�
 
 新仓库应按以下顺序创建：
 
-1. 创建 `distribution.yml` 和 `profiles/official/`，固定官方发行版身份、DSH runtime 和最小 bundle 栈。
+1. 创建 `distribution.yml` 和 `profiles/dsh-forge-official/`，固定官方发行版身份、DSH runtime 和最小 bundle 栈。
 2. 创建 `apps/desktop` 和 `packages/desktop-plugin`，只实现兼容模式。
 3. 实现 `profile:resolve`、`profile:verify` 和安装包启动 smoke。
 4. 增加 `packages/bundles/product-base`，再逐项加入 L0 插件。

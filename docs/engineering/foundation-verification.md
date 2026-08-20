@@ -14,24 +14,29 @@ pnpm dev
 ```
 
 该命令会先编译 TypeScript 和 workspace 包，再执行 Electron。启动 profile 默认读取
-`distribution.yml` 的 `defaultProfile`（当前为 `official`），因此开发启动不需要追加
-`-- official`；`official` 参数只在需要显式选择 profile 的构建或验证命令中使用。
+`distribution.yml` 的 `defaultProfile`（当前为 `dsh-forge-official`），因此开发启动不需要追加
+profile 参数。需要启动仓库中的其他 profile 时，使用 `pnpm dev -- --profile <name>`；启动器会将
+已选 profile 写入 `~/.dsh/profiles/<name>`，但拒绝覆盖没有 DSH Forge 归属标记的同名目录。
 
 ```sh
 pnpm run check
 pnpm run acceptance
 pnpm run profile:resolve
 pnpm run profile:verify
-pnpm run dump-config -- official
+pnpm run dump-config -- dsh-forge-official
 pnpm run catalog:verify
 pnpm run check:all
 pnpm run boundaries:check
 pnpm run profile:resolve -- developer
 pnpm run profile:verify -- developer
 pnpm run dump-config -- developer
-pnpm run package:desktop -- official
-pnpm run package:inspect -- official
-pnpm run package:smoke -- official
+pnpm dev -- --profile developer
+pnpm run package:desktop -- developer
+pnpm run package:inspect -- developer
+pnpm run package:smoke -- developer
+pnpm run package:desktop -- dsh-forge-official
+pnpm run package:inspect -- dsh-forge-official
+pnpm run package:smoke -- dsh-forge-official
 pnpm run docs:check
 git diff --check
 openspec validate "align-repository-with-distribution-design" --type change --strict --no-interactive

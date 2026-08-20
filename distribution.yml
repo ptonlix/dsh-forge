@@ -4,7 +4,7 @@ name: DSH Forge
 packageScope: '@dsh-forge'
 applicationId: ai.dshforge.desktop
 version: 0.1.0
-defaultProfile: official
+defaultProfile: dsh-forge-official
 channel: stable
 platforms:
   - os: darwin

@@ -17,7 +17,7 @@ import { errorCode } from '../types.ts';
 export function runFoundationAcceptance({ root }: { readonly root?: string } = {}) {
   // 编译产物位于 tools/profile-toolchain/dist/acceptance，默认根目录需回到仓库根。
   const projectRoot = path.resolve(root || path.join(__dirname, '../../../..'));
-  const official = compileProfile({ root: projectRoot });
+  const forgeOfficial = compileProfile({ root: projectRoot });
   const verified = verifyProfile({ root: projectRoot });
   const dump = composeCompiled(verified, { overlay: { port: 38080, generationId: 'acceptance' } });
   if (!dump.healthy) throw new Error('官方 profile 的真实 DSH dump 不健康');
@@ -34,7 +34,7 @@ export function runFoundationAcceptance({ root }: { readonly root?: string } = {
         "packageScope: '@dsh-forge-fork'",
         'applicationId: ai.dshforge.fork',
         'version: 0.1.0',
-        'defaultProfile: official',
+        'defaultProfile: dsh-forge-official',
         'platforms:',
         '  - os: darwin',
         '    architectures: [arm64]',
@@ -45,8 +45,14 @@ export function runFoundationAcceptance({ root }: { readonly root?: string } = {
       throw new Error('Fork 身份未投影到 resolved manifest');
 
     const upgradedProfile = path.join(temporary, 'profile.yml');
-    const officialProfile = fs.readFileSync(path.join(projectRoot, 'profiles', 'official', 'profile.yml'), 'utf8');
-    fs.writeFileSync(upgradedProfile, officialProfile.replace('electronVersion: 43.4.0', 'electronVersion: 44.0.0'));
+    const forgeOfficialProfile = fs.readFileSync(
+      path.join(projectRoot, 'profiles', 'dsh-forge-official', 'profile.yml'),
+      'utf8',
+    );
+    fs.writeFileSync(
+      upgradedProfile,
+      forgeOfficialProfile.replace('electronVersion: 43.4.0', 'electronVersion: 44.0.0'),
+    );
     let upgradeRejected = false;
     try {
       parseProfile(upgradedProfile);
@@ -62,7 +68,7 @@ export function runFoundationAcceptance({ root }: { readonly root?: string } = {
     });
     if (rejected.valid) throw new Error('不完整安装包未被拒绝');
     return Object.freeze({
-      official: official.inputDigest,
+      distributionProfile: forgeOfficial.inputDigest,
       fork: fork.inputDigest,
       configHealthy: dump.healthy,
       incompleteArtifactRejected: true,

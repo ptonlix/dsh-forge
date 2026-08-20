@@ -124,7 +124,7 @@ test('发行版身份投影不可变，并校验更新信任根输入', () => {
   assert.equal(Object.isFrozen(identity), true);
   const invalid = tempFile(
     'distribution.yml',
-    'schema: dsh-forge/distribution@1\nid: test\nname: Test\npackageScope: "@test"\napplicationId: ai.test.desktop\nversion: 1.0.0\ndefaultProfile: official\nplatforms:\n  - os: darwin\n    architectures: [arm64]\nupdates:\n  enabled: true\n',
+    'schema: dsh-forge/distribution@1\nid: test\nname: Test\npackageScope: "@test"\napplicationId: ai.test.desktop\nversion: 1.0.0\ndefaultProfile: dsh-forge-official\nplatforms:\n  - os: darwin\n    architectures: [arm64]\nupdates:\n  enabled: true\n',
   );
   throwsCode(() => parseDistribution(invalid.file), 'SCHEMA_REQUIRED');
   fs.rmSync(invalid.dir, { recursive: true, force: true });

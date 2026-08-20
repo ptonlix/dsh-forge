@@ -3,8 +3,10 @@ import { app, dialog } from 'electron';
 import { assertNoStartupInstall, loadStaticCatalog } from '@dsh-forge/profile-toolchain/trust';
 import { parseDistribution } from '@dsh-forge/profile-toolchain/schema';
 import { errorMessage } from './runtime/types.ts';
+import { resolveDesktopDshHome } from './runtime/dsh-home.ts';
+import { packagedProfileName, profileFromArguments, selectDesktopProfile } from './runtime/profile-selection.ts';
 import { createElectronRuntime } from './native-runtime.ts';
-import { createDesktopLauncher, ensureOfficialProfile, listProfiles, probeLoopback, startDshHost } from './main.ts';
+import { createDesktopLauncher, ensureDistributionProfile, listProfiles, probeLoopback, startDshHost } from './main.ts';
 
 /** Electron 应用入口：只负责应用就绪、静态 catalog 检查、launcher 创建和信号退出。 */
 
@@ -36,14 +38,26 @@ export async function startElectron() {
   reportDevelopmentPhase(`Electron 已就绪，加载应用根目录: ${root}`);
   assertNoStartupInstall(loadStaticCatalog(path.join(root, 'catalog', 'catalog.yml')));
   const runtimeRoot = app.isPackaged ? packagedResourcePath('dsh-forge', 'runtime') : root;
-  const home = path.join(app.getPath('userData'), 'dsh-home');
   const template = app.isPackaged ? packagedResourcePath('dsh-forge', 'profile') : null;
   const distribution = parseDistribution(path.join(root, 'distribution.yml'));
-  ensureOfficialProfile({ root, home, profileTemplate: template, profileName: distribution.defaultProfile });
-  const profiles = listProfiles(home, distribution.defaultProfile);
+  const requestedProfile = profileFromArguments(process.argv);
+  const sourceProfile = selectDesktopProfile({
+    defaultProfile: distribution.defaultProfile,
+    requestedProfile,
+    packagedProfile: app.isPackaged ? packagedProfileName(packagedResourcePath('dsh-forge', 'resolved-manifest.json')) : null,
+  });
+  const dshHome = resolveDesktopDshHome();
+  const managedProfile = ensureDistributionProfile({
+    root,
+    dshHome: dshHome.path,
+    profileTemplate: template,
+    distributionId: distribution.id,
+    sourceProfile,
+  });
+  const profiles = listProfiles(dshHome.path, managedProfile.profileName);
   if (!profiles.some((profile) => profile.selectable)) throw new Error('没有可启动的 desktop profile');
-  reportDevelopmentPhase(`使用 profile: ${distribution.defaultProfile}`);
-  process.env.DSH_HOME = home;
+  reportDevelopmentPhase(`使用 DSH Home: ${dshHome.source === 'default' ? '~/.dsh' : '$DSH_HOME'}`);
+  reportDevelopmentPhase(`使用 profile: ${managedProfile.profileName}`);
   let quitting = false;
   const windowFactory = runtime.createWindowFactory({
     preload: path.join(__dirname, 'preload.js'),
@@ -57,10 +71,11 @@ export async function startElectron() {
   const launcher = createDesktopLauncher({
     userData: runtime.userDataPath,
     profiles,
+    startupProfile: requestedProfile || (app.isPackaged ? managedProfile.profileName : undefined),
     deadlineMs: 15_000,
     probe: (url) => probeLoopback(url, 15_000),
     windowFactory,
-    host: { start: (options) => startDshHost({ root, home, runtimeRoot, ...options }) },
+    host: { start: (options) => startDshHost({ root, home: dshHome.path, runtimeRoot, ...options }) },
     pnpm: process.execPath,
     pnpmArgs: [path.join(runtimeRoot, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')],
     pnpmEnv: { ELECTRON_RUN_AS_NODE: '1' },

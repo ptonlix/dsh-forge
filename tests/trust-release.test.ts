@@ -34,10 +34,10 @@ test('catalog 是静态审计快照且明确 trusted-in-process 非隔离语义'
   assert.equal(firstEntry.executionMode, 'trusted-in-process');
   assert.match(NON_ISOLATION_NOTICE, /不构成/);
   assert.throws(
-    () => installationConfirmation(firstEntry, 'official'),
+    () => installationConfirmation(firstEntry, 'dsh-forge-official'),
     (error: unknown) => error instanceof ForgeError && error.code === 'CATALOG_CONFIRMATION_REQUIRED',
   );
-  assert.equal(installationConfirmation(firstEntry, 'official', true).userConfirmed, true);
+  assert.equal(installationConfirmation(firstEntry, 'dsh-forge-official', true).userConfirmed, true);
   assert.throws(
     () => assertNoStartupInstall(catalog, { type: 'install' }),
     (error: unknown) => error instanceof ForgeError && error.code === 'CATALOG_STARTUP_INSTALL',

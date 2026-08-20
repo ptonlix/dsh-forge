@@ -17,6 +17,8 @@ import { spawnTree } from '../packages/desktop-plugin/host/process-tree.ts';
 import { ForgeError } from '../packages/desktop-plugin/host/errors.ts';
 import type { GenerationHooks, ProcessResult, ProcessOperation } from '../apps/desktop/runtime/types.ts';
 
+const DISTRIBUTION_PROFILE = 'dsh-forge-official';
+
 function makeManager(hooks: GenerationHooks = {}): { dir: string; manager: GenerationManager } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-state-'));
   const store = new ProfileStateStore(dir);
@@ -24,7 +26,7 @@ function makeManager(hooks: GenerationHooks = {}): { dir: string; manager: Gener
     dir,
     manager: new GenerationManager({
       stateStore: store,
-      profiles: [{ name: 'official', default: true, selectable: true }],
+      profiles: [{ name: DISTRIBUTION_PROFILE, default: true, selectable: true }],
       hooks,
       healthDeadlineMs: 30,
     }),
@@ -47,11 +49,11 @@ test('同目标选择合并，不同目标被拒绝，成功后提交 last-known
     rendererReady: async () => {},
     interactionReady: async () => {},
   });
-  const first = manager.select('official');
-  const second = manager.select('official');
+  const first = manager.select(DISTRIBUTION_PROFILE);
+  const second = manager.select(DISTRIBUTION_PROFILE);
   assert.equal(first, second);
   await first;
-  assert.equal(manager.snapshot.lastKnownGood, 'official');
+  assert.equal(manager.snapshot.lastKnownGood, DISTRIBUTION_PROFILE);
   assert.equal(manager.snapshot.pending, null);
   await manager.dispose();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -65,11 +67,11 @@ test('renderer 超时进入 manual recovery，旧 generation service 调用失�
     rendererReady: () => new Promise(() => {}),
   });
   await assert.rejects(
-    manager.select('official'),
+    manager.select(DISTRIBUTION_PROFILE),
     (error: unknown) => error instanceof ForgeError && error.code === 'GENERATION_FAILED',
   );
   assert.ok(manager.snapshot.manualRecovery);
-  const old = new Generation(manager, 'official');
+  const old = new Generation(manager, DISTRIBUTION_PROFILE);
   await old.dispose();
   assert.throws(
     () => old.assertOpen(),
@@ -85,7 +87,7 @@ test('失败 generation 最多自动恢复一次到 last-known-good，并保留�
   const manager = new GenerationManager({
     stateStore: store,
     profiles: [
-      { name: 'official', default: true, selectable: true },
+      { name: DISTRIBUTION_PROFILE, default: true, selectable: true },
       { name: 'beta', selectable: true },
     ],
     hooks: {
@@ -98,11 +100,11 @@ test('失败 generation 最多自动恢复一次到 last-known-good，并保留�
       interactionReady: async () => {},
     },
   });
-  await manager.select('official');
+  await manager.select(DISTRIBUTION_PROFILE);
   failBeta = true;
   const generation = await manager.select('beta');
-  assert.equal(generation.profile, 'official');
-  assert.equal(manager.snapshot.active, 'official');
+  assert.equal(generation.profile, DISTRIBUTION_PROFILE);
+  assert.equal(manager.snapshot.active, DISTRIBUTION_PROFILE);
   assert.equal(manager.snapshot.lastFailure.target, 'beta');
   await manager.dispose();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -133,7 +135,7 @@ test('状态目录拒绝符号链接，窗口隐藏与显式退出具有不同�
       disposed += 1;
     },
   });
-  await manager.select('official');
+  await manager.select(DISTRIBUTION_PROFILE);
   await manager.hideWindow();
   assert.equal(hidden, 1);
   assert.equal(disposed, 0);
@@ -145,7 +147,7 @@ test('状态目录拒绝符号链接，窗口隐藏与显式退出具有不同�
 
 test('desktopPnpm 拒绝 add、busy、NUL 与关闭 generation', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-pnpm-'));
-  const generation = { id: 'test', profile: 'official', context: {}, stage: 'preparing', closed: false, attach() {} };
+  const generation = { id: 'test', profile: DISTRIBUTION_PROFILE, context: {}, stage: 'preparing', closed: false, attach() {} };
   const provider = new DesktopPnpmProvider({ generation, profileDir: dir, spawn: fakeSpawn() });
   assert.throws(
     () => provider.runPlugin(['add', 'x']),
@@ -182,7 +184,7 @@ test('可恢复安装封存 receipt，失败时只恢复受保护 profile 文件
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-install-'));
   for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'])
     fs.writeFileSync(path.join(dir, file), `${file}-before`);
-  const generation = { id: 'test', profile: 'official', context: {}, stage: 'preparing', closed: false, attach() {} };
+  const generation = { id: 'test', profile: DISTRIBUTION_PROFILE, context: {}, stage: 'preparing', closed: false, attach() {} };
   const provider = new DesktopPnpmProvider({ generation, profileDir: dir, spawn: fakeSpawn() });
   const operation = provider.installPlugin(
     { bundle: '@fixture/plugin', version: '1.2.3', source: 'npm' },
@@ -201,7 +203,7 @@ test('安装部分失败恢复配置，但明确不承诺 node_modules 回滚', 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-install-failure-'));
   for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'])
     fs.writeFileSync(path.join(dir, file), `${file}-before`);
-  const generation = { id: 'test', profile: 'official', context: {}, stage: 'preparing', closed: false, attach() {} };
+  const generation = { id: 'test', profile: DISTRIBUTION_PROFILE, context: {}, stage: 'preparing', closed: false, attach() {} };
   const provider = new DesktopPnpmProvider({
     generation,
     profileDir: dir,
@@ -224,12 +226,12 @@ test('安装部分失败恢复配置，但明确不承诺 node_modules 回滚', 
 test('desktopProfiles 返回不可变快照，普通操作的相对 source 必须锚定 profile', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-profile-service-'));
   fs.mkdirSync(path.join(dir, 'plugins'));
-  const generation = { id: 'test', profile: 'official', context: {}, stage: 'preparing', closed: false, attach() {} };
+  const generation = { id: 'test', profile: DISTRIBUTION_PROFILE, context: {}, stage: 'preparing', closed: false, attach() {} };
   const manager = { select: async () => generation };
   const profiles = new DesktopProfilesProvider({
     generation,
     manager,
-    profiles: [{ name: 'official', selectable: true }],
+    profiles: [{ name: DISTRIBUTION_PROFILE, selectable: true }],
   });
   assert.equal(Object.isFrozen(profiles.snapshot()), true);
   const provider = new DesktopPnpmProvider({ generation, profileDir: dir, spawn: fakeSpawn() });
