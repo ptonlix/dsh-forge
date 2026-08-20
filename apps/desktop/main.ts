@@ -4,13 +4,13 @@ import * as net from 'node:net';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { compileProfile } from '../../src/compiler/index.ts';
-import { fail } from '../../src/core/errors.ts';
-import { GenerationManager } from '../../src/runtime/generation.ts';
-import { ProfileStateStore } from '../../src/runtime/state-store.ts';
-import { createDesktopServices } from '../../src/services/desktop-services.ts';
-import { errorMessage } from '../../src/types.ts';
-import type { GenerationLike, ProfileSummary } from '../../src/types.ts';
+import { compileProfile } from '@dsh-forge/profile-toolchain/compiler';
+import { fail } from '@dsh-forge/profile-toolchain/core/errors';
+import { createDesktopServices } from '@dsh-forge/desktop-plugin';
+import { GenerationManager } from './runtime/generation.ts';
+import { ProfileStateStore } from './runtime/state-store.ts';
+import { errorMessage } from './runtime/types.ts';
+import type { GenerationLike, ProfileSummary } from './runtime/types.ts';
 
 /**
  * Electron 主进程与 DSH Host 的适配层。
@@ -94,23 +94,6 @@ export interface HostStartOptions {
   readonly profile: DesktopProfile;
   readonly generationId: string;
   readonly capability: ReturnType<typeof createDesktopServices>;
-}
-
-interface ElectronWindow {
-  readonly webContents: {
-    once(event: 'did-fail-load', listener: (event: unknown, code: number, description: string) => void): void;
-  };
-  on(event: 'close', listener: (event: { preventDefault(): void }) => void): void;
-  loadURL(url: string): Promise<void>;
-  show(): void;
-  hide(): void;
-  destroy(): void;
-  isDestroyed(): boolean;
-}
-
-interface IpcMainLike {
-  on(event: string, listener: (event: { readonly sender: unknown }, report: unknown) => void): void;
-  off(event: string, listener: (event: { readonly sender: unknown }, report: unknown) => void): void;
 }
 
 interface RendererWindow {
@@ -294,7 +277,7 @@ export async function startDshHost({
   const runtimeRequire = dshRequire(runtimeRoot);
   const appBoot = await loadAppBoot(runtimeRequire);
   const cmdline = (await import(
-    pathToFileURL(runtimeRequire.resolve('@deepseek-ai/dsh-cmdline')).href
+    pathToFileURL(runtimeRequire.resolve('@deepseek-ai/dsh-cmdline')).href,
   )) as unknown as CmdlineModule;
   const installAnchor = runtimeRequire.resolve('@deepseek-ai/dsh/package.json');
   appBoot.healProfilesModuleFallback(installAnchor, home);
@@ -341,72 +324,6 @@ export async function startDshHost({
     registerInteractiveCommands: async () => {},
     dispose: async () => ctx.fiber.dispose(),
   });
-}
-
-function rendererReport(window: ElectronWindow, ipcMain: IpcMainLike, deadlineMs: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finish =
-      (callback: (value?: unknown) => void) =>
-      (value?: unknown): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        callback(value);
-      };
-    const timer = setTimeout(() => finish(reject)(new Error('renderer boot report 超时')), deadlineMs);
-    const listener = (event: { readonly sender: unknown }, report: unknown): void => {
-      if (event.sender !== window.webContents) return;
-      ipcMain.off('dsh-forge:renderer-boot', listener);
-      const healthy = isRecord(report) && report.status === 'healthy';
-      if (!healthy) {
-        const message =
-          isRecord(report) && typeof report.error === 'string' ? report.error : 'renderer boot report 失败';
-        finish(reject)(new Error(message));
-      } else finish(() => resolve())();
-    };
-    ipcMain.on('dsh-forge:renderer-boot', listener);
-    window.webContents.once('did-fail-load', (_event, code, description) =>
-      finish(reject)(new Error(`renderer 加载失败: ${code} ${description}`)),
-    );
-  });
-}
-
-/** 创建 renderer 健康握手窗口，并固定 sandbox/contextIsolation/nodeIntegration 安全策略。 */
-export function createElectronWindowFactory({
-  BrowserWindow,
-  ipcMain,
-  preload,
-  deadlineMs,
-  onClose,
-}: {
-  readonly BrowserWindow: new (options: Record<string, unknown>) => ElectronWindow;
-  readonly ipcMain: IpcMainLike;
-  readonly preload: string;
-  readonly deadlineMs: number;
-  readonly onClose: (event: { preventDefault(): void }, window: ElectronWindow) => void;
-}): WindowFactory {
-  return async ({ url, sandbox, contextIsolation, nodeIntegration }) => {
-    const window = new BrowserWindow({
-      width: 1280,
-      height: 860,
-      show: false,
-      webPreferences: { sandbox, contextIsolation, nodeIntegration, preload },
-    });
-    window.on('close', (event) => onClose(event, window));
-    await window.loadURL(url);
-    return Object.freeze({
-      sandbox,
-      contextIsolation,
-      nodeIntegration,
-      waitForBootReport: () => rendererReport(window, ipcMain, deadlineMs),
-      show: () => window.show(),
-      hide: () => window.hide(),
-      destroy: () => {
-        if (!window.isDestroyed()) window.destroy();
-      },
-    });
-  };
 }
 
 /** 把 profile、Host、窗口和 GenerationManager 组装成完整桌面启动事务。 */

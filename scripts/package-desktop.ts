@@ -1,14 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { resolveProfile } from '../src/compiler/index.ts';
-import { writeConfigDump } from '../src/composer/index.ts';
-import { parseDistribution } from '../src/core/schema.ts';
-import { createRuntimeManifest, generateEvidence } from '../src/release/index.ts';
-import { fail } from '../src/core/errors.ts';
-import { errorCode, errorMessage } from '../src/types.ts';
-import type { CompiledProfile } from '../src/compiler/index.ts';
-import type { Distribution, RuntimePlatform } from '../src/core/schema.ts';
+import { resolveProfile } from '@dsh-forge/profile-toolchain/compiler';
+import { writeConfigDump } from '@dsh-forge/profile-toolchain/composer';
+import { parseDistribution } from '@dsh-forge/profile-toolchain/schema';
+import { createRuntimeManifest, generateEvidence } from '@dsh-forge/profile-toolchain/release';
+import { fail } from '@dsh-forge/profile-toolchain/core/errors';
+import { errorCode, errorMessage } from '@dsh-forge/profile-toolchain/types';
+import type { CompiledProfile } from '@dsh-forge/profile-toolchain/compiler';
+import type { Distribution, RuntimePlatform } from '@dsh-forge/profile-toolchain/schema';
 
 /** Electron 目录产物构建脚本；构建前必须已有已验证 profile 和 config dump。 */
 
@@ -46,6 +46,7 @@ function builderConfig({
     files: [
       'dist/**',
       'packages/**',
+      'tools/**',
       'catalog/**',
       'package.json',
       'distribution.yml',
@@ -54,6 +55,10 @@ function builderConfig({
       '!node_modules/**/.pnpm-store/**',
     ],
     extraResources: [
+      // workspace 依赖在 pnpm 安装目录中是相对 symlink；保留 packages 拓扑后，
+      // 打包 runtime 内的 @dsh-forge/* 链接仍能解析到随包携带的真实目录。
+      { from: path.join(root, 'packages'), to: 'dsh-forge/runtime/packages' },
+      { from: path.join(root, 'tools'), to: 'dsh-forge/runtime/tools' },
       { from: path.join(root, 'node_modules'), to: 'dsh-forge/runtime/node_modules' },
       { from: profileDir, to: 'dsh-forge/profile' },
       { from: path.join(path.dirname(profileDir), 'resolved-manifest.json'), to: 'dsh-forge/resolved-manifest.json' },
@@ -128,7 +133,8 @@ function findApplication(outputDir: string, productName: string): string {
 
 function main(): void {
   const root = rootDirectory();
-  const compiled = resolveProfile({ root });
+  const profileName = process.argv[2] === '--' ? process.argv[3] : process.argv[2];
+  const compiled = resolveProfile({ root, profileName });
   const dump = writeConfigDump(compiled, { overlay: { port: 38080, generationId: 'package-build' } });
   if (!dump.healthy) fail('真实 DSH 配置转储不健康', 'PACKAGE_CONFIG_DUMP');
   const distribution = parseDistribution(path.join(root, 'distribution.yml'), {

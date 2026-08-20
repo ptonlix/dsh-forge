@@ -1,16 +1,10 @@
 import * as path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
-import { assertNoStartupInstall, loadStaticCatalog } from '../../src/trust/catalog.ts';
-import { parseDistribution } from '../../src/core/schema.ts';
-import { errorMessage } from '../../src/types.ts';
-import {
-  createDesktopLauncher,
-  createElectronWindowFactory,
-  ensureOfficialProfile,
-  listProfiles,
-  probeLoopback,
-  startDshHost,
-} from './main.ts';
+import { app, dialog } from 'electron';
+import { assertNoStartupInstall, loadStaticCatalog } from '@dsh-forge/profile-toolchain/trust';
+import { parseDistribution } from '@dsh-forge/profile-toolchain/schema';
+import { errorMessage } from './runtime/types.ts';
+import { createElectronRuntime } from './native-runtime.ts';
+import { createDesktopLauncher, ensureOfficialProfile, listProfiles, probeLoopback, startDshHost } from './main.ts';
 
 /** Electron 应用入口：只负责应用就绪、静态 catalog 检查、launcher 创建和信号退出。 */
 
@@ -25,6 +19,11 @@ function packagedResourcePath(...segments: readonly string[]): string {
 export async function startElectron() {
   if (process.env.DSH_FORGE_SMOKE_USER_DATA)
     app.setPath('userData', path.resolve(process.env.DSH_FORGE_SMOKE_USER_DATA));
+  const runtime = createElectronRuntime();
+  if (!runtime.acquired) {
+    app.quit();
+    return null;
+  }
   await app.whenReady();
   const root = app.getAppPath();
   assertNoStartupInstall(loadStaticCatalog(path.join(root, 'catalog', 'catalog.yml')));
@@ -37,9 +36,7 @@ export async function startElectron() {
   if (!profiles.some((profile) => profile.selectable)) throw new Error('没有可启动的 desktop profile');
   process.env.DSH_HOME = home;
   let quitting = false;
-  const windowFactory = createElectronWindowFactory({
-    BrowserWindow,
-    ipcMain,
+  const windowFactory = runtime.createWindowFactory({
     preload: path.join(__dirname, 'preload.js'),
     deadlineMs: 15_000,
     onClose: (event) => {
@@ -49,7 +46,7 @@ export async function startElectron() {
     },
   });
   const launcher = createDesktopLauncher({
-    userData: app.getPath('userData'),
+    userData: runtime.userDataPath,
     profiles,
     deadlineMs: 15_000,
     probe: (url) => probeLoopback(url, 15_000),
@@ -59,13 +56,14 @@ export async function startElectron() {
     pnpmArgs: [path.join(runtimeRoot, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')],
     pnpmEnv: { ELECTRON_RUN_AS_NODE: '1' },
   });
+  runtime.setSecondInstanceHandler(() => launcher.show());
   const requestExit = async (reason: string): Promise<void> => {
     if (quitting) return;
     quitting = true;
     try {
       await launcher.signal(reason);
     } finally {
-      app.exit(0);
+      runtime.exit(0);
     }
   };
   app.on('activate', () => launcher?.show());

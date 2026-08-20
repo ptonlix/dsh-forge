@@ -1,9 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { createProfileSnapshot } from '../../packages/desktop-plugin/contracts/index.ts';
-import { fail } from '../core/errors.ts';
-import { errorMessage } from '../types.ts';
-import type { GenerationLike, ProcessOperation, ProcessResult, ProfileSummary, SpawnOptions } from '../types.ts';
+import { createProfileSnapshot } from '@dsh-forge/desktop-plugin/profile-service';
+import { fail } from './errors.ts';
+import { errorMessage } from './types.ts';
+import type { GenerationLike, ProcessOperation, ProcessResult, ProfileSummary, SpawnOptions } from './types.ts';
 import { spawnTree } from './process-tree.ts';
 
 /**

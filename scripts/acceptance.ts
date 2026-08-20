@@ -1,6 +1,6 @@
 /** CI/本地发布前运行基础契约验收，并将失败转换为非零退出码。 */
-import { runFoundationAcceptance } from '../src/acceptance/index.ts';
-import { errorCode, errorMessage } from '../src/types.ts';
+import { runFoundationAcceptance } from '@dsh-forge/profile-toolchain/acceptance';
+import { errorCode, errorMessage } from '@dsh-forge/profile-toolchain/types';
 
 try {
   process.stdout.write(`${JSON.stringify(runFoundationAcceptance(), null, 2)}\n`);

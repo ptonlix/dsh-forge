@@ -4,7 +4,7 @@
 >
 > 英文品牌口号（固定原文）：Build Your Own DeepSeek Harness
 
-> 设计状态：拟采用。本文定义一个独立仓库如何围绕 DeepSeek Harness 构建可组装、可审计、可发布的桌面 Agent 发行版。
+> 设计状态：当前规范。本文定义本仓库围绕 DeepSeek Harness 构建可组装、可审计、可发布的桌面 Agent 发行版的唯一架构。
 
 ## 1. 文档范围
 
@@ -106,14 +106,24 @@ profile 切换、桌面呈现模式切换和 DSH 核心升级都通过完整 gen
 dsh-forge/
 ├── apps/
 │   └── desktop/
+│       ├── main.ts
+│       ├── native-runtime.ts
+│       ├── platform/
+│       └── runtime/
 ├── packages/
 │   ├── desktop-plugin/
+│   │   ├── contracts/
+│   │   └── host/
 │   ├── bundles/
 │   ├── features/
 │   └── generators/
+├── tools/
+│   └── profile-toolchain/
 ├── profiles/
 ├── catalog/
-├── tools/
+├── schemas/
+├── tests/
+│   └── fixtures/
 ├── templates/
 ├── scripts/
 ├── docs/
@@ -127,9 +137,10 @@ dsh-forge/
 
 该目录是 Electron 应用入口，不承载 DSH 领域行为。
 
-- `main.ts`：单实例、Electron app lifecycle、Host root 启动。
+- `main.ts`：Host generation 组装、profile 启动和生命周期协调。
 - `native-runtime.ts`：实现 `desktopRuntime` 的 Electron 提供方。
-- `platform/`：窗口材质、系统菜单、原生路径和平台更新器。
+- `platform/`：BrowserWindow 安全策略、窗口实现和平台适配。
+- `runtime/`：generation 状态机和私有状态存储。
 - `electron-builder.yml`：安装包资源、签名和平台目标。
 
 `apps/desktop` 可以替换为未来的 `apps/desktop-tauri`，但二者必须实现同一组宿主能力定义。
@@ -138,12 +149,10 @@ dsh-forge/
 
 这是可安装的 DSH 插件包，包含 Host 面、Web Client 面和公开 service contract。
 
-- `host/desktop-shell`：窗口生命周期、导航规则、模式设置和 Cordis effects。
-- `host/desktop-profiles`：当前 profile 的只读事实、列表和重启式选择。
-- `host/desktop-pnpm`：受控的 profile 插件安装、移除、更新和依赖修复。
+- `host/`：generation-scoped desktop service provider、进程树和安装恢复。
 - `client/`：桌面布局或状态展示；兼容模式下不替换官方布局。
 - `contracts/`：第三方可依赖的 TypeScript 类型和模块导出。
-- `native-runtime` 不属于公开 exports，第三方插件不能 inject。
+- Electron `desktopRuntime` 不属于公开 exports，第三方插件不能 inject。
 
 ### 4.3 `packages/bundles`
 
@@ -258,7 +267,7 @@ profiles/developer/
 
 `catalog` 保存插件目录快照、来源和审核事实；它不在应用启动时动态决定加载内容。
 
-`tools` 保存清单解析、插件同步、profile 验证、SBOM 和发行工具；这些工具不是 DSH 运行时插件。
+`tools/profile-toolchain` 保存清单解析、组合、profile 验证、SBOM、catalog、发布和 CLI；这些工具不是 DSH 运行时插件。`packages/features` 与 `packages/generators` 是真实功能包和生成器包的集合根，没有实际消费者时不创建空实现。
 
 `templates` 为第三方提供新插件、新 bundle 和新 profile 的起始结构。模板必须生成可通过同一质量门禁的最小项目。
 
@@ -268,16 +277,31 @@ profiles/developer/
 
 示例：
 
+<!-- dsh-forge-example:distribution -->
 ```yaml
-schema: 1
-id: dsh-forge
-productName: DSH Forge
+schema: dsh-forge/distribution@1
+id: dsh-forge-official
+name: DSH Forge
 packageScope: '@dsh-forge'
-appId: com.dshforge.desktop
+applicationId: ai.dshforge.desktop
+version: 0.1.0
 defaultProfile: official
-update:
+channel: stable
+platforms:
+  - os: darwin
+    architectures: [arm64, x64]
+  - os: win32
+    architectures: [x64]
+updates:
+  enabled: false
   channel: stable
+  metadataUrl: https://updates.invalid/dsh-forge/stable.json
+  trustRoot: dsh-forge-dev-root-v1
+branding:
+  productName: DSH Forge
+  publisher: DSH Forge Team
 ```
+<!-- /dsh-forge-example:distribution -->
 
 Fork 用户应优先修改 `distribution.yml` 和 `profiles/<name>/`。需要新增能力时，再创建自己的 bundle 或 feature；只有确实涉及窗口、托盘或平台 API 时才修改 `apps/desktop` 的平台适配层。
 
@@ -296,33 +320,29 @@ Fork 用户应优先修改 `distribution.yml` 和 `profiles/<name>/`。需要新
   -> 发布新的官方或 Fork 发行版
 ```
 
-只有未来明确决定维护上游源码快照或本地补丁时，才另行设计带有 commit 清单、补丁记录和同步流程的源码维护机制；这不属于当前发行版模板的默认布局。
+本仓库不维护上游源码快照或本地补丁。上游版本只通过 profile runtime、锁文件、catalog 和构建验证共同确定；若要维护源码快照，必须新增独立的 OpenSpec 变更，不得在本架构中隐式增加目录。
 
 ## 5. Profile 组合模型
 
-建议的 `profile.yml` 结构如下：
+`profiles/official/profile.yml` 的组合源文件结构如下：
 
+<!-- dsh-forge-example:profile -->
 ```yaml
-schema: 1
-id: developer
+schema: dsh-forge/profile@1
+name: official
 runtime:
-  dsh: 0.1.0-rc.6
-  node: 24
+  dshPackageFamily: '@deepseek-ai/dsh'
+  dshVersion: 0.1.0-rc.7
+  cordisVersion: 4.0.1
+  desktopProtocol: 1
+  electronVersion: 43.4.0
+  nodeEngine: '>=20.0.0'
 bundles:
-  - @deepseek-ai/dsh-base
-  - @deepseek-ai/dsh-web-app
-  - @dsh-forge/desktop-plugin
-  - @dsh-forge/product-base
-  - @dsh-forge/curated
-plugins:
-  - name: example-plugin
-    version: 1.2.3
-    source: npm
-    enabled: true
-policy:
-  defaultPermission: workspace-write
-  allowInstall: user-confirmed
+  - '@deepseek-ai/dsh-base'
+  - '@deepseek-ai/dsh-web-app'
+  - '@dsh-forge/product-base'
 ```
+<!-- /dsh-forge-example:profile -->
 
 编译器必须验证以下条件：
 
@@ -375,14 +395,13 @@ dsh-base / dsh-web-app（官方运行基线）
 ### 7.1 `desktopProfiles`
 
 ```ts
-interface DesktopProfileSummary {
-  readonly name: string
-}
+import type { DesktopProfiles, DesktopProfileSnapshot } from '@dsh-forge/desktop-plugin/profile-service'
 
 interface DesktopProfiles {
-  readonly current: { readonly name: string; readonly dir: string }
+  readonly current: string | null
+  snapshot(): Readonly<DesktopProfileSnapshot>
   list(): readonly DesktopProfileSummary[]
-  select(name: string): Promise<void>
+  select(name: string): Promise<DesktopProfileSelection>
 }
 ```
 
@@ -391,16 +410,19 @@ interface DesktopProfiles {
 ### 7.2 `desktopPnpm`
 
 ```ts
-interface DesktopPnpmHandle {
-  readonly stdout: unknown
-  readonly stderr: unknown
-  readonly done: Promise<{ readonly exitCode: number | null }>
-  cancel(): void
+import type { Readable } from 'node:stream'
+import type { DesktopPnpm, DesktopPnpmOperation } from '@dsh-forge/desktop-plugin/pnpm'
+
+interface DesktopPnpmOperation {
+  readonly stdout: Readable
+  readonly stderr: Readable
+  readonly done: Promise<Readonly<{ exitCode: number | null; signal: NodeJS.Signals | null; cancelled: boolean }>>
+  cancel(): Promise<void>
 }
 
 interface DesktopPnpm {
-  run(args: readonly string[], signal?: AbortSignal): DesktopPnpmHandle
-  runPlugin(args: readonly string[], invokingDir: string, signal?: AbortSignal): DesktopPnpmHandle
+  runPlugin(args: readonly string[], options?: object): DesktopPnpmOperation
+  installPlugin(request: object, options?: object): DesktopPnpmOperation
 }
 ```
 
@@ -423,13 +445,13 @@ interface DesktopPnpm {
 3. 生成 profile 目录、SBOM、许可证通知、resolved manifest 和平台资源。
 4. 启动真实安装包，验证窗口、loopback Web、profile、退出、更新和回滚。
 
-建议的命令名称如下；它们属于新仓库的工具接口，不代表当前 DSH 已提供这些命令：
+profile 工具命令支持显式 profile；省略名称时使用 `distribution.yml` 的 `defaultProfile`：
 
 ```text
-pnpm run profile:resolve developer
-pnpm run profile:verify developer
-pnpm run package:desktop developer
-pnpm run package:inspect developer
+pnpm run profile:resolve -- official
+pnpm run profile:verify -- official
+pnpm run package:desktop -- official
+pnpm run package:inspect -- official
 ```
 
 安装包必须包含固定版本的 DSH runtime、Node runtime、已解析插件依赖和 profile 生成物。源码仓库不复制第三方插件源码；发行包仍然需要物理包含运行所需的依赖。

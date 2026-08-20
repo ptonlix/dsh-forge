@@ -1,6 +1,6 @@
 import * as crypto from 'node:crypto';
-import { fail } from '../core/errors.ts';
-import { errorMessage } from '../types.ts';
+import { fail } from './errors.ts';
+import { errorMessage } from './types.ts';
 import type {
   Disposable,
   GenerationHooks,
@@ -10,7 +10,7 @@ import type {
   ProfileState,
   ProfileSummary,
   StateStore,
-} from '../types.ts';
+} from './types.ts';
 
 const STAGES = Object.freeze(['preparing', 'host-ready', 'renderer-ready', 'committed', 'failed', 'manual-recovery']);
 

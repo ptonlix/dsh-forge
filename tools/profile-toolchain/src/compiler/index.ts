@@ -111,7 +111,10 @@ interface PnpmResult {
 
 function repoRoot(): string {
   const sourceRoot = path.resolve(__dirname, '../..');
-  return fs.existsSync(path.join(sourceRoot, 'distribution.yml')) ? sourceRoot : path.resolve(__dirname, '../../..');
+  if (fs.existsSync(path.join(sourceRoot, 'distribution.yml'))) return sourceRoot;
+  const repositoryRoot = path.resolve(__dirname, '../../../..');
+  if (fs.existsSync(path.join(repositoryRoot, 'distribution.yml'))) return repositoryRoot;
+  return sourceRoot;
 }
 
 function dshRequire(): NodeRequire {
@@ -209,10 +212,10 @@ function packageSource(directory: string, root: string, workspaceRoots: readonly
   return workspace
     ? { kind: 'workspace', path: relative, integrity: `sha256-${sha256File(path.join(directory, 'package.json'))}` }
     : {
-        kind: 'installed',
-        path: relative || '.',
-        integrity: `sha256-${sha256File(path.join(directory, 'package.json'))}`,
-      };
+      kind: 'installed',
+      path: relative || '.',
+      integrity: `sha256-${sha256File(path.join(directory, 'package.json'))}`,
+    };
 }
 
 function resolveDependencyDirectory(anchor: string, name: string): string | null {
@@ -490,18 +493,26 @@ export function compileProfile({
   root = repoRoot(),
   distributionFile = path.join(root, 'distribution.yml'),
   profileFile = null,
+  profileName,
   artifactsDir = path.join(root, 'artifacts'),
   fixtureRoot,
 }: {
   root?: string;
   distributionFile?: string;
   profileFile?: string | null;
+  profileName?: string;
   artifactsDir?: string;
   /** 仅测试使用的本地 bundle 夹具根目录。 */
   fixtureRoot?: string;
 } = {}): CompiledProfile {
   const distribution = parseDistribution(distributionFile, { profilesRoot: path.join(root, 'profiles') });
-  const profile = parseProfile(profileFile || path.join(root, 'profiles', distribution.defaultProfile, 'profile.yml'));
+  const selectedProfile = profileName || distribution.defaultProfile;
+  if (!/^[a-z][a-z0-9-]{1,63}$/.test(selectedProfile))
+    fail(`profile 名称无效: ${selectedProfile}`, 'PROFILE_UNSELECTABLE');
+  const selectedFile = profileFile || path.join(root, 'profiles', selectedProfile, 'profile.yml');
+  const profile = parseProfile(selectedFile);
+  if (profile.name !== selectedProfile)
+    fail(`profile 目录与 manifest 名称不一致: ${selectedProfile} / ${profile.name}`, 'PROFILE_UNSELECTABLE');
   const profilePatch = readPatch(profile.patchFile);
   const collected = collectBundles(profile, root, { fixtureRoot });
   const input = inputSummary(
@@ -650,16 +661,18 @@ export function verifyProfile({
   root = repoRoot(),
   distributionFile = path.join(root, 'distribution.yml'),
   profileFile = null,
+  profileName,
   artifactsDir = path.join(root, 'artifacts'),
 }: {
   root?: string;
   distributionFile?: string;
   profileFile?: string | null;
+  profileName?: string;
   artifactsDir?: string;
 } = {}): CompiledProfile & { readonly verified: true } {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-verify-'));
   try {
-    const rebuilt = compileProfile({ root, distributionFile, profileFile, artifactsDir: scratch });
+    const rebuilt = compileProfile({ root, distributionFile, profileFile, profileName, artifactsDir: scratch });
     const existingDir = path.join(artifactsDir, rebuilt.distribution.id, rebuilt.profile.name, rebuilt.inputDigest);
     if (!fs.existsSync(existingDir)) fail(`profile 尚未解析: ${rebuilt.profile.name}`, 'VERIFY_ARTIFACT_MISSING');
     const existingManifest = JSON.parse(fs.readFileSync(path.join(existingDir, 'resolved-manifest.json'), 'utf8'));

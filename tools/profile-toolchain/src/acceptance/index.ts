@@ -15,7 +15,8 @@ import { errorCode } from '../types.ts';
 
 /** 运行基础发行链验收并返回可供脚本序列化的事实摘要。 */
 export function runFoundationAcceptance({ root }: { readonly root?: string } = {}) {
-  const projectRoot = path.resolve(root || path.join(__dirname, '../..'));
+  // 编译产物位于 tools/profile-toolchain/dist/acceptance，默认根目录需回到仓库根。
+  const projectRoot = path.resolve(root || path.join(__dirname, '../../../..'));
   const official = compileProfile({ root: projectRoot });
   const verified = verifyProfile({ root: projectRoot });
   const dump = composeCompiled(verified, { overlay: { port: 38080, generationId: 'acceptance' } });

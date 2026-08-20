@@ -12,7 +12,7 @@ import {
   NON_ISOLATION_NOTICE,
   requiresReaudit,
   verifyCatalog,
-} from '../src/trust/catalog.ts';
+} from '@dsh-forge/profile-toolchain/trust';
 import {
   createChannelMetadata,
   generateEvidence,
@@ -22,9 +22,9 @@ import {
   validateRuntimeTargets,
   verifyChannelMetadata,
   verifyEvidence,
-} from '../src/release/index.ts';
-import { ForgeError } from '../src/core/errors.ts';
-import type { RuntimeManifest } from '../src/types.ts';
+} from '@dsh-forge/profile-toolchain/release';
+import { ForgeError } from '@dsh-forge/profile-toolchain/core/errors';
+import type { RuntimeManifest } from '@dsh-forge/profile-toolchain/types';
 
 const root = path.resolve(__dirname, '..');
 

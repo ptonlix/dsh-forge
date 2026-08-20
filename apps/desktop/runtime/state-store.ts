@@ -1,9 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import { fail } from '../core/errors.ts';
-import { errorMessage } from '../types.ts';
-import type { ActivityRecord, ProfileState, StateStore } from '../types.ts';
+import { fail } from './errors.ts';
+import { errorMessage } from './types.ts';
+import type { ActivityRecord, ProfileState, StateStore } from './types.ts';
 
 const STATE_VERSION = 1;
 const EMPTY_STATE = Object.freeze({

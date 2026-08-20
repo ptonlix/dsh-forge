@@ -243,6 +243,8 @@ function packageEntryExists(paths: RuntimePaths | null, packageName: string): bo
   if (!paths?.runtime) return false;
   const anchor = path.join(paths.runtime, '@deepseek-ai', 'dsh', 'package.json');
   if (!fs.existsSync(anchor)) return false;
+  // `@deepseek-ai/dsh` 是运行时配置包，故意只提供 package.json 和 lib 目录，不声明根入口。
+  if (packageName === '@deepseek-ai/dsh') return true;
   try {
     return Boolean(createRequire(fs.realpathSync(anchor)).resolve(packageName));
   } catch {
@@ -314,6 +316,11 @@ export function inspectPackage(
       if (!fs.existsSync(file)) failures.push({ code: 'NATIVE_FILE_MISSING', path: native.path });
       if (native.executable && fs.existsSync(file) && (fs.statSync(file).mode & 0o111) === 0)
         failures.push({ code: 'EXECUTABLE_PERMISSION_MISSING', path: native.path });
+      const normalizedPath = native.path.replaceAll('\\', '/');
+      const platformMatch = normalizedPath.match(/(?:^|[/_-])(darwin|win32|linux)(?:-|[/])/);
+      const architectureMatch = normalizedPath.match(/(?:^|[/_-])(arm64|x64|ia32)(?:-|[/]|\.|$)/);
+      if (platformMatch && platformMatch[1] !== process.platform) continue;
+      if (architectureMatch && architectureMatch[1] !== process.arch) continue;
       for (const target of manifest.targets || []) {
         if (target.os === process.platform && fs.existsSync(file))
           for (const architecture of target.architectures || []) {

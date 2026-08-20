@@ -2,6 +2,7 @@ packages:
   - apps/*
   - packages/*
   - packages/bundles/*
+  - tools/*
 allowBuilds:
   '@deepseek-ai/dsh-subprocess-local': true
   '@google/genai': false

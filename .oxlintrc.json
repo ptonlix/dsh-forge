@@ -18,5 +18,32 @@
     "typescript/no-redundant-type-constituents": "off",
     "typescript/unbound-method": "off",
     "no-unsafe-optional-chaining": "off"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["apps/**/*.{ts,tsx}", "packages/**/*.{ts,tsx}", "tools/**/*.{ts,tsx}", "scripts/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"],
+      "rules": {
+        "@stylistic/indent": ["error", 2],
+        "@stylistic/semi": ["error", "always"],
+        "@stylistic/quotes": ["error", "single", { "avoidEscape": true }],
+        "@stylistic/comma-dangle": ["error", "always-multiline"],
+        "@stylistic/eol-last": ["error", "always"],
+        "@stylistic/no-trailing-spaces": "error",
+        "@stylistic/object-curly-spacing": ["error", "always"],
+        "@stylistic/arrow-parens": ["error", "always"],
+        "@stylistic/member-delimiter-style": [
+          "error",
+          {
+            "multiline": { "delimiter": "semi", "requireLast": true },
+            "singleline": { "delimiter": "semi", "requireLast": false }
+          }
+        ],
+        "@stylistic/max-len": [
+          "error",
+          { "code": 120, "ignoreUrls": true, "ignoreStrings": true, "ignoreTemplateLiterals": true }
+        ]
+      },
+      "jsPlugins": ["@stylistic/eslint-plugin"]
+    }
+  ]
 }

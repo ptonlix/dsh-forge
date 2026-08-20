@@ -2,11 +2,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { findLatestArtifact } from '../src/compiler/index.ts';
-import { parseDistribution, parseProfile } from '../src/core/schema.ts';
-import { inspectPackage } from '../src/release/index.ts';
-import { errorCode, errorMessage } from '../src/types.ts';
-import type { RuntimeManifest } from '../src/types.ts';
+import { findLatestArtifact } from '@dsh-forge/profile-toolchain/compiler';
+import { parseDistribution, parseProfile } from '@dsh-forge/profile-toolchain/schema';
+import { inspectPackage } from '@dsh-forge/profile-toolchain/release';
+import { errorCode, errorMessage } from '@dsh-forge/profile-toolchain/types';
+import type { RuntimeManifest } from '@dsh-forge/profile-toolchain/types';
 
 /** 对已构建 Electron 目录产物执行结构检查和真实 smoke 启动。 */
 
@@ -27,8 +27,10 @@ function main(): void {
   const distribution = parseDistribution(path.join(root, 'distribution.yml'), {
     profilesRoot: path.join(root, 'profiles'),
   });
-  const profile = parseProfile(path.join(root, 'profiles', distribution.defaultProfile, 'profile.yml'));
-  const artifact = findLatestArtifact(root, distribution.id, profile.name);
+  const profileName = (process.argv[2] === '--' ? process.argv[3] : process.argv[2]) || distribution.defaultProfile;
+  const profile = parseProfile(path.join(root, 'profiles', profileName, 'profile.yml'));
+  if (profile.name !== profileName) throw new Error(`profile manifest 名称不一致: ${profileName} / ${profile.name}`);
+  const artifact = findLatestArtifact(root, distribution.id, profileName);
   if (!artifact) throw new Error('没有已解析 profile artifact');
   const runtimeFile = path.join(artifact, 'runtime-manifest.json');
   if (!fs.existsSync(runtimeFile)) throw new Error('没有真实 Electron runtime manifest；请先运行 package:desktop');

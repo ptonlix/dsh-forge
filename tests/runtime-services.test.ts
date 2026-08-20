@@ -5,17 +5,17 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
 
-import { ProfileStateStore } from '../src/runtime/state-store.ts';
-import { GenerationManager, Generation } from '../src/runtime/generation.ts';
+import { ProfileStateStore } from '../apps/desktop/runtime/state-store.ts';
+import { GenerationManager, Generation } from '../apps/desktop/runtime/generation.ts';
 import {
   DesktopPnpmProvider,
   DesktopProfilesProvider,
   recoverTransactions,
   snapshotProfile,
-} from '../src/services/desktop-services.ts';
-import { spawnTree } from '../src/services/process-tree.ts';
-import { ForgeError } from '../src/core/errors.ts';
-import type { GenerationHooks, ProcessResult, ProcessOperation } from '../src/types.ts';
+} from '@dsh-forge/desktop-plugin';
+import { spawnTree } from '../packages/desktop-plugin/host/process-tree.ts';
+import { ForgeError } from '../packages/desktop-plugin/host/errors.ts';
+import type { GenerationHooks, ProcessResult, ProcessOperation } from '../apps/desktop/runtime/types.ts';
 
 function makeManager(hooks: GenerationHooks = {}): { dir: string; manager: GenerationManager } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-state-'));

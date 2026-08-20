@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { Readable } from 'node:stream';
-import { errorCode } from '../types.ts';
-import type { ProcessOperation as ProcessOperationContract, ProcessResult, SpawnOptions } from '../types.ts';
+import { errorCode } from './types.ts';
+import type { ProcessOperation as ProcessOperationContract, ProcessResult, SpawnOptions } from './types.ts';
 
 export const TERM_GRACE_MS = 2_000;
 export const TREE_EXIT_TIMEOUT_MS = 10_000;

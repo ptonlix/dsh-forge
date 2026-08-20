@@ -1,0 +1,41 @@
+{
+  "name": "@dsh-forge/profile-toolchain",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "dsh-forge": "dist/cli/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./cli": "./dist/cli/index.js",
+    "./compiler": "./dist/compiler/index.js",
+    "./composer": "./dist/composer/index.js",
+    "./acceptance": "./dist/acceptance/index.js",
+    "./core/digest": "./dist/core/digest.js",
+    "./core/errors": "./dist/core/errors.js",
+    "./core/yaml": "./dist/core/yaml.js",
+    "./schema": "./dist/core/schema.js",
+    "./release": "./dist/release/index.js",
+    "./trust": "./dist/trust/catalog.js",
+    "./types": "./dist/types.js"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-invariants": "0.1.0-rc.7",
+    "@electron/asar": "3.4.1",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "typescript": "^6.0.3",
+    "tsx": "^4.22.4"
+  },
+  "scripts": {
+    "build": "tsx ../../scripts/clean-build-output.ts dist && tsc -p tsconfig.json"
+  }
+}

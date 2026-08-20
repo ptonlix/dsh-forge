@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import * as path from 'node:path';
 
-import { runFoundationAcceptance } from '../src/acceptance/index.ts';
+import { runFoundationAcceptance } from '@dsh-forge/profile-toolchain/acceptance';
 
 test('官方 profile、Fork 身份、runtime 升级和不完整产物端到端验收', () => {
   const result = runFoundationAcceptance({ root: path.resolve(__dirname, '..') });

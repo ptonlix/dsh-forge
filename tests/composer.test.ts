@@ -2,9 +2,14 @@
 import assert from 'node:assert/strict';
 import * as path from 'node:path';
 
-import { compileProfile } from '../src/compiler/index.ts';
-import { composeCompiled, desktopBundleOrder, entryActivation, validateOverlay } from '../src/composer/index.ts';
-import { ForgeError } from '../src/core/errors.ts';
+import { compileProfile } from '@dsh-forge/profile-toolchain/compiler';
+import {
+  composeCompiled,
+  desktopBundleOrder,
+  entryActivation,
+  validateOverlay,
+} from '@dsh-forge/profile-toolchain/composer';
+import { ForgeError } from '@dsh-forge/profile-toolchain/core/errors';
 
 const root = path.resolve(__dirname, '..');
 

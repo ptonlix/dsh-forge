@@ -9,6 +9,13 @@ export class ForgeError extends Error {
     this.code = code;
     this.details = Object.freeze({ ...details });
   }
+
+  /** 跨 CJS/ESM workspace 边界按稳定错误形状识别，避免重复加载类导致身份丢失。 */
+  static override [Symbol.hasInstance](value: unknown): boolean {
+    if (typeof value !== 'object' || value === null) return false;
+    const candidate = value as { readonly name?: unknown; readonly code?: unknown };
+    return candidate.name === 'ForgeError' && typeof candidate.code === 'string';
+  }
 }
 
 /** 创建并立即抛出 ForgeError，保证所有可预期失败都带稳定错误码。 */

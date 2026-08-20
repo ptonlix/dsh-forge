@@ -33,3 +33,20 @@ const installDesktopServices: DesktopServiceInstaller = (ctx) => {
 installDesktopServices.inject = ['dshForgeDesktopCapability'];
 
 export default installDesktopServices;
+
+/** launcher 使用的 provider 工厂；第三方插件仍只依赖 contracts 子路径。 */
+export {
+  createDesktopServices,
+  DesktopPnpmProvider,
+  DesktopProfilesProvider,
+  recoverTransactions,
+  restoreProfile,
+  snapshotProfile,
+} from './host/desktop-services.ts';
+export type {
+  DesktopServiceOptions,
+  DesktopOperationOptions,
+  PluginInstallationRequest,
+  ProfileSnapshot,
+  RecoveryFact,
+} from './host/desktop-services.ts';

@@ -10,8 +10,8 @@ import {
   parseBundleManifest,
   projectDistributionIdentity,
   ForgeError,
-} from '../src/core/schema.ts';
-import { bundleDirectory, collectBundles, compileProfile, verifyProfile } from '../src/compiler/index.ts';
+} from '@dsh-forge/profile-toolchain/schema';
+import { bundleDirectory, collectBundles, compileProfile, verifyProfile } from '@dsh-forge/profile-toolchain/compiler';
 import { assertResolvedManifest } from './helpers.ts';
 
 const root = path.resolve(__dirname, '..');

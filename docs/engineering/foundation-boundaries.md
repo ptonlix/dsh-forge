@@ -24,10 +24,11 @@
 
 ```sh
 pnpm run check
-pnpm run profile:verify
-pnpm exec tsx src/cli/index.ts dump-config
+pnpm run profile:verify -- official
+pnpm run dump-config -- official
 pnpm run catalog:verify
 pnpm run package:inspect
+pnpm run boundaries:check
 ```
 
 生产发布还需要在每个声明的平台执行真实安装包启动、renderer boot、退出、更新入口和诊断导出 smoke，并完成平台签名验证。
