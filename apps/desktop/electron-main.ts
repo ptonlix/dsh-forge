@@ -15,17 +15,25 @@ function packagedResourcePath(...segments: readonly string[]): string {
   return path.join(resourcesPath, ...segments);
 }
 
+/** 开发模式输出启动阶段，避免 Host 就绪前没有窗口时无法诊断停留位置。 */
+function reportDevelopmentPhase(message: string): void {
+  if (!app.isPackaged) process.stdout.write(`[dsh-forge:dev] ${message}\n`);
+}
+
 /** 启动桌面应用；smoke 模式会在成功握手后主动退出，避免测试进程常驻。 */
 export async function startElectron() {
   if (process.env.DSH_FORGE_SMOKE_USER_DATA)
     app.setPath('userData', path.resolve(process.env.DSH_FORGE_SMOKE_USER_DATA));
   const runtime = createElectronRuntime();
   if (!runtime.acquired) {
+    reportDevelopmentPhase('已有桌面实例正在运行，转交窗口激活请求');
     app.quit();
     return null;
   }
+  reportDevelopmentPhase('等待 Electron 应用就绪');
   await app.whenReady();
   const root = app.getAppPath();
+  reportDevelopmentPhase(`Electron 已就绪，加载应用根目录: ${root}`);
   assertNoStartupInstall(loadStaticCatalog(path.join(root, 'catalog', 'catalog.yml')));
   const runtimeRoot = app.isPackaged ? packagedResourcePath('dsh-forge', 'runtime') : root;
   const home = path.join(app.getPath('userData'), 'dsh-home');
@@ -34,6 +42,7 @@ export async function startElectron() {
   ensureOfficialProfile({ root, home, profileTemplate: template, profileName: distribution.defaultProfile });
   const profiles = listProfiles(home, distribution.defaultProfile);
   if (!profiles.some((profile) => profile.selectable)) throw new Error('没有可启动的 desktop profile');
+  reportDevelopmentPhase(`使用 profile: ${distribution.defaultProfile}`);
   process.env.DSH_HOME = home;
   let quitting = false;
   const windowFactory = runtime.createWindowFactory({
@@ -74,20 +83,22 @@ export async function startElectron() {
   });
   process.once('SIGTERM', () => void requestExit('SIGTERM'));
   process.once('SIGINT', () => void requestExit('SIGINT'));
-  await launcher.start();
+  reportDevelopmentPhase('启动 deepseek-harness Host 并等待 renderer 健康握手');
+  const generation = await launcher.start();
+  process.stdout.write(`DSH Forge Desktop 已就绪（profile: ${generation.profile}）\n`);
   if (process.argv.includes('--dsh-forge-smoke')) setTimeout(() => void requestExit('smoke-exit'), 1_000);
   return { launcher, requestExit };
 }
 
-if (require.main === module) {
-  startElectron().catch((error: unknown) => {
-    const diagnostic = error instanceof Error && error.stack ? error.stack : errorMessage(error);
-    if (process.argv.includes('--dsh-forge-smoke')) {
-      process.stderr.write(`${diagnostic}\n`);
-      app.exit(1);
-    } else {
-      dialog.showErrorBox('DSH Forge 启动失败', diagnostic);
-      app.exit(1);
-    }
-  });
-}
+// Electron 通过默认启动器加载 package.json 的 main，不会使当前模块成为
+// require.main。使用 Node CLI 守卫会导致 Electron 进程常驻却完全不执行桌面启动。
+void startElectron().catch((error: unknown) => {
+  const diagnostic = error instanceof Error && error.stack ? error.stack : errorMessage(error);
+  process.stderr.write(`DSH Forge Desktop 启动失败:\n${diagnostic}\n`);
+  if (process.argv.includes('--dsh-forge-smoke')) {
+    app.exit(1);
+  } else {
+    dialog.showErrorBox('DSH Forge 启动失败', diagnostic);
+    app.exit(1);
+  }
+});

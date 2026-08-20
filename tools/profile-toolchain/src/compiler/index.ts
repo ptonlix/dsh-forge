@@ -444,7 +444,9 @@ function runPnpm(root: string, cwd: string, args: readonly string[]): PnpmResult
     cwd,
     encoding: 'utf8',
     timeout: 60_000,
-    env: { ...process.env, CI: 'true', npm_config_ignore_scripts: 'true' },
+    // 桌面主进程中的 process.execPath 是 Electron，而非 node。让 Electron
+    // 显式进入 Node 模式，避免 profile 编译再拉起无窗口的 Electron GUI 并卡住启动。
+    env: { ...process.env, CI: 'true', npm_config_ignore_scripts: 'true', ELECTRON_RUN_AS_NODE: '1' },
   });
   if (result.status !== 0) {
     fail(`pnpm 解析失败: ${(result.stderr || result.stdout || 'unknown error').trim()}`, 'PNPM_RESOLUTION_FAILED', {

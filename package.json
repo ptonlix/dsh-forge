@@ -22,6 +22,7 @@
     "yaml": "2.9.0"
   },
   "scripts": {
+    "dev": "pnpm run build && pnpm exec electron .",
     "build": "pnpm run build:toolchain && pnpm run build:core && pnpm run build:desktop-plugin",
     "build:toolchain": "pnpm --filter @dsh-forge/profile-toolchain build",
     "build:core": "tsx scripts/clean-build-output.ts dist && tsc -p tsconfig.build.json && tsx scripts/rewrite-emitted-requires.ts",

@@ -5,6 +5,18 @@
 结果覆盖当前工作区的 schema、profile 编译、真实 DSH 配置转储、generation/service 契约、
 catalog、更新签名、目录边界和未签名 Electron 产物输入。
 
+## 本地桌面开发启动
+
+安装依赖后，可直接使用以下命令启动未打包的 Electron 桌面端：
+
+```sh
+pnpm dev
+```
+
+该命令会先编译 TypeScript 和 workspace 包，再执行 Electron。启动 profile 默认读取
+`distribution.yml` 的 `defaultProfile`（当前为 `official`），因此开发启动不需要追加
+`-- official`；`official` 参数只在需要显式选择 profile 的构建或验证命令中使用。
+
 ```sh
 pnpm run check
 pnpm run acceptance
