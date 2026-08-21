@@ -129,13 +129,112 @@ interface WindowFactoryOptions {
 
 type WindowFactory = (options: WindowFactoryOptions) => Promise<RendererWindow>;
 
-/** 从真实 runtime 安装锚点创建 require，确保 pnpm peer 闭包按正确路径解析。 */
-function dshRequire(runtimeRoot?: string): RuntimeRequire {
-  const packageFile = runtimeRoot
-    ? path.join(runtimeRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
-    : require.resolve('@deepseek-ai/dsh/package.json');
-  if (!fs.existsSync(packageFile)) fail(`缺少 DSH runtime 安装锚点: ${packageFile}`, 'DSH_RUNTIME_MISSING');
+/**
+ * 从受管 profile 的 package.json 锚点加载 DSH runtime。
+ *
+ * 外部 bundle 与 DSH 的 peer 闭包必须处于同一个 profile-local 解析域；不能让
+ * runtime 闭包先接管 DSH，再让 Cordis Loader 从另一个闭包解析 bundle entry。
+ */
+function dshRequire(profileAnchor: string): RuntimeRequire {
+  if (!fs.existsSync(profileAnchor)) fail(`缺少 profile 模块锚点: ${profileAnchor}`, 'PROFILE_DEPENDENCY_ANCHOR_MISSING');
+  const profileRequire = createRequire(fs.realpathSync(profileAnchor)) as RuntimeRequire;
+  let packageFile: string;
+  try {
+    packageFile = profileRequire.resolve('@deepseek-ai/dsh/package.json');
+  } catch {
+    fail(`profile 闭包缺少 DSH runtime: ${profileAnchor}`, 'DSH_RUNTIME_MISSING');
+  }
   return createRequire(fs.realpathSync(packageFile)) as RuntimeRequire;
+}
+
+function packageDirectoryFromAnchor(anchor: string, packageName: string): string | null {
+  const runtimeRequire = createRequire(anchor);
+  for (const searchPath of runtimeRequire.resolve.paths(packageName) || []) {
+    const directory = path.join(searchPath, ...packageName.split('/'));
+    const manifest = path.join(directory, 'package.json');
+    if (fs.existsSync(manifest)) return fs.realpathSync(directory);
+  }
+  return null;
+}
+
+function assertPackageIdentity(directory: string, packageName: string): void {
+  const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')) as { name?: unknown };
+  if (manifest.name !== packageName) fail(`运行时 package 身份不匹配: ${packageName}`, 'DESKTOP_RUNTIME_PACKAGE_IDENTITY');
+}
+
+function packageVersion(directory: string): string | null {
+  const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')) as { version?: unknown };
+  return typeof manifest.version === 'string' ? manifest.version : null;
+}
+
+function isWithinDirectory(root: string, target: string): boolean {
+  const relative = path.relative(fs.realpathSync(root), target);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function linkFallbackPackage(
+  fallback: string,
+  packageName: string,
+  source: string,
+  { allowMaterializedDependency = false }: { readonly allowMaterializedDependency?: boolean } = {},
+): void {
+  assertPackageIdentity(source, packageName);
+  const link = path.join(fallback, ...packageName.split('/'));
+  fs.mkdirSync(path.dirname(link), { recursive: true, mode: 0o700 });
+  let stat: fs.Stats | null = null;
+  try {
+    stat = fs.lstatSync(link);
+  } catch (error: unknown) {
+    if (!(error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT')) throw error;
+  }
+  if (stat) {
+    if (!stat.isSymbolicLink()) {
+      if (allowMaterializedDependency) {
+        assertPackageIdentity(link, packageName);
+        return;
+      }
+      fail(`desktop fallback 被非受管路径占用: ${link}`, 'DESKTOP_RUNTIME_FALLBACK_CONFLICT');
+    }
+    const existing = fs.realpathSync(link);
+    // pnpm 物化的依赖链接必须仍位于 profile 闭包内；它们由 profile-local
+    // lockfile 锁定，可能与 launcher runtime 使用不同但兼容的传递版本。
+    if (allowMaterializedDependency && isWithinDirectory(fallback, existing)) {
+      assertPackageIdentity(existing, packageName);
+      return;
+    }
+    if (existing === source) return;
+    if (packageVersion(existing) !== packageVersion(source))
+      fail(`desktop fallback 版本与当前 runtime 不一致: ${link}`, 'DESKTOP_RUNTIME_FALLBACK_CONFLICT');
+    // profile `node_modules` 中的同版本链接只可能来自旧的 pnpm peer 实例；
+    // 重定向到当前 runtime，避免 ESM 从两个闭包混合导入。
+    fs.unlinkSync(link);
+  }
+  // `DSH_HOME` 可以经过系统符号链接（macOS 的 /tmp 即为常见情况）；
+  // 必须以实际父目录计算相对目标，避免写入看似相对、实际悬挂的 fallback。
+  const relative = path.relative(fs.realpathSync(path.dirname(link)), fs.realpathSync(source));
+  if (!relative || path.isAbsolute(relative)) fail(`desktop fallback 不能建立安全相对链接: ${packageName}`, 'DESKTOP_RUNTIME_FALLBACK');
+  fs.symlinkSync(relative, link, 'junction');
+}
+
+/**
+ * desktop layer 由 launcher 临时注入，不进入 profile bundle 列表。为让 profile
+ * 锚点的 Loader 只从受控路径解析它，在当前 profile 闭包中创建到当前
+ * runtime 的相对链接；fallback 只包含 launcher 注入层及其服务提供方，
+ * 不得把 DSH runtime 或任意工作区包混入 profile 的持久闭包。
+ */
+function ensureDesktopLayerFallback(profileDir: string, runtimeRoot: string | undefined): void {
+  // 打包 runtime 只携带 node_modules 与受控 workspace 包，不携带仓库根
+  // package.json；DSH 安装包是两种布局中都存在的可信解析锚点。
+  const runtimeAnchor = runtimeRoot
+    ? path.join(runtimeRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
+    : path.join(process.cwd(), 'package.json');
+  if (!fs.existsSync(runtimeAnchor)) fail(`缺少桌面 runtime 锚点: ${runtimeAnchor}`, 'DESKTOP_RUNTIME_MISSING');
+  const fallback = path.join(profileDir, 'node_modules');
+  for (const packageName of ['@dsh-forge/desktop-layer', '@dsh-forge/desktop-services-local']) {
+    const source = packageDirectoryFromAnchor(runtimeAnchor, packageName);
+    if (!source) fail(`desktop runtime 缺少 ${packageName}`, 'DESKTOP_RUNTIME_PACKAGE_MISSING');
+    linkFallbackPackage(fallback, packageName, source, { allowMaterializedDependency: true });
+  }
 }
 
 /** 判断 Cordis 条目的配置是否可以作为浅层 patch 的基底。 */
@@ -381,13 +480,14 @@ export async function startDshHost({
   readonly generationId: string;
   readonly capability: DesktopHostCapability;
 }): Promise<HostInstance> {
-  const runtimeRequire = dshRequire(runtimeRoot);
-  const appBoot = await loadAppBoot(runtimeRequire);
+  const profileAnchor = path.join(profile.dir, 'package.json');
+  const profileRequire = dshRequire(profileAnchor);
+  const appBoot = await loadAppBoot(profileRequire);
   const cmdline = (await import(
-    pathToFileURL(runtimeRequire.resolve('@deepseek-ai/dsh-cmdline')).href,
+    pathToFileURL(profileRequire.resolve('@deepseek-ai/dsh-cmdline')).href,
   )) as unknown as CmdlineModule;
-  const installAnchor = runtimeRequire.resolve('@deepseek-ai/dsh/package.json');
-  appBoot.healProfilesModuleFallback(installAnchor, home);
+  const installAnchor = profileRequire.resolve('@deepseek-ai/dsh/package.json');
+  ensureDesktopLayerFallback(profile.dir, runtimeRoot);
   const loaded = appBoot.loadProfile('dsh-forge-desktop', profile.name, installAnchor, home);
   const desktopPatch = appBoot.loadOverlayPatches(
     'dsh-forge-desktop',
@@ -420,9 +520,12 @@ export async function startDshHost({
       patches,
       (hostCtx) => {
         hostCtx.provide('dshForgeDesktopCapability', capability);
-        cmdline.provideCmdline(hostCtx, { args: ['--host', '127.0.0.1', '--port', String(port)], exit: () => {} });
+        cmdline.provideCmdline(hostCtx, {
+          args: ['--host', '127.0.0.1', '--port', String(port), '--no-open'],
+          exit: () => {},
+        });
       },
-      pathToFileURL(installAnchor).href,
+      pathToFileURL(profileAnchor).href,
     );
   } catch (error) {
     throw new Error(`DSH Host boot 失败:\n${describeBootError(error)}`, { cause: error });

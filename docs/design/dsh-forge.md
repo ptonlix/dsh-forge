@@ -169,15 +169,15 @@ desktop layer 注册，`./launcher` 只由 `apps/desktop` 创建 capability。El
 - `optional`：已验证兼容但默认关闭或按需安装的能力。
 - `desktop-ui`：只在确实需要桌面呈现时加载的 Web UI 组合。
 
-官方 profile 只选择 `dsh-base` 与 `dsh-web-app` 作为持久运行基线，launcher 随后临时
-注入 desktop layer。产品策略 bundle 只能在同一变更中带有非空 patch、完整覆盖值、偏离
-理由与验证时进入 profile；空扩展锚点不得保留。
+官方 profile 选择 `dsh-base`、`dsh-web-app` 和经审计的第三方 bundle 作为持久运行组合，
+launcher 随后临时注入 desktop layer。产品策略 bundle 只能在同一变更中带有非空 patch、完整
+覆盖值、偏离理由与验证时进入 profile；空扩展锚点不得保留。
 
 场景发行版不应命名为 `dshd-flavor-*` 并放在 bundle 目录；场景是 profile 清单，不是通用运行时层。
 
 #### 4.3.1 具体插件的引用关系
 
-具体插件不直接散落在 profile 或桌面外壳中，而是由 bundle 通过标准 Node 包依赖和 patch 注册：
+未发布或需要本仓库补充 patch 的插件由 bundle 通过标准 Node 包依赖和 patch 注册：
 
 ```text
 具体插件包（npm 或 GitHub 仓库）
@@ -188,7 +188,27 @@ profile
   -> 按顺序选择 bundle
 ```
 
-bundle 的 `package.json` 必须声明 `dsh.bundle.patch`，并在 `dependencies` 中声明它的插件包；`cordis.patch.yml` 的 Loader 行使用已安装包的名称，不能指向本仓库之外的源码相对路径。profile 只引用 bundle，插件的来源、版本和完整性由 bundle 的锁文件及 catalog 记录。
+bundle 的 `package.json` 必须声明 `dsh.bundle.patch`，并在 `dependencies` 中声明它的插件包；`cordis.patch.yml` 的 Loader 行使用已安装包的名称，不能指向本仓库之外的源码相对路径。插件的来源、版本和完整性由 profile-local lockfile 及 catalog 记录。
+
+已发布且自身声明有效 `dsh.bundle.patch` 的第三方 npm bundle 可以被官方 profile 直接选择，
+不得再创建只用于重复挂载同一 entry 的空 wrapper。例如官方 profile 直接选择
+`dsh-better-sidebar@0.14.0`；它是 L1 catalog 条目，固定 npm tarball integrity、许可证、
+维护者、依赖与安装脚本摘要、能力范围和已验证平台。该包在 profile 中只出现一次，避免重复
+注册 sidebar 路由。
+
+构建器把这类外部 bundle、DSH runtime 及其必要 peer 写入生成 profile 的显式依赖，从冻结的根
+lockfile 投影 profile-local lockfile，再离线物化闭包。生命周期脚本只有在 `allowBuilds` 中经
+审计授权时才能运行。Desktop Host 以受管 profile 的 `package.json` 为模块锚点加载 DSH 与外部
+entry；只有 launcher 所有的 `desktop-layer` 及其服务提供方可以作为受限、临时 fallback 注入。
+它不会回退到根工作区、任意用户目录，也不会把 desktop layer 写进持久 bundle 列表。打包流程将
+物化闭包解引用后复制到 macOS 应用包的 `Contents/Resources/dsh-forge/profile/node_modules` 或 Windows
+可执行文件同级的 `resources/dsh-forge/profile/node_modules`，并在同一最终资源目录执行
+Cordis Loader 动态导入检查。打包前，profile 内的 `node-pty` 必须按目标 Electron ABI 重建，最终
+包的 native 文件、摘要和当前平台 smoke evidence 一并记录。
+
+这是一项发行准入，不是隔离机制。`dsh-better-sidebar` 与 DSH、Electron 同处一个 Node 进程，
+执行模式为 `trusted-in-process`；其文件、网络、Git 与终端能力来自审核事实，不因 profile
+选择、设置开关或 renderer sandbox 而被技术隔离。
 
 发布到 npm 的插件使用普通的精确版本：
 
@@ -339,7 +359,7 @@ schema: dsh-forge/profile@1
 name: dsh-forge-official
 runtime:
   dshPackageFamily: '@deepseek-ai/dsh'
-  dshVersion: 0.1.0-rc.7
+  dshVersion: 0.1.0-rc.8
   cordisVersion: 4.0.1
   desktopProtocol: 1
   electronVersion: 43.4.0
@@ -347,6 +367,7 @@ runtime:
 bundles:
   - '@deepseek-ai/dsh-base'
   - '@deepseek-ai/dsh-web-app'
+  - dsh-better-sidebar
 ```
 <!-- /dsh-forge-example:profile -->
 

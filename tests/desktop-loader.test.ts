@@ -11,6 +11,11 @@ import {
 } from '@dsh-forge/desktop-services';
 import localProvider from '@dsh-forge/desktop-services-local';
 import { createDesktopHostCapability } from '@dsh-forge/desktop-services-local/launcher';
+import { compileProfile } from '@dsh-forge/profile-toolchain/compiler';
+import { ensureManagedProfile } from '../apps/desktop/runtime/managed-profile.ts';
+import { startDshHost } from '../apps/desktop/main.ts';
+
+const root = path.resolve(__dirname, '..');
 
 function profile(): DesktopProfileSummary {
   return {
@@ -65,3 +70,65 @@ test('协议主版本不兼容时在执行操作前稳定失败', () => {
     /desktop services 协议不兼容: 需要 1，实际 2/,
   );
 });
+
+test(
+  'Desktop Host 从受管 profile 闭包加载第三方 bundle，并只临时补齐 launcher runtime',
+  async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-host-loader-'));
+    try {
+      const compiled = compileProfile({ root });
+      const managed = ensureManagedProfile({
+        source: compiled.profileDir,
+        dshHome: home,
+        distributionId: compiled.distribution.id,
+        sourceProfile: compiled.profile.name,
+      });
+      const bundles = compiled.profile.bundles;
+      const desktopProfile = {
+        name: managed.profileName,
+        dir: managed.directory,
+        bundles,
+        exists: true,
+        webCompatible: true,
+        default: true,
+        selectable: true,
+        error: null,
+        reason: null,
+      };
+      const generation = { id: 'desktop-loader-host', profile: managed.profileName, stage: 'prepared', closed: false };
+      const capability = createDesktopHostCapability({
+        generation,
+        profileDir: managed.directory,
+        profiles: [desktopProfile],
+        manager: { select: async () => generation },
+        catalog: [],
+        reconcile: async () => {},
+        verifyNextGeneration: async () => true,
+      });
+      const host = await startDshHost({
+        root,
+        home,
+        runtimeRoot: root,
+        profile: desktopProfile,
+        generationId: generation.id,
+        capability,
+      });
+      try {
+        await host.entriesSettled();
+        assert.equal(bundles.filter((bundle) => bundle === 'dsh-better-sidebar').length, 1);
+        assert.equal(bundles.includes('@dsh-forge/desktop-layer'), false);
+        const dependencies = path.join(managed.directory, 'node_modules');
+        assert.equal(fs.existsSync(path.join(dependencies, 'dsh-better-sidebar', 'package.json')), true);
+        assert.equal(fs.existsSync(path.join(dependencies, '@deepseek-ai', 'dsh-llm', 'package.json')), true);
+        assert.equal(fs.existsSync(path.join(dependencies, '@dsh-forge', 'desktop-layer', 'package.json')), true);
+        assert.equal(fs.lstatSync(path.join(dependencies, '@deepseek-ai', 'dsh-llm')).isDirectory(), true);
+        assert.equal(fs.lstatSync(path.join(dependencies, '@dsh-forge', 'desktop-layer')).isSymbolicLink(), true);
+      } finally {
+        await host.dispose();
+      }
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  },
+  55_000,
+);

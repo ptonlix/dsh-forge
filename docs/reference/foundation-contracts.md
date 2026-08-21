@@ -51,4 +51,7 @@ Host descriptor 和 catalog 条目的 `executionMode` 固定为 `trusted-in-proc
 
 `resolved-manifest.json` 记录 profile runtime、bundle、来源、完整性、许可证、脚本、`allowBuilds`、平台和输入摘要。`runtime-manifest` 在此基础上记录 Electron、Node、pnpm、native addon、已构建目标、声明目标和签名状态；它是运行时闭包检查的输入，不是签名、来源可信度或恶意代码安全证明。
 
-macOS 产物将完整 pnpm runtime 放在 `Contents/Resources/dsh-forge/runtime/node_modules`。DSH 必须以该目录中 `@deepseek-ai/dsh` 的真实路径解析依赖，不能以根软链接作为解析锚点，否则 pnpm virtual store 中的 peer 依赖会被错误地报告为缺失。
+macOS 产物将 launcher runtime 放在 `Contents/Resources/dsh-forge/runtime/node_modules`，并将解引用的
+profile 闭包放在 `Contents/Resources/dsh-forge/profile/node_modules`。DSH Host 必须以 profile 的
+`package.json` 为模块锚点解析 DSH、外部 bundle 与 peer 依赖；launcher runtime 只能为临时注入的
+`@dsh-forge/desktop-layer` 提供受限 fallback，不能成为 profile bundle 的解析来源。

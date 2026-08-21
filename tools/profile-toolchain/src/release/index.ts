@@ -6,7 +6,14 @@ import { createRequire } from 'node:module';
 import * as asar from '@electron/asar';
 import { fail } from '../core/errors.ts';
 import { errorCode, errorMessage } from '../types.ts';
-import type { NativeFile, PackageInspection, RuntimeManifest, RuntimeTarget, UpdateInstallResult } from '../types.ts';
+import type {
+  NativeFile,
+  NativeFileRoot,
+  PackageInspection,
+  RuntimeManifest,
+  RuntimeTarget,
+  UpdateInstallResult,
+} from '../types.ts';
 import type { ResolvedManifest } from '../compiler/index.ts';
 
 /**
@@ -56,6 +63,11 @@ export interface PackageEvidence {
   readonly sbom: string;
   readonly licenseNotice: string;
 }
+
+export interface PackageSmoke {
+  readonly healthy?: boolean;
+  readonly nativeEvidence?: unknown;
+}
 export interface ChannelMetadata {
   readonly schema: 'dsh-forge/channel@1';
   readonly distributionId: string;
@@ -89,13 +101,25 @@ export function compareVersions(left: string, right: string): number {
   return a[3].localeCompare(b[3]);
 }
 
-/** 根据 macOS app bundle 或目录产物推导可检查的 resources/profile/runtime 路径。 */
-export function runtimePaths(packageRoot: string | null | undefined): RuntimePaths | null {
+/** 根据 macOS app bundle、Windows 可执行文件或目录产物推导资源路径。 */
+export function runtimePaths(packageRoot: string | null | undefined, platform = process.platform): RuntimePaths | null {
   if (!packageRoot || !fs.existsSync(packageRoot)) return null;
-  if (process.platform === 'darwin' && packageRoot.endsWith('.app')) {
+  if (platform === 'darwin' && packageRoot.endsWith('.app')) {
     const resources = path.join(packageRoot, 'Contents', 'Resources');
     return {
       application: packageRoot,
+      resources,
+      asar: path.join(resources, 'app.asar'),
+      unpacked: path.join(resources, 'app.asar.unpacked'),
+      profile: path.join(resources, 'dsh-forge', 'profile'),
+      runtime: path.join(resources, 'dsh-forge', 'runtime', 'node_modules'),
+    };
+  }
+  if (platform === 'win32' && packageRoot.toLowerCase().endsWith('.exe')) {
+    const application = path.dirname(packageRoot);
+    const resources = path.join(application, 'resources');
+    return {
+      application,
       resources,
       asar: path.join(resources, 'app.asar'),
       unpacked: path.join(resources, 'app.asar.unpacked'),
@@ -113,19 +137,89 @@ export function runtimePaths(packageRoot: string | null | undefined): RuntimePat
   };
 }
 
-function collectNativeFiles(directory: string, relative = '', result: NativeFile[] = []): NativeFile[] {
+const NATIVE_FILE_ROOTS = Object.freeze(['app.asar.unpacked', 'dsh-forge/profile', 'dsh-forge/runtime'] as const);
+
+function isSafeRelativePath(value: string): boolean {
+  return Boolean(value) && !path.isAbsolute(value) && !value.split(/[\\/]+/).includes('..');
+}
+
+function isNativeHelper(relativePath: string, executable: boolean): boolean {
+  const normalized = relativePath.split(path.sep).join('/');
+  const name = path.basename(relativePath).toLowerCase();
+  return name === 'spawn-helper' || name.endsWith('.exe') || (executable && normalized.includes('/helpers/'));
+}
+
+function statIfAccessible(file: string): fs.Stats | null {
+  try {
+    return fs.statSync(file);
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+/** 扫描一个受限资源根中的 native addon 与 helper，并记录其内容摘要。 */
+export function collectNativeFiles(
+  directory: string,
+  root: NativeFileRoot,
+  relative = '',
+  result: NativeFile[] = [],
+): NativeFile[] {
   if (!fs.existsSync(directory)) return result;
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const next = path.join(directory, entry.name);
     const relativePath = path.join(relative, entry.name);
-    if (entry.isDirectory()) collectNativeFiles(next, relativePath, result);
-    else if (
-      entry.name.endsWith('.node') ||
-      (relativePath.includes(`${path.sep}helpers${path.sep}`) && (fs.statSync(next).mode & 0o111) !== 0)
-    )
-      result.push({ path: relativePath.split(path.sep).join('/'), executable: (fs.statSync(next).mode & 0o111) !== 0 });
+    const stat = statIfAccessible(next);
+    if (!stat) continue;
+    if (stat.isDirectory()) collectNativeFiles(next, root, relativePath, result);
+    else if (stat.isFile()) {
+      const executable = (stat.mode & 0o111) !== 0;
+      if (entry.name.endsWith('.node') || isNativeHelper(relativePath, executable)) {
+        result.push({ root, path: relativePath.split(path.sep).join('/'), executable, sha256: sha256(next) });
+      }
+    }
   }
-  return result.sort((left, right) => left.path.localeCompare(right.path));
+  return result.sort((left, right) => nativeFileKey(left).localeCompare(nativeFileKey(right)));
+}
+
+function nativeFileKey(native: Pick<NativeFile, 'root' | 'path'>): string {
+  return `${native.root}/${native.path}`;
+}
+
+function nativeRootDirectory(paths: RuntimePaths, root: NativeFileRoot): string {
+  if (root === 'app.asar.unpacked') return paths.unpacked;
+  if (root === 'dsh-forge/profile') return paths.profile;
+  return paths.runtime;
+}
+
+function nativeFileLocation(paths: RuntimePaths, native: NativeFile): string | null {
+  if (!NATIVE_FILE_ROOTS.includes(native.root) || !isSafeRelativePath(native.path)) return null;
+  const root = nativeRootDirectory(paths, native.root);
+  const target = path.resolve(root, native.path);
+  const relative = path.relative(root, target);
+  return relative && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative) ? target : null;
+}
+
+function collectPackagedNativeFiles(paths: RuntimePaths): NativeFile[] {
+  return [
+    ...collectNativeFiles(paths.unpacked, 'app.asar.unpacked'),
+    ...collectNativeFiles(paths.profile, 'dsh-forge/profile'),
+    ...collectNativeFiles(paths.runtime, 'dsh-forge/runtime'),
+  ].sort((left, right) => nativeFileKey(left).localeCompare(nativeFileKey(right)));
+}
+
+function validateNativeFile(native: NativeFile, label: string): true {
+  if (
+    !native ||
+    !NATIVE_FILE_ROOTS.includes(native.root) ||
+    typeof native.path !== 'string' ||
+    !isSafeRelativePath(native.path) ||
+    typeof native.executable !== 'boolean' ||
+    typeof native.sha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/i.test(native.sha256)
+  )
+    fail(`${label} 包含无效 native 文件`, 'RUNTIME_TARGETS');
+  return true;
 }
 
 /** 校验平台/架构目标唯一性以及 native 文件相对路径安全性。 */
@@ -147,15 +241,7 @@ export function validateRuntimeTargets(targets: readonly RuntimeTarget[], label 
       if (seen.has(key)) fail(`${label} 包含重复目标: ${key}`, 'RUNTIME_TARGETS');
       seen.add(key);
     }
-    for (const native of target.nativeFiles || []) {
-      if (
-        !native ||
-        typeof native.path !== 'string' ||
-        path.isAbsolute(native.path) ||
-        native.path.split(/[\\/]+/).includes('..')
-      )
-        fail(`${label} 包含无效 native 文件`, 'RUNTIME_TARGETS');
-    }
+    for (const native of target.nativeFiles || []) validateNativeFile(native, label);
   }
   return true;
 }
@@ -168,6 +254,8 @@ export function createRuntimeManifest({
   targets = [],
   declaredTargets = null,
   artifact = null,
+  electronAbi = process.versions.modules,
+  nativeRebuild = null,
 }: {
   resolved: ResolvedManifest;
   packageRoot: string | null;
@@ -175,13 +263,15 @@ export function createRuntimeManifest({
   targets: readonly RuntimeTarget[];
   declaredTargets?: readonly RuntimeTarget[] | null;
   artifact?: string | null;
+  electronAbi?: string;
+  nativeRebuild?: unknown;
 }): RuntimeManifest {
   if (!resolved) fail('runtime manifest 缺少 resolved manifest', 'RUNTIME_MANIFEST');
   validateRuntimeTargets(targets, '构建目标');
   const declared = declaredTargets || resolved.distribution.platforms;
   validateRuntimeTargets(declared, '声明目标');
   const paths = runtimePaths(packageRoot ? path.resolve(packageRoot) : null);
-  const nativeAddons = paths ? collectNativeFiles(paths.unpacked) : [];
+  const nativeAddons = paths ? collectPackagedNativeFiles(paths) : [];
   return {
     schema: 'dsh-forge/runtime-manifest@1',
     distribution: resolved.distribution,
@@ -194,6 +284,7 @@ export function createRuntimeManifest({
       pnpm: resolved.tools.pnpm,
       node: resolved.tools.node,
       nodeAbi: process.versions.modules,
+      electronAbi,
     },
     bundles: resolved.bundles,
     lockfile: resolved.lockfile,
@@ -203,6 +294,7 @@ export function createRuntimeManifest({
     declaredTargets: declared.map((target) => ({ os: target.os, architectures: target.architectures.slice() })),
     packageRoot: paths?.application || null,
     artifact: artifact ? path.resolve(artifact) : null,
+    nativeRebuild,
     signing: { signed, kind: signed ? 'platform-identity' : 'unsigned-smoke' },
   };
 }
@@ -252,6 +344,99 @@ function packageEntryExists(paths: RuntimePaths | null, packageName: string): bo
     return Boolean(createRequire(fs.realpathSync(anchor)).resolve(packageName));
   } catch {
     return false;
+  }
+}
+
+function packagedElectronExecutable(paths: RuntimePaths): string | null {
+  if (process.platform === 'darwin') {
+    const directory = path.join(paths.application, 'Contents', 'MacOS');
+    if (!fs.existsSync(directory)) return null;
+    const executables = fs
+      .readdirSync(directory)
+      .map((name) => path.join(directory, name))
+      .filter((candidate) => (fs.statSync(candidate).mode & 0o111) !== 0);
+    return executables.length === 1 ? executables[0]! : null;
+  }
+  if (process.platform === 'win32') {
+    const candidates = fs
+      .readdirSync(paths.application)
+      .filter((name) => name.endsWith('.exe'))
+      .map((name) => path.join(paths.application, name));
+    return candidates.length === 1 ? candidates[0]! : null;
+  }
+  return null;
+}
+
+/**
+ * 在最终应用的 Electron runtime 中按 Cordis Loader 的 internal.import 路径导入
+ * profile patch 中的全部 bare entry。静态 require.resolve 无法覆盖 ESM 子依赖，
+ * 例如 dsh-better-sidebar 进一步导入 @deepseek-ai/dsh-llm 的真实链路。
+ */
+function inspectProfileDynamicImports(paths: RuntimePaths, failures: InspectionFailure[]): void {
+  const executable = packagedElectronExecutable(paths);
+  if (!executable) {
+    failures.push({ code: 'PROFILE_CORDIS_IMPORT_RUNNER_MISSING' });
+    return;
+  }
+  const script = `
+const fs = require('node:fs');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+const { pathToFileURL } = require('node:url');
+const profileAnchor = process.argv[1];
+const profileRequire = createRequire(profileAnchor);
+const packageDirectory = (name) => {
+  for (const searchPath of profileRequire.resolve.paths(name) || []) {
+    const candidate = path.join(searchPath, ...name.split('/'));
+    if (fs.existsSync(path.join(candidate, 'package.json'))) return candidate;
+  }
+  throw new Error('profile 无法解析 bundle: ' + name);
+};
+(async () => {
+  const appBoot = await import(pathToFileURL(profileRequire.resolve('@deepseek-ai/dsh-app-boot')).href);
+  const cordis = await import(pathToFileURL(profileRequire.resolve('@deepseek-ai/cordis')).href);
+  const loaderModule = await import(pathToFileURL(profileRequire.resolve('@deepseek-ai/cordis-plugin-loader')).href);
+  const profile = JSON.parse(fs.readFileSync(profileAnchor, 'utf8'));
+  const layers = (profile.dsh?.profile?.bundles || []).map((bundle) => {
+    const directory = packageDirectory(bundle);
+    const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
+    const patch = manifest.dsh?.bundle?.patch;
+    if (typeof patch !== 'string' || path.isAbsolute(patch) || patch.split(/[\\/]+/).includes('..'))
+      throw new Error('bundle patch 非法: ' + bundle);
+    return appBoot.loadOverlayPatches('package:inspect', path.join(directory, patch));
+  });
+  const entries = appBoot.composeEntries(layers);
+  const names = new Set();
+  const collect = (entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
+    if (typeof entry.name === 'string' && !entry.name.startsWith('cordis:')) names.add(entry.name);
+    if (entry.group && Array.isArray(entry.config)) for (const child of entry.config) collect(child);
+  };
+  for (const entry of entries) collect(entry);
+  const ctx = new cordis.Context();
+  try {
+    ctx.baseUrl = pathToFileURL(path.dirname(profileAnchor)).href + '/';
+    await ctx.plugin(loaderModule.default);
+    const loader = ctx.get('loader');
+    if (!loader) throw new Error('Cordis Loader 未激活');
+    // 调用 Loader 自己的 import：有 internal loader 时使用其 profile base URL，
+    // 不可用时退回 ESM import(name)，两者都是实际 entry 激活所走的分支。
+    for (const name of names) await loader.import(name);
+  } finally {
+    await ctx.fiber.dispose();
+  }
+})().catch((error) => { console.error(error?.stack || String(error)); process.exitCode = 1; });
+`;
+  const result = spawnSync(executable, ['-e', script, path.join(paths.profile, 'package.json')], {
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+  });
+  if (result.status !== 0 || result.signal || result.error) {
+    failures.push({
+      code: 'PROFILE_CORDIS_DYNAMIC_IMPORT_FAILED',
+      message: (result.stderr || result.stdout || result.error?.message || result.signal || 'unknown error').trim(),
+    });
   }
 }
 
@@ -307,6 +492,7 @@ export function inspectPackage(
       }
       if (!shippedStandardPresetExists(paths))
         failures.push({ code: 'RUNTIME_PRESET_ASSET_MISSING', path: SHIPPED_STANDARD_PRESET });
+      inspectProfileDynamicImports(paths, failures);
       const macBin = path.join(paths.application, 'Contents', 'MacOS');
       if (
         process.platform === 'darwin' &&
@@ -319,24 +505,52 @@ export function inspectPackage(
         if (!fs.existsSync(path.join(paths.resources, relative)))
           failures.push({ code: 'PACKAGE_FILE_MISSING', path: relative });
     }
-    const nativeRequirements = manifest.nativeAddons?.length
-      ? manifest.nativeAddons
-      : (manifest.targets || []).flatMap((target) => target.nativeFiles || []);
+    const nativeRequirements = manifest.nativeAddons || [];
+    const declaredNative = new Map<string, NativeFile>();
     for (const native of nativeRequirements) {
-      const file = path.join(paths.unpacked, native.path);
-      if (!fs.existsSync(file)) failures.push({ code: 'NATIVE_FILE_MISSING', path: native.path });
-      if (native.executable && fs.existsSync(file) && (fs.statSync(file).mode & 0o111) === 0)
-        failures.push({ code: 'EXECUTABLE_PERMISSION_MISSING', path: native.path });
+      try {
+        validateNativeFile(native, 'runtime manifest');
+      } catch (error) {
+        failures.push({ code: errorCode(error) || 'NATIVE_MANIFEST_INVALID', message: errorMessage(error) });
+        continue;
+      }
+      const key = nativeFileKey(native);
+      if (declaredNative.has(key)) {
+        failures.push({ code: 'NATIVE_FILE_DUPLICATE', path: key });
+        continue;
+      }
+      declaredNative.set(key, native);
+    }
+    const scannedNative = collectPackagedNativeFiles(paths);
+    const scannedByKey = new Map(scannedNative.map((native) => [nativeFileKey(native), native]));
+    for (const native of scannedNative) {
+      const key = nativeFileKey(native);
+      const declared = declaredNative.get(key);
+      if (!declared) {
+        failures.push({ code: 'NATIVE_FILE_UNDECLARED', path: key });
+        continue;
+      }
+      if (declared.sha256 !== native.sha256)
+        failures.push({ code: 'NATIVE_FILE_DIGEST_MISMATCH', path: key });
+      if (declared.executable !== native.executable)
+        failures.push({ code: 'EXECUTABLE_PERMISSION_MISMATCH', path: key });
+    }
+    for (const [key, native] of declaredNative) {
+      const file = nativeFileLocation(paths, native);
+      if (!file || !fs.existsSync(file) || !scannedByKey.has(key)) {
+        failures.push({ code: 'NATIVE_FILE_MISSING', path: key });
+        continue;
+      }
       const normalizedPath = native.path.replaceAll('\\', '/');
-      const platformMatch = normalizedPath.match(/(?:^|[/_-])(darwin|win32|linux)(?:-|[/])/);
+      const platformMatch = normalizedPath.match(/(?:^|[./_-])(darwin|win32|linux)(?:-|[./])/);
       const architectureMatch = normalizedPath.match(/(?:^|[/_-])(arm64|x64|ia32)(?:-|[/]|\.|$)/);
       if (platformMatch && platformMatch[1] !== process.platform) continue;
       if (architectureMatch && architectureMatch[1] !== process.arch) continue;
       for (const target of manifest.targets || []) {
-        if (target.os === process.platform && fs.existsSync(file))
+        if (target.os === process.platform && native.path.endsWith('.node'))
           for (const architecture of target.architectures || []) {
             if (!nativeArchitecture(file, architecture))
-              failures.push({ code: 'NATIVE_ARCHITECTURE_MISMATCH', path: native.path, architecture });
+              failures.push({ code: 'NATIVE_ARCHITECTURE_MISMATCH', path: key, architecture });
           }
       }
     }
@@ -351,7 +565,8 @@ function walkFiles(directory: string, prefix = '', result: EvidenceFile[] = []):
     const target = path.join(directory, entry.name);
     const name = path.join(prefix, entry.name);
     // pnpm workspace 可能留下指向目录的符号链接，必须按真实 stat 判断，不能把目录交给 readFileSync。
-    const stat = fs.statSync(target);
+    const stat = statIfAccessible(target);
+    if (!stat) continue;
     if (stat.isDirectory()) walkFiles(target, name, result);
     else if (stat.isFile())
       result.push({ path: name.split(path.sep).join('/'), size: stat.size, sha256: sha256(target) });
@@ -398,6 +613,33 @@ export function verifyEvidence(
 }
 
 /** 汇总 profile、配置、包、catalog、smoke 和证据检查，决定是否允许发布。 */
+function nativeEvidenceTarget(evidence: unknown): string | null {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
+  const record = evidence as Record<string, unknown>;
+  const target = record.target;
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return null;
+  const targetRecord = target as Record<string, unknown>;
+  if (
+    record.schema !== 'dsh-forge/native-verification@1' ||
+    record.result !== 'passed' ||
+    typeof record.electron !== 'string' ||
+    typeof record.electronAbi !== 'string' ||
+    typeof record.runtimeManifestSha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/i.test(record.runtimeManifestSha256) ||
+    !Array.isArray(record.nativeFiles) ||
+    typeof record.verifiedAt !== 'string' ||
+    !['darwin', 'win32'].includes(String(targetRecord.os)) ||
+    !['arm64', 'x64', 'ia32'].includes(String(targetRecord.architecture))
+  )
+    return null;
+  try {
+    for (const native of record.nativeFiles) validateNativeFile(native as NativeFile, 'native verification evidence');
+  } catch {
+    return null;
+  }
+  return `${targetRecord.os}-${targetRecord.architecture}`;
+}
+
 export function releaseGate({
   profileVerified,
   configDump,
@@ -405,7 +647,7 @@ export function releaseGate({
   catalogVerified,
   manifest,
   updateConfigured,
-  packageSmoke,
+  packageSmokes,
   evidence,
 }: {
   profileVerified: boolean;
@@ -414,16 +656,35 @@ export function releaseGate({
   catalogVerified: { readonly valid?: boolean } | null;
   manifest: RuntimeManifest | null;
   updateConfigured: boolean;
-  packageSmoke: { readonly healthy?: boolean } | null;
+  packageSmokes: readonly PackageSmoke[];
   evidence: { readonly valid?: boolean } | null;
 }): { readonly publishable: true } {
   const failures: string[] = [];
   if (!profileVerified) failures.push('profile verify 未通过');
   if (!configDump?.healthy) failures.push('Loader config dump 未通过');
   if (!packageInspection?.valid) failures.push('安装包检查未通过');
-  if (!packageSmoke?.healthy) failures.push('真实安装包 smoke 未通过');
+  if (!packageSmokes.length) failures.push('缺少真实安装包 smoke evidence');
   if (!evidence?.valid) failures.push('产物证据、SBOM 或许可证未通过');
   if (!catalogVerified?.valid) failures.push('catalog 验证未通过');
+  const verifiedTargets = new Set<string>();
+  for (const smoke of packageSmokes) {
+    if (!smoke?.healthy) {
+      failures.push('真实安装包 smoke 未通过');
+      continue;
+    }
+    const target = nativeEvidenceTarget(smoke.nativeEvidence);
+    if (!target) {
+      failures.push('native verification evidence 无效');
+      continue;
+    }
+    if (verifiedTargets.has(target)) failures.push(`native verification evidence 重复: ${target}`);
+    verifiedTargets.add(target);
+  }
+  for (const declared of manifest?.declaredTargets || [])
+    for (const architecture of declared.architectures || []) {
+      const key = `${declared.os}-${architecture}`;
+      if (!verifiedTargets.has(key)) failures.push(`声明目标缺少 native evidence: ${key}`);
+    }
   if (!manifest?.signing?.signed) failures.push('生产发布需要平台签名');
   if (!updateConfigured) failures.push('生产发布需要更新信任根与 channel');
   if (failures.length) fail(`发布门禁拒绝: ${failures.join('；')}`, 'RELEASE_GATE', { failures });

@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { app, dialog } from 'electron';
 import { assertNoStartupInstall, loadStaticCatalog } from '@dsh-forge/profile-toolchain/trust';
@@ -103,7 +104,20 @@ export async function startElectron() {
   reportDevelopmentPhase('启动 deepseek-harness Host 并等待 renderer 健康握手');
   const generation = await launcher.start();
   process.stdout.write(`DSH Forge Desktop 已就绪（profile: ${generation.profile}）\n`);
-  if (process.argv.includes('--dsh-forge-smoke')) setTimeout(() => void requestExit('smoke-exit'), 1_000);
+  if (process.argv.includes('--dsh-forge-smoke')) {
+    const report = process.env.DSH_FORGE_SMOKE_REPORT;
+    if (report)
+      fs.writeFileSync(
+        report,
+        `${JSON.stringify({
+          schema: 'dsh-forge/electron-smoke@1',
+          electron: process.versions.electron || null,
+          electronAbi: process.versions.modules,
+        })}\n`,
+        { mode: 0o600 },
+      );
+    setTimeout(() => void requestExit('smoke-exit'), 1_000);
+  }
   return { launcher, requestExit };
 }
 

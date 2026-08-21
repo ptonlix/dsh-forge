@@ -4,11 +4,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { satisfies } from 'semver';
 import {
   parseBundleManifest,
   parseDistribution,
   parseProfile,
   type BundleManifest,
+  type CatalogEntry,
   type Distribution,
   type Profile,
   type PackageSource,
@@ -16,6 +18,7 @@ import {
 import { readYaml, stringifyYaml } from '../core/yaml.ts';
 import { digest, stable } from '../core/digest.ts';
 import { fail } from '../core/errors.ts';
+import { loadStaticCatalog } from '../trust/catalog.ts';
 
 /**
  * Profile compiler：把发行版与 profile 源文件转换为可复现的安装输入。
@@ -61,6 +64,9 @@ export interface BundleCollectionProfile {
  */
 export interface BundleResolutionOptions {
   readonly fixtureRoot?: string;
+  /** 官方 profile 的外部 bundle 必须逐项匹配已验证 catalog。 */
+  readonly catalogEntries?: readonly CatalogEntry[];
+  readonly requireCatalog?: boolean;
 }
 
 export interface ResolvedManifest {
@@ -68,7 +74,12 @@ export interface ResolvedManifest {
   readonly inputDigest: string;
   readonly generatedAt: 'deterministic';
   readonly tools: typeof TOOL_VERSIONS;
-  readonly pnpmEvidence: { readonly generated: string; readonly frozen: string; readonly lockfileDigest: string };
+  readonly pnpmEvidence: {
+    readonly generated: string;
+    readonly frozen: string;
+    readonly materialized: string;
+    readonly lockfileDigest: string;
+  };
   readonly distribution: Pick<
     Distribution,
     'id' | 'name' | 'applicationId' | 'version' | 'packageScope' | 'channel' | 'platforms' | 'updates'
@@ -119,6 +130,25 @@ function repoRoot(): string {
 
 function dshRequire(): NodeRequire {
   return createRequire(fs.realpathSync(require.resolve('@deepseek-ai/dsh/package.json')));
+}
+
+/** 遍历 DSH 应用声明的闭包，不把工作区偶然可解析的包误判为内置 bundle。 */
+function dshInstallationPackageNames(): ReadonlySet<string> {
+  const installAnchor = dshRequire().resolve('@deepseek-ai/dsh/package.json');
+  const queue = [installAnchor];
+  const names = new Set<string>();
+  while (queue.length) {
+    const anchor = queue.shift();
+    if (!anchor || !fs.existsSync(anchor)) continue;
+    const pkg = JSON.parse(fs.readFileSync(anchor, 'utf8')) as DependencyPackage;
+    if (typeof pkg.name !== 'string' || names.has(pkg.name)) continue;
+    names.add(pkg.name);
+    for (const dependency of dependencyNames(pkg)) {
+      const directory = resolveDependencyDirectory(anchor, dependency);
+      if (directory) queue.push(path.join(directory, 'package.json'));
+    }
+  }
+  return names;
 }
 
 function realDirectory(candidate: string): string | null {
@@ -186,17 +216,7 @@ function sha256File(file: string): string {
 }
 
 function allowsVersion(range: string, version: string): boolean {
-  if (range === version || range === `=${version}`) return true;
-  const caret = String(range).match(/^\^(\d+)\.(\d+)\.(\d+)$/);
-  const actual = String(version).match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!caret || !actual) return false;
-  const minimum = [Number(caret[1]!), Number(caret[2]!), Number(caret[3]!)];
-  const resolved = [Number(actual[1]!), Number(actual[2]!), Number(actual[3]!)];
-  if (minimum[0] !== resolved[0]) return false;
-  for (let index = 1; index < minimum.length; index += 1) {
-    if (resolved[index]! !== minimum[index]!) return resolved[index]! > minimum[index]!;
-  }
-  return true;
+  return satisfies(version, range, { includePrerelease: true, loose: false });
 }
 
 function packageSource(directory: string, root: string, workspaceRoots: readonly string[]): PackageSource {
@@ -307,6 +327,54 @@ function readBuildPolicy(root: string): Map<string, boolean> {
   return new Map();
 }
 
+function optionalPeer(bundle: BundleManifest, name: string): boolean {
+  const pkg = JSON.parse(fs.readFileSync(bundle.packageFile, 'utf8')) as DependencyPackage;
+  return pkg.peerDependenciesMeta?.[name]?.optional === true;
+}
+
+/** 以 bundle 自己的 package.json 为锚点验证 peer，预发布版本不会被宽松比较放行。 */
+function assertBundlePeers(bundle: BundleManifest, profile: BundleCollectionProfile): void {
+  for (const [peer, range] of Object.entries(bundle.peerDependencies)) {
+    if (peer === '@deepseek-ai/cordis' && !allowsVersion(range, profile.runtime.cordisVersion)) {
+      fail(`Cordis peer 不一致: ${bundle.name} 要求 ${range}，profile 为 ${profile.runtime.cordisVersion}`, 'PEER_MISMATCH');
+    }
+    const directory = resolveDependencyDirectory(bundle.sourceDirectory, peer);
+    if (!directory) {
+      if (optionalPeer(bundle, peer)) continue;
+      fail(`bundle ${bundle.name} 缺少 peer 依赖 ${peer}`, 'PEER_MISSING', { bundle: bundle.name, peer, range });
+    }
+    const peerPackage = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')) as DependencyPackage;
+    if (typeof peerPackage.version !== 'string' || !allowsVersion(range, peerPackage.version)) {
+      fail(
+        `peer 不兼容: ${bundle.name} 要求 ${peer}@${range}，实际为 ${peerPackage.version || 'unknown'}`,
+        'PEER_MISMATCH',
+        { bundle: bundle.name, peer, range, actual: peerPackage.version || null },
+      );
+    }
+  }
+}
+
+/** 官方 profile 的非内置 bundle 必须来自当前 catalog 的精确 L1 审计事实。 */
+function assertOfficialExternalBundles(
+  bundles: readonly Bundle[],
+  options: BundleResolutionOptions,
+): void {
+  if (!options.requireCatalog) return;
+  const catalog = options.catalogEntries;
+  if (!catalog) fail('官方 profile 缺少静态 catalog', 'CATALOG_REQUIRED');
+  const installationPackages = dshInstallationPackageNames();
+  for (const bundle of bundles) {
+    if (bundle.source.kind === 'workspace' || installationPackages.has(bundle.name)) continue;
+    const entry = catalog.find((candidate) => candidate.packageName === bundle.name);
+    if (!entry) fail(`官方外部 bundle 缺少 catalog 审计: ${bundle.name}`, 'CATALOG_BUNDLE_MISSING');
+    if (entry.tier !== 'L1') fail(`官方外部 bundle 必须是 L1: ${bundle.name}`, 'CATALOG_BUNDLE_TIER');
+    if (entry.version !== bundle.version)
+      fail(`catalog 版本与 bundle 不一致: ${bundle.name} ${entry.version} / ${bundle.version}`, 'CATALOG_BUNDLE_VERSION');
+    if (entry.source.kind !== 'npm' || entry.source.package !== bundle.name)
+      fail(`catalog 来源与外部 npm bundle 不一致: ${bundle.name}`, 'CATALOG_BUNDLE_SOURCE');
+  }
+}
+
 /** 收集 profile bundle、依赖闭包和构建授权，返回可审计的编译输入集合。 */
 export function collectBundles(
   profile: BundleCollectionProfile,
@@ -321,10 +389,8 @@ export function collectBundles(
     const manifest = parseBundleManifest(directory);
     if (manifest.name !== name)
       fail(`bundle 名称不匹配: profile 声明 ${name}，实际为 ${manifest.name}`, 'BUNDLE_IDENTITY');
+    assertBundlePeers(manifest, profile);
     for (const [peer, range] of Object.entries(manifest.peerDependencies)) {
-      if (peer === '@deepseek-ai/cordis' && !allowsVersion(range, profile.runtime.cordisVersion)) {
-        fail(`Cordis peer 不一致: ${name} 要求 ${range}，profile 为 ${profile.runtime.cordisVersion}`, 'PEER_MISMATCH');
-      }
       const previous = peerVersions.get(peer);
       if (
         previous &&
@@ -342,6 +408,7 @@ export function collectBundles(
     for (const spec of Object.values(manifest.dependencies)) normalizeGit(spec);
     return { ...manifest, source: packageSource(directory, root, workspaceRoots) };
   });
+  assertOfficialExternalBundles(bundles, options);
   const dependencyClosure = collectDependencyClosure(
     bundles.map((bundle) => bundle.sourceDirectory),
     root,
@@ -356,6 +423,10 @@ export function collectBundles(
       });
     }
   }
+  const buildPolicy = new Map(policy);
+  for (const name of requestedBuilds) {
+    if (!buildPolicy.has(name)) buildPolicy.set(name, true);
+  }
   return {
     bundles,
     dependencyClosure,
@@ -367,7 +438,7 @@ export function collectBundles(
           .concat([...requestedBuilds]),
       ),
     ].sort(),
-    buildPolicy: Object.fromEntries(policy),
+    buildPolicy: Object.fromEntries([...buildPolicy.entries()].sort(([left], [right]) => left.localeCompare(right))),
   };
 }
 
@@ -385,6 +456,7 @@ function inputSummary(
   profilePatch: readonly unknown[],
   dependencyClosure: readonly DependencyClosureEntry[],
   allowBuilds: readonly string[],
+  buildPolicy: Readonly<Record<string, boolean>>,
 ): unknown {
   return stable({
     tools: TOOL_VERSIONS,
@@ -407,6 +479,7 @@ function inputSummary(
     })),
     dependencyClosure,
     allowBuilds,
+    buildPolicy,
   });
 }
 
@@ -427,10 +500,42 @@ function profileDependencySpec(bundle: Bundle, profileDir: string): string {
 }
 
 function profileLocalDependency(bundle: Bundle, fixtureRoot: string | undefined): boolean {
-  // DSH 先从发行包安装锚点解析内置 bundle；只有显式测试夹具才进入 profile 的 file 依赖。
-  if (!fixtureRoot || bundle.source.kind === 'installed') return false;
+  // DSH 内置 bundle 始终由安装锚点提供；其余 bundle 必须成为 profile 自己的显式依赖。
+  if (!fixtureRoot) return !dshInstallationPackageNames().has(bundle.name);
+  if (bundle.source.kind === 'installed') return false;
   const relative = path.relative(path.resolve(fixtureRoot), bundle.sourceDirectory);
   return Boolean(relative && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function profilePackageDependencies(
+  root: string,
+  profile: Profile,
+  bundles: readonly Bundle[],
+  profileDir: string,
+  fixtureRoot: string | undefined,
+): Record<string, string> {
+  const dependencies: Record<string, string> = { [profile.runtime.dshPackageFamily]: profile.runtime.dshVersion };
+  for (const bundle of bundles) {
+    if (!profileLocalDependency(bundle, fixtureRoot)) continue;
+    dependencies[bundle.name] = profileDependencySpec(bundle, profileDir);
+  }
+  if (fixtureRoot) return Object.fromEntries(Object.entries(dependencies).sort(([a], [b]) => a.localeCompare(b)));
+
+  // 外部 bundle 的根运行时显式提供 peer 时，profile 必须同样固定它，避免锁文件
+  // 在独立 profile 中重新选择与官方 runtime 不同的预发布版本。
+  const rootPackage = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')) as DependencyPackage;
+  const rootDependencies = rootPackage.dependencies || {};
+  const installationPackages = dshInstallationPackageNames();
+  for (const bundle of bundles) {
+    if (installationPackages.has(bundle.name)) continue;
+    for (const peer of Object.keys(bundle.peerDependencies)) {
+      if (optionalPeer(bundle, peer) || !Object.hasOwn(rootDependencies, peer)) continue;
+      const spec = rootDependencies[peer];
+      if (typeof spec !== 'string' || !spec) fail(`根运行时 peer 版本无效: ${peer}`, 'PROFILE_PEER_INVALID');
+      dependencies[peer] = spec;
+    }
+  }
+  return Object.fromEntries(Object.entries(dependencies).sort(([a], [b]) => a.localeCompare(b)));
 }
 
 function pnpmCommand(root: string): string {
@@ -439,14 +544,14 @@ function pnpmCommand(root: string): string {
   return entry;
 }
 
-function runPnpm(root: string, cwd: string, args: readonly string[]): PnpmResult {
+function runPnpm(root: string, cwd: string, args: readonly string[], { ignoreScripts = true } = {}): PnpmResult {
   const result = spawnSync(process.execPath, [pnpmCommand(root), ...args], {
     cwd,
     encoding: 'utf8',
     timeout: 60_000,
     // 桌面主进程中的 process.execPath 是 Electron，而非 node。让 Electron
     // 显式进入 Node 模式，避免 profile 编译再拉起无窗口的 Electron GUI 并卡住启动。
-    env: { ...process.env, CI: 'true', npm_config_ignore_scripts: 'true', ELECTRON_RUN_AS_NODE: '1' },
+    env: { ...process.env, CI: 'true', npm_config_ignore_scripts: ignoreScripts ? 'true' : 'false', ELECTRON_RUN_AS_NODE: '1' },
   });
   if (result.status !== 0) {
     fail(`pnpm 解析失败: ${(result.stderr || result.stdout || 'unknown error').trim()}`, 'PNPM_RESOLUTION_FAILED', {
@@ -458,9 +563,126 @@ function runPnpm(root: string, cwd: string, args: readonly string[]): PnpmResult
   return { command: `node ${path.relative(root, pnpmCommand(root))} ${args.join(' ')}`, stdout: result.stdout.trim() };
 }
 
+function assertLockCatalog(
+  bundles: readonly Bundle[],
+  lock: Record<string, unknown>,
+  catalogEntries: readonly CatalogEntry[] | undefined,
+  requireCatalog: boolean,
+): void {
+  if (!requireCatalog) return;
+  const packages = lock.packages;
+  if (!packages || typeof packages !== 'object' || Array.isArray(packages))
+    fail('profile lockfile 缺少 packages 解析记录', 'PROFILE_LOCK_PACKAGES_MISSING');
+  for (const bundle of bundles) {
+    if (bundle.source.kind === 'workspace' || dshInstallationPackageNames().has(bundle.name)) continue;
+    const entry = catalogEntries?.find((candidate) => candidate.packageName === bundle.name);
+    const packageKey = `${bundle.name}@${bundle.version}`;
+    const locked = (packages as Record<string, unknown>)[packageKey];
+    const resolution = locked && typeof locked === 'object' && !Array.isArray(locked)
+      ? (locked as Record<string, unknown>).resolution
+      : null;
+    const integrity = resolution && typeof resolution === 'object' && !Array.isArray(resolution)
+      ? (resolution as Record<string, unknown>).integrity
+      : null;
+    if (!entry || typeof integrity !== 'string' || integrity !== entry.integrity)
+      fail(`profile lockfile 与 catalog 完整性不一致: ${bundle.name}`, 'CATALOG_BUNDLE_INTEGRITY', {
+        package: bundle.name,
+        expected: entry?.integrity || null,
+        actual: integrity || null,
+      });
+  }
+}
+
+function lockedPackageIntegrity(lock: Record<string, unknown>, name: string, version: string): string | null {
+  const packages = lock.packages;
+  if (!packages || typeof packages !== 'object' || Array.isArray(packages)) return null;
+  const candidate = (packages as Record<string, unknown>)[`${name}@${version}`];
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+  const resolution = (candidate as Record<string, unknown>).resolution;
+  if (!resolution || typeof resolution !== 'object' || Array.isArray(resolution)) return null;
+  const integrity = (resolution as Record<string, unknown>).integrity;
+  return typeof integrity === 'string' ? integrity : null;
+}
+
+/** 把 profile lock 的 tarball integrity 投影到 resolved manifest 与 SBOM 输入。 */
+function withLockedExternalEvidence(
+  bundles: readonly Bundle[],
+  dependencyClosure: readonly DependencyClosureEntry[],
+  lock: Record<string, unknown>,
+): Readonly<{ bundles: readonly Bundle[]; dependencyClosure: readonly DependencyClosureEntry[] }> {
+  const integrityByPackage = new Map<string, string>();
+  for (const bundle of bundles) {
+    if (bundle.source.kind === 'workspace' || dshInstallationPackageNames().has(bundle.name)) continue;
+    const integrity = lockedPackageIntegrity(lock, bundle.name, bundle.version);
+    if (!integrity) fail(`profile lockfile 缺少外部 bundle 完整性: ${bundle.name}`, 'PROFILE_LOCK_INTEGRITY_MISSING');
+    integrityByPackage.set(bundle.name, integrity);
+  }
+  const apply = <T extends { readonly name: string; readonly source: PackageSource }>(entry: T): T => {
+    const integrity = integrityByPackage.get(entry.name);
+    return integrity ? ({ ...entry, source: { ...entry.source, integrity } } as T) : entry;
+  };
+  return Object.freeze({ bundles: bundles.map(apply), dependencyClosure: dependencyClosure.map(apply) });
+}
+
+function materializeProfile(root: string, profileDir: string): PnpmResult {
+  return runPnpm(
+    root,
+    profileDir,
+    ['install', '--offline', '--frozen-lockfile'],
+    { ignoreScripts: false },
+  );
+}
+
+function projectPnpmLock(root: string, profileDir: string): void {
+  const profilePackage = JSON.parse(fs.readFileSync(path.join(profileDir, 'package.json'), 'utf8')) as DependencyPackage;
+  const dependencies = profilePackage.dependencies || {};
+  const rootLock = readYaml(path.join(root, 'pnpm-lock.yaml'));
+  if (!rootLock || typeof rootLock !== 'object' || Array.isArray(rootLock))
+    fail('根 pnpm lockfile 无效', 'PROFILE_LOCK_SOURCE_INVALID');
+  const source = rootLock as Record<string, unknown>;
+  const importers = source.importers;
+  if (!importers || typeof importers !== 'object' || Array.isArray(importers))
+    fail('根 pnpm lockfile 缺少 importers', 'PROFILE_LOCK_SOURCE_INVALID');
+  const rootImporter = (importers as Record<string, unknown>)['.'];
+  if (!rootImporter || typeof rootImporter !== 'object' || Array.isArray(rootImporter))
+    fail('根 pnpm lockfile 缺少根 importer', 'PROFILE_LOCK_SOURCE_INVALID');
+  const rootDependencies = (rootImporter as Record<string, unknown>).dependencies;
+  if (!rootDependencies || typeof rootDependencies !== 'object' || Array.isArray(rootDependencies))
+    fail('根 pnpm lockfile 缺少根依赖', 'PROFILE_LOCK_SOURCE_INVALID');
+  const lockedDependencies: Record<string, unknown> = {};
+  for (const name of Object.keys(dependencies).sort()) {
+    const resolved = (rootDependencies as Record<string, unknown>)[name];
+    if (!resolved) fail(`根 lockfile 未锁定 profile 依赖: ${name}`, 'PROFILE_LOCK_SOURCE_MISSING');
+    lockedDependencies[name] = resolved;
+  }
+  writeText(
+    path.join(profileDir, 'pnpm-lock.yaml'),
+    `${stringifyYaml({
+      ...source,
+      importers: { '.': { dependencies: lockedDependencies } },
+    })}\n`,
+  );
+}
+
+function rootAutoInstallPeers(root: string): boolean {
+  const rootLock = readYaml(path.join(root, 'pnpm-lock.yaml'));
+  if (!rootLock || typeof rootLock !== 'object' || Array.isArray(rootLock))
+    fail('根 pnpm lockfile 无效', 'PROFILE_LOCK_SOURCE_INVALID');
+  const settings = (rootLock as Record<string, unknown>).settings;
+  if (settings === undefined) return true;
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings))
+    fail('根 pnpm lockfile settings 无效', 'PROFILE_LOCK_SOURCE_INVALID');
+  const autoInstallPeers = (settings as Record<string, unknown>).autoInstallPeers;
+  if (autoInstallPeers === undefined) return true;
+  if (typeof autoInstallPeers !== 'boolean')
+    fail('根 pnpm lockfile autoInstallPeers 无效', 'PROFILE_LOCK_SOURCE_INVALID');
+  return autoInstallPeers;
+}
+
 function resolvePnpmLock(
   root: string,
   profileDir: string,
+  { fixtureRoot }: { readonly fixtureRoot?: string } = {},
 ): {
   readonly generated: PnpmResult;
   readonly frozen: PnpmResult;
@@ -471,9 +693,19 @@ function resolvePnpmLock(
   // 临时 profile 与产物保持相同父目录层级，file/workspace 依赖的相对来源不会被改写。
   const scratchRoot = fs.mkdtempSync(path.join(path.dirname(profileDir), '.dsh-forge-resolve-'));
   const scratchProfile = path.join(scratchRoot, 'profile');
-  fs.cpSync(profileDir, scratchProfile, { recursive: true, dereference: true });
+  fs.cpSync(profileDir, scratchProfile, {
+    recursive: true,
+    dereference: true,
+    // 锁文件解析只依赖 profile 声明，不能把上次物化的安装状态带入临时目录。
+    filter: (source) => path.basename(source) !== 'node_modules',
+  });
   try {
-    const generated = runPnpm(root, scratchProfile, [...common, '--no-frozen-lockfile']);
+    let generated: PnpmResult;
+    if (fixtureRoot) generated = runPnpm(root, scratchProfile, [...common, '--no-frozen-lockfile']);
+    else {
+      projectPnpmLock(root, scratchProfile);
+      generated = { command: 'project profile pnpm-lock.yaml from verified workspace lockfile', stdout: '' };
+    }
     const frozen = runPnpm(root, scratchProfile, [...common, '--frozen-lockfile']);
     const lockFile = path.join(scratchProfile, 'pnpm-lock.yaml');
     if (!fs.existsSync(lockFile)) fail('pnpm 未生成锁文件', 'PNPM_LOCK_MISSING');
@@ -516,7 +748,13 @@ export function compileProfile({
   if (profile.name !== selectedProfile)
     fail(`profile 目录与 manifest 名称不一致: ${selectedProfile} / ${profile.name}`, 'PROFILE_UNSELECTABLE');
   const profilePatch = readPatch(profile.patchFile);
-  const collected = collectBundles(profile, root, { fixtureRoot });
+  const officialProfile = profile.name === distribution.defaultProfile;
+  const catalog = fixtureRoot ? null : loadStaticCatalog(path.join(root, 'catalog', 'catalog.yml'));
+  const collected = collectBundles(profile, root, {
+    fixtureRoot,
+    catalogEntries: catalog?.entries,
+    requireCatalog: officialProfile,
+  });
   const input = inputSummary(
     distribution,
     profile,
@@ -524,17 +762,14 @@ export function compileProfile({
     profilePatch,
     collected.dependencyClosure,
     collected.allowBuilds,
+    collected.buildPolicy,
   );
   const inputDigest = digest(input);
   const outputDir = path.join(artifactsDir, distribution.id, profile.name, inputDigest);
   const profileDir = path.join(outputDir, 'profile');
   fs.mkdirSync(profileDir, { recursive: true, mode: 0o700 });
 
-  const dependencies = Object.fromEntries(
-    collected.bundles
-      .filter((bundle) => profileLocalDependency(bundle, fixtureRoot))
-      .map((bundle) => [bundle.name, profileDependencySpec(bundle, profileDir)]),
-  );
+  const dependencies = profilePackageDependencies(root, profile, collected.bundles, profileDir, fixtureRoot);
   writeJson(path.join(profileDir, 'package.json'), {
     name: `${distribution.packageScope}/${profile.name}-profile`,
     private: true,
@@ -550,9 +785,17 @@ export function compileProfile({
   writeText(path.join(profileDir, 'cordis.yml'), '[]\n');
   writeText(
     path.join(profileDir, 'pnpm-workspace.yaml'),
-    `${stringifyYaml({ packages: ['.'], nodeLinker: 'hoisted', autoInstallPeers: false, onlyBuiltDependencies: collected.allowBuilds })}\n`,
+    `${stringifyYaml({
+      packages: ['.'],
+      nodeLinker: 'hoisted',
+      autoInstallPeers: rootAutoInstallPeers(root),
+      allowBuilds: collected.buildPolicy,
+    })}\n`,
   );
-  const pnpmEvidence = resolvePnpmLock(root, profileDir);
+  const pnpmEvidence = resolvePnpmLock(root, profileDir, { fixtureRoot });
+  assertLockCatalog(collected.bundles, pnpmEvidence.lock, catalog?.entries, officialProfile);
+  const materialized = materializeProfile(root, profileDir);
+  const evidence = withLockedExternalEvidence(collected.bundles, collected.dependencyClosure, pnpmEvidence.lock);
 
   const resolved: ResolvedManifest = {
     schema: 'dsh-forge/resolved-manifest@1',
@@ -562,6 +805,7 @@ export function compileProfile({
     pnpmEvidence: {
       generated: pnpmEvidence.generated.command,
       frozen: pnpmEvidence.frozen.command,
+      materialized: materialized.command,
       lockfileDigest: pnpmEvidence.lockfileDigest,
     },
     distribution: {
@@ -575,7 +819,7 @@ export function compileProfile({
       updates: distribution.updates,
     },
     profile: { name: profile.name, runtime: profile.runtime, bundles: profile.bundles },
-    bundles: collected.bundles.map((bundle) => ({
+    bundles: evidence.bundles.map((bundle) => ({
       name: bundle.name,
       version: bundle.version,
       source: bundle.source,
@@ -590,19 +834,24 @@ export function compileProfile({
       scripts: bundle.scripts,
       allowBuilds: bundle.allowBuilds || [],
     })),
-    dependencyClosure: collected.dependencyClosure,
+    dependencyClosure: evidence.dependencyClosure,
     allowBuilds: collected.allowBuilds,
     lockfile: { digest: pnpmEvidence.lockfileDigest, version: pnpmEvidence.lock.lockfileVersion ?? null },
     input,
   };
   writeJson(path.join(outputDir, 'resolved-manifest.json'), resolved);
-  const sbomPackages = collected.dependencyClosure.map((dependency) => ({
+  const sbomPackages = evidence.dependencyClosure.map((dependency) => ({
     name: dependency.name,
     versionInfo: dependency.version || 'NOASSERTION',
     licenseConcluded: dependency.license,
     downloadLocation: dependency.source.path || 'NOASSERTION',
     checksums: dependency.source.integrity
-      ? [{ algorithm: 'SHA256', checksumValue: dependency.source.integrity.replace(/^sha256-/, '') }]
+      ? [
+        {
+          algorithm: dependency.source.integrity.startsWith('sha512-') ? 'SHA512' : 'SHA256',
+          checksumValue: dependency.source.integrity.replace(/^sha(?:256|512)-/, ''),
+        },
+      ]
       : [],
   }));
   writeJson(path.join(outputDir, 'sbom.input.json'), {
@@ -613,7 +862,7 @@ export function compileProfile({
   });
   writeText(
     path.join(outputDir, 'THIRD-PARTY-NOTICES.txt'),
-    collected.dependencyClosure
+    evidence.dependencyClosure
       .map((dependency) => `${dependency.name}@${dependency.version || 'unknown'}\nLicense: ${dependency.license}\n`)
       .join('\n'),
   );
@@ -621,8 +870,8 @@ export function compileProfile({
     root,
     distribution,
     profile,
-    bundles: collected.bundles,
-    dependencyClosure: collected.dependencyClosure,
+    bundles: evidence.bundles,
+    dependencyClosure: evidence.dependencyClosure,
     inputDigest,
     outputDir,
     profileDir,

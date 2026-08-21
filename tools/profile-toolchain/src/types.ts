@@ -139,9 +139,14 @@ export interface RuntimeTarget {
   readonly nativeFiles?: readonly NativeFile[];
 }
 
+export type NativeFileRoot = 'app.asar.unpacked' | 'dsh-forge/profile' | 'dsh-forge/runtime';
+
 export interface NativeFile {
+  /** 打包资源中的受限根目录，path 永远相对于该根目录。 */
+  readonly root: NativeFileRoot;
   readonly path: string;
-  readonly executable?: boolean;
+  readonly executable: boolean;
+  readonly sha256: string;
 }
 
 export interface RuntimeManifest {

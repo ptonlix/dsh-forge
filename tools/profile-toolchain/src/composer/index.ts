@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseYaml, readYaml, stringifyYaml } from '../core/yaml.ts';
 import { fail } from '../core/errors.ts';
-import { resolvePackageDirectory, type CompiledProfile } from '../compiler/index.ts';
+import { type CompiledProfile } from '../compiler/index.ts';
 import { errorMessage } from '../types.ts';
 import type { JsonObject, Overlay } from '../types.ts';
 
@@ -30,7 +30,8 @@ const WEB_BUNDLE = '@deepseek-ai/dsh-web-app';
 export interface ConfigEntry {
   readonly id?: string;
   readonly name?: string;
-  readonly disabled?: boolean;
+  /** `!!js` 条件会在真实 Loader 中求值，静态转储不能将其误判为布尔值。 */
+  readonly disabled?: boolean | string;
   readonly inject?: string | readonly string[];
   readonly provide?: readonly string[];
   readonly provides?: readonly string[];
@@ -40,7 +41,8 @@ export interface ConfigEntry {
 export interface EntryActivation {
   readonly id: string | null;
   readonly name: string | null;
-  readonly active: boolean;
+  /** `null` 表示 entry 依赖运行时表达式决定是否禁用。 */
+  readonly active: boolean | null;
   readonly requires: readonly string[];
   readonly missing: readonly string[];
 }
@@ -147,6 +149,7 @@ function dshBin(root: string): string {
 function verifyEntryPackages(entries: readonly ConfigEntry[], compiled: CompiledProfile): ComposeDiagnostic[] {
   const diagnostics: ComposeDiagnostic[] = [];
   const ids = new Set();
+  const resolvedPackages = new Set(compiled.dependencyClosure.map((dependency) => dependency.name));
   for (const entry of entries) {
     if (!entry || typeof entry !== 'object') continue;
     if (entry.id) {
@@ -156,7 +159,10 @@ function verifyEntryPackages(entries: readonly ConfigEntry[], compiled: Compiled
     if (typeof entry.name !== 'string' || entry.name.startsWith('.')) continue;
     const segments = entry.name.split('/');
     const packageName = entry.name.startsWith('@') ? segments.slice(0, 2).join('/') : segments[0]!;
-    if (!resolvePackageDirectory(packageName, compiled.root))
+    const launcherPackage =
+      packageName === '@dsh-forge/desktop-services-local' &&
+      fs.existsSync(path.join(compiled.root, 'packages', 'desktop-services-local', 'package.json'));
+    if (!resolvedPackages.has(packageName) && !launcherPackage)
       diagnostics.push({ code: 'ENTRY_PACKAGE_UNRESOLVED', id: entry.id || null, package: entry.name });
   }
   if (!ids.has('dsh-forge-desktop-services'))
@@ -190,9 +196,9 @@ export function entryActivation(
   for (const entry of entries) {
     const requires = Array.isArray(entry.inject) ? entry.inject : entry.inject ? [entry.inject] : [];
     const missing = requires.filter((service) => !available.has(service));
-    const active = !entry.disabled && missing.length === 0;
+    const active = typeof entry.disabled === 'string' ? null : !entry.disabled && missing.length === 0;
     activation.push({ id: entry.id || null, name: entry.name || null, active, requires, missing });
-    for (const service of entry.provide || entry.provides || []) if (active) available.add(service);
+    for (const service of entry.provide || entry.provides || []) if (active === true) available.add(service);
   }
   return activation;
 }

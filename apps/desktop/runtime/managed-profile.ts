@@ -4,12 +4,15 @@ import * as path from 'node:path';
 
 const MANAGED_PROFILE_SCHEMA = 'dsh-forge/managed-profile@1';
 const MANAGED_PROFILE_MARKER = '.dsh-forge-profile.json';
+const LAUNCHER_FALLBACK_PACKAGES = new Set(['@dsh-forge/desktop-layer', '@dsh-forge/desktop-services-local']);
 
 interface ManagedProfileMarker {
   readonly schema: typeof MANAGED_PROFILE_SCHEMA;
   readonly distributionId: string;
   readonly sourceProfile: string;
   readonly templateDigest: string;
+  /** 受管 profile 的依赖闭包摘要。 */
+  readonly dependencyDigest: string;
 }
 
 /** 发行版 profile 安装完成后的稳定结果。 */
@@ -27,7 +30,8 @@ function isMarker(value: unknown): value is ManagedProfileMarker {
     record.schema === MANAGED_PROFILE_SCHEMA &&
     typeof record.distributionId === 'string' &&
     typeof record.sourceProfile === 'string' &&
-    typeof record.templateDigest === 'string'
+    typeof record.templateDigest === 'string' &&
+    typeof record.dependencyDigest === 'string'
   );
 }
 
@@ -60,10 +64,92 @@ function assertDirectory(directory: string, label: string): void {
 /**
  * 计算 template/profile 的内容摘要。
  *
- * `node_modules` 是安装状态而非 profile 声明，不参与摘要也不会写入用户 Home；
- * 任何符号链接都被拒绝，避免发行模板或已安装 profile 间接引用任意本地路径。
+ * 普通 profile 文件不允许符号链接；materialized `node_modules` 单独验证其
+ * pnpm 闭包内相对链接，并将闭包摘要纳入受管 profile 的版本事实。
  */
-function directoryDigest(root: string): string {
+function inside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+/** 仅忽略由 launcher 临时注入且在使用前会重新验证的 fallback 包。 */
+function isIgnoredDependencyPath(dependencies: string, candidate: string): boolean {
+  const relative = path.relative(dependencies, candidate).split(path.sep).join('/');
+  return path.basename(candidate) === '.bin' || LAUNCHER_FALLBACK_PACKAGES.has(relative);
+}
+
+/**
+ * 只接受 pnpm 闭包内部的相对链接。复制到 DSH Home 后这些链接仍以
+ * `node_modules` 为根解析，不会保留构建机 store 或工作区的绝对引用。
+ */
+function assertSafeDependencies(directory: string): void {
+  const dependencies = path.join(directory, 'node_modules');
+  if (!pathExists(dependencies)) return;
+  assertDirectory(dependencies, 'profile node_modules');
+  const root = fs.realpathSync(dependencies);
+  const visit = (current: string): void => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      // pnpm 的 .bin 是 CLI shim，不属于 Node/Cordis 的模块解析闭包。
+      const file = path.join(current, entry.name);
+      if (isIgnoredDependencyPath(dependencies, file)) continue;
+      const stat = fs.lstatSync(file);
+      if (stat.isSymbolicLink()) {
+        const link = fs.readlinkSync(file);
+        if (path.isAbsolute(link)) throw new Error(`profile 依赖不允许绝对链接: ${file}`);
+        let target: string;
+        try {
+          target = fs.realpathSync(file);
+        } catch {
+          throw new Error(`profile 依赖包含悬挂链接: ${file}`);
+        }
+        if (!inside(root, target)) throw new Error(`profile 依赖链接越出闭包: ${file}`);
+        continue;
+      }
+      if (stat.isDirectory()) visit(file);
+    }
+  };
+  visit(dependencies);
+}
+
+function dependencyDigest(root: string): string {
+  const dependencies = path.join(root, 'node_modules');
+  if (!pathExists(dependencies)) return 'sha256-none';
+  assertSafeDependencies(root);
+  const hash = crypto.createHash('sha256');
+  const visited = new Set<string>();
+  let hasRelevantEntry = false;
+  const visit = (directory: string, relative: string): void => {
+    const real = fs.realpathSync(directory);
+    if (visited.has(real)) return;
+    visited.add(real);
+    const entries = fs
+      .readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const file = path.join(directory, entry.name);
+      if (isIgnoredDependencyPath(dependencies, file)) continue;
+      const child = relative ? `${relative}/${entry.name}` : entry.name;
+      const stat = fs.lstatSync(file);
+      if (stat.isSymbolicLink()) {
+        hasRelevantEntry = true;
+        // 保留经过 assertSafeDependencies 校验的相对链接文本，避免 realpath
+        // 在 macOS /var 与 /private/var 别名下把临时绝对路径写进摘要。
+        hash.update(`link\0${child}\0${fs.readlinkSync(file)}\0`);
+      } else if (stat.isDirectory()) {
+        visit(file, child);
+      } else if (stat.isFile()) {
+        hasRelevantEntry = true;
+        hash.update(`file\0${child}\0${(stat.mode & 0o777).toString(8)}\0`);
+        hash.update(fs.readFileSync(file));
+      }
+    }
+  };
+  visit(dependencies, 'node_modules');
+  if (!hasRelevantEntry) return 'sha256-none';
+  return `sha256-${hash.digest('hex')}`;
+}
+
+function directoryDigest(root: string): Readonly<{ templateDigest: string; dependencyDigest: string }> {
   assertDirectory(root, 'profile 目录');
   const hash = crypto.createHash('sha256');
   const visit = (directory: string, relative: string): void => {
@@ -88,22 +174,14 @@ function directoryDigest(root: string): string {
     }
   };
   visit(root, '');
-  return `sha256-${hash.digest('hex')}`;
+  const closure = dependencyDigest(root);
+  hash.update(`dependencies\0${closure}\0`);
+  return Object.freeze({ templateDigest: `sha256-${hash.digest('hex')}`, dependencyDigest: closure });
 }
 
 function profileNameFor(sourceProfile: string): string {
   if (!/^[a-z][a-z0-9-]{1,63}$/.test(sourceProfile)) throw new Error(`profile 名称无效: ${sourceProfile}`);
   return sourceProfile;
-}
-
-/**
- * 发行版 ID 是目录所有权凭据；sourceProfile 仅记录本次模板来源。
- *
- * 同一发行版可以在保持已安装目录不变时重命名 source profile。把来源名称也作为
- * 所有权条件会使这类正常迁移被误判为用户目录，从而无法更新已有受管 profile。
- */
-function ownsProfile(marker: ManagedProfileMarker | null, distributionId: string): boolean {
-  return marker?.distributionId === distributionId;
 }
 
 /** 使用临时文件和 rename 刷新 marker，避免崩溃后留下半个归属记录。 */
@@ -118,9 +196,11 @@ function writeMarker(file: string, marker: ManagedProfileMarker): void {
 }
 
 function copyTemplate(source: string, stage: string, marker: ManagedProfileMarker): void {
+  assertSafeDependencies(source);
   fs.cpSync(source, stage, {
     recursive: true,
     dereference: false,
+    verbatimSymlinks: true,
     filter: (candidate) => {
       const name = path.basename(candidate);
       if (name === 'node_modules' || name === MANAGED_PROFILE_MARKER) return false;
@@ -129,6 +209,16 @@ function copyTemplate(source: string, stage: string, marker: ManagedProfileMarke
       return true;
     },
   });
+  const dependencies = path.join(source, 'node_modules');
+  if (pathExists(dependencies)) {
+    // .bin 与 launcher 临时 fallback 都不属于 profile 闭包；其余链接均已通过校验。
+    fs.cpSync(dependencies, path.join(stage, 'node_modules'), {
+      recursive: true,
+      dereference: false,
+      verbatimSymlinks: true,
+      filter: (candidate) => !isIgnoredDependencyPath(dependencies, candidate),
+    });
+  }
   writeMarker(path.join(stage, MANAGED_PROFILE_MARKER), marker);
 }
 
@@ -146,8 +236,8 @@ function backupPath(dshHome: string, profileName: string): string {
  * 将发行版 profile 安装到共享 DSH Home 中独占的命名空间。
  *
  * 已安装目录使用 `sourceProfile`，例如 `developer` 会安装为
- * `~/.dsh/profiles/developer`。发行版 ID 证明目录归属，来源 profile 和模板摘要
- * 记录安装版本；因此已有无归属标记或属于其他发行版的同名目录一律拒绝覆盖。
+ * `~/.dsh/profiles/developer`。发行版 ID、来源 profile 和模板摘要记录安装版本；
+ * 因此已有缺少当前 marker、归属其他发行版或来源不一致的同名目录一律拒绝覆盖。
  * 升级前的受管 profile 会保留到 Home 下的备份目录，确保写入失败或发布回退时
  * 仍可人工恢复。
  */
@@ -165,12 +255,13 @@ export function ensureManagedProfile({
   const sourceDirectory = path.resolve(source);
   const home = path.resolve(dshHome);
   const profileName = profileNameFor(sourceProfile);
-  const templateDigest = directoryDigest(sourceDirectory);
+  const template = directoryDigest(sourceDirectory);
   const marker: ManagedProfileMarker = Object.freeze({
     schema: MANAGED_PROFILE_SCHEMA,
     distributionId,
     sourceProfile,
-    templateDigest,
+    templateDigest: template.templateDigest,
+    dependencyDigest: template.dependencyDigest,
   });
   const profilesDirectory = path.join(home, 'profiles');
   const destination = path.join(profilesDirectory, profileName);
@@ -180,11 +271,14 @@ export function ensureManagedProfile({
   assertDirectory(destination, '已安装 profile');
   if (destinationExists) {
     const existing = readMarker(markerFile);
-    if (!ownsProfile(existing, distributionId))
-      throw new Error(`拒绝覆盖非本发行版管理的 profile: ${profileName}`);
-    const currentDigest = directoryDigest(destination);
-    if (currentDigest === templateDigest && fs.existsSync(path.join(destination, 'package.json'))) {
-      if (existing?.sourceProfile !== sourceProfile || existing.templateDigest !== templateDigest)
+    if (existing?.distributionId !== distributionId || existing.sourceProfile !== sourceProfile)
+      throw new Error(`拒绝覆盖不符合当前发行版受管契约的 profile: ${profileName}`);
+    const current = directoryDigest(destination);
+    if (current.templateDigest === template.templateDigest && fs.existsSync(path.join(destination, 'package.json'))) {
+      if (
+        existing.templateDigest !== template.templateDigest ||
+        existing.dependencyDigest !== template.dependencyDigest
+      )
         writeMarker(markerFile, marker);
       return Object.freeze({ directory: destination, profileName, installed: false, updated: false });
     }

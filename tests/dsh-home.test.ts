@@ -130,11 +130,11 @@ describe('发行版受管 profile', () => {
         distributionId: 'dsh-forge-official',
         sourceProfile: 'dsh-forge-official',
       }),
-    ).toThrow(/拒绝覆盖非本发行版管理的 profile/);
+    ).toThrow(/拒绝覆盖不符合当前发行版受管契约的 profile/);
   });
 
-  it('同一发行版的旧来源标记会刷新为当前 profile', () => {
-    const root = temporaryDirectory('dsh-forge-profile-marker-migration-');
+  it('拒绝缺少当前闭包摘要的旧受管 marker', () => {
+    const root = temporaryDirectory('dsh-forge-profile-legacy-marker-');
     const template = path.join(root, 'template');
     const dshHome = path.join(root, 'home');
     const destination = path.join(dshHome, 'profiles', 'dsh-forge-official');
@@ -145,23 +145,149 @@ describe('发行版受管 profile', () => {
       `${JSON.stringify({
         schema: 'dsh-forge/managed-profile@1',
         distributionId: 'dsh-forge-official',
-        sourceProfile: 'official',
+        sourceProfile: 'dsh-forge-official',
         templateDigest: 'sha256-old',
       })}\n`,
     );
 
-    const result = ensureManagedProfile({
+    expect(() =>
+      ensureManagedProfile({
+        source: template,
+        dshHome,
+        distributionId: 'dsh-forge-official',
+        sourceProfile: 'dsh-forge-official',
+      }),
+    ).toThrow(/拒绝覆盖不符合当前发行版受管契约的 profile/);
+  });
+
+  it('复制闭包内相对 pnpm 链接并将依赖摘要写入受管 marker', () => {
+    const root = temporaryDirectory('dsh-forge-profile-dependencies-');
+    const template = path.join(root, 'template');
+    const dshHome = path.join(root, 'home');
+    writeProfile(template, 'dependencies');
+    const packageRoot = path.join(template, 'node_modules', '.pnpm', 'fixture@1.0.0', 'node_modules', 'fixture');
+    writeFile(path.join(packageRoot, 'package.json'), '{"name":"fixture","version":"1.0.0"}\n');
+    fs.symlinkSync('.pnpm/fixture@1.0.0/node_modules/fixture', path.join(template, 'node_modules', 'fixture'), 'dir');
+
+    const installed = ensureManagedProfile({
+      source: template,
+      dshHome,
+      distributionId: 'dsh-forge-official',
+      sourceProfile: 'dsh-forge-official',
+    });
+    const copied = path.join(installed.directory, 'node_modules', 'fixture');
+    expect(fs.lstatSync(copied).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(copied)).toBe('.pnpm/fixture@1.0.0/node_modules/fixture');
+    expect(JSON.parse(fs.readFileSync(path.join(copied, 'package.json'), 'utf8'))).toMatchObject({ name: 'fixture' });
+    expect(JSON.parse(fs.readFileSync(path.join(installed.directory, '.dsh-forge-profile.json'), 'utf8')).dependencyDigest).toMatch(
+      /^sha256-/,
+    );
+
+    expect(
+      ensureManagedProfile({
+        source: template,
+        dshHome,
+        distributionId: 'dsh-forge-official',
+        sourceProfile: 'dsh-forge-official',
+      }),
+    ).toMatchObject({ installed: false, updated: false });
+  });
+
+  it('发现已安装依赖源码漂移后原子恢复受管闭包', () => {
+    const root = temporaryDirectory('dsh-forge-profile-content-digest-');
+    const template = path.join(root, 'template');
+    const dshHome = path.join(root, 'home');
+    writeProfile(template, 'content-digest');
+    writeFile(path.join(template, 'node_modules', 'fixture', 'package.json'), '{"name":"fixture","version":"1.0.0"}\n');
+    writeFile(path.join(template, 'node_modules', 'fixture', 'index.js'), 'module.exports = "original";\n');
+
+    const installed = ensureManagedProfile({
+      source: template,
+      dshHome,
+      distributionId: 'dsh-forge-official',
+      sourceProfile: 'dsh-forge-official',
+    });
+    const installedEntry = path.join(installed.directory, 'node_modules', 'fixture', 'index.js');
+    writeFile(installedEntry, 'module.exports = "tampered";\n');
+
+    const repaired = ensureManagedProfile({
       source: template,
       dshHome,
       distributionId: 'dsh-forge-official',
       sourceProfile: 'dsh-forge-official',
     });
 
-    expect(result).toMatchObject({ installed: false, updated: false });
-    expect(JSON.parse(fs.readFileSync(path.join(destination, '.dsh-forge-profile.json'), 'utf8'))).toMatchObject({
+    expect(repaired).toMatchObject({ installed: false, updated: true });
+    expect(fs.readFileSync(installedEntry, 'utf8')).toBe('module.exports = "original";\n');
+  });
+
+  it('忽略并且不复制所有层级的 pnpm 绝对 .bin shim', () => {
+    const root = temporaryDirectory('dsh-forge-profile-bin-shim-');
+    const template = path.join(root, 'template');
+    const dshHome = path.join(root, 'home');
+    writeProfile(template, 'bin-shim');
+    const target = path.join(root, 'build', 'cli');
+    writeFile(target, '#!/usr/bin/env node\n');
+    fs.mkdirSync(path.join(template, 'node_modules', '.bin'), { recursive: true, mode: 0o700 });
+    fs.symlinkSync(target, path.join(template, 'node_modules', '.bin', 'fixture-cli'), 'file');
+    fs.mkdirSync(path.join(template, 'node_modules', 'fixture', 'node_modules', '.bin'), { recursive: true, mode: 0o700 });
+    fs.symlinkSync(target, path.join(template, 'node_modules', 'fixture', 'node_modules', '.bin', 'fixture-cli'), 'file');
+
+    const installed = ensureManagedProfile({
+      source: template,
+      dshHome,
       distributionId: 'dsh-forge-official',
       sourceProfile: 'dsh-forge-official',
     });
+
+    expect(fs.existsSync(path.join(installed.directory, 'node_modules', '.bin'))).toBe(false);
+    expect(fs.existsSync(path.join(installed.directory, 'node_modules', 'fixture', 'node_modules', '.bin'))).toBe(false);
+  });
+
+  it('不将启动时注入的 desktop fallback 纳入 profile 闭包', () => {
+    const root = temporaryDirectory('dsh-forge-profile-desktop-fallback-');
+    const template = path.join(root, 'template');
+    const dshHome = path.join(root, 'home');
+    writeProfile(template, 'desktop-fallback');
+    const installed = ensureManagedProfile({
+      source: template,
+      dshHome,
+      distributionId: 'dsh-forge-official',
+      sourceProfile: 'dsh-forge-official',
+    });
+    const fallbackRoot = path.join(root, 'runtime');
+    writeFile(path.join(fallbackRoot, 'desktop-layer', 'package.json'), '{"name":"@dsh-forge/desktop-layer"}\n');
+    const fallback = path.join(installed.directory, 'node_modules', '@dsh-forge');
+    fs.mkdirSync(fallback, { recursive: true, mode: 0o700 });
+    fs.symlinkSync(path.join(fallbackRoot, 'desktop-layer'), path.join(fallback, 'desktop-layer'), 'dir');
+
+    const repeated = ensureManagedProfile({
+      source: template,
+      dshHome,
+      distributionId: 'dsh-forge-official',
+      sourceProfile: 'dsh-forge-official',
+    });
+
+    expect(repeated).toMatchObject({ installed: false, updated: false });
+  });
+
+  it('拒绝越出 profile 闭包的依赖链接', () => {
+    const root = temporaryDirectory('dsh-forge-profile-escaped-dependency-');
+    const template = path.join(root, 'template');
+    const dshHome = path.join(root, 'home');
+    writeProfile(template, 'escaped');
+    writeFile(path.join(root, 'outside', 'package.json'), '{}\n');
+    fs.mkdirSync(path.join(template, 'node_modules'), { recursive: true, mode: 0o700 });
+    fs.symlinkSync('../../outside', path.join(template, 'node_modules', 'outside'), 'dir');
+
+    expect(() =>
+      ensureManagedProfile({
+        source: template,
+        dshHome,
+        distributionId: 'dsh-forge-official',
+        sourceProfile: 'dsh-forge-official',
+      }),
+    ).toThrow(/链接越出闭包/);
   });
 });
 

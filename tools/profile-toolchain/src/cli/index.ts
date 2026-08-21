@@ -160,10 +160,13 @@ export function main(command = process.argv[2], profileName = process.argv[3]): 
         ? JSON.parse(fs.readFileSync(path.join(artifact, 'runtime-manifest.json'), 'utf8'))
         : null;
     const inspection = runtime ? inspectPackage(runtime) : { valid: false };
-    const smoke =
-      artifact && fs.existsSync(path.join(artifact, 'package-smoke.json'))
-        ? JSON.parse(fs.readFileSync(path.join(artifact, 'package-smoke.json'), 'utf8'))
-        : { healthy: false };
+    const smokes = artifact
+      ? fs
+        .readdirSync(artifact)
+        .filter((file) => /^package-smoke\.(?:darwin|win32)-(?:arm64|x64|ia32)\.json$/.test(file))
+        .sort()
+        .map((file) => JSON.parse(fs.readFileSync(path.join(artifact, file), 'utf8')))
+      : [];
     const evidence =
       artifact && fs.existsSync(path.join(artifact, 'package-evidence.json'))
         ? verifyEvidence(JSON.parse(fs.readFileSync(path.join(artifact, 'package-evidence.json'), 'utf8')), {
@@ -178,7 +181,7 @@ export function main(command = process.argv[2], profileName = process.argv[3]): 
       catalogVerified: catalog,
       manifest: runtime,
       updateConfigured: compiled.distribution.updates.enabled,
-      packageSmoke: smoke,
+      packageSmokes: smokes,
       evidence,
     });
     json(result);

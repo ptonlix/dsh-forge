@@ -21,6 +21,7 @@ test('真实 DSH dump 按 bundle 顺序临时注入 desktop layer', () => {
     '@deepseek-ai/dsh-base',
     '@deepseek-ai/dsh-web-app',
     '@dsh-forge/desktop-layer',
+    'dsh-better-sidebar',
   ]);
   assert.equal(
     dump.entries.some(
@@ -74,4 +75,5 @@ test('launcher overlay 是真实 dump 的最后一层，entry 激活不依赖列
   ]);
   assert.equal(activation[0]?.active, false);
   assert.equal(activation[1]?.active, true);
+  assert.equal(entryActivation([{ id: 'conditional', disabled: 'process.platform === \'win32\'' }])[0]?.active, null);
 });

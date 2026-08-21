@@ -18,6 +18,8 @@ import {
   generateEvidence,
   inspectPackage,
   releaseGate,
+  runtimePaths,
+  sha256,
   UpdateCoordinator,
   validateRuntimeTargets,
   verifyChannelMetadata,
@@ -27,6 +29,22 @@ import { ForgeError } from '@dsh-forge/profile-toolchain/core/errors';
 import type { RuntimeManifest } from '@dsh-forge/profile-toolchain/types';
 
 const root = path.resolve(__dirname, '..');
+
+function passingSmoke(os: 'darwin' | 'win32', architecture: 'arm64' | 'x64') {
+  return {
+    healthy: true,
+    nativeEvidence: {
+      schema: 'dsh-forge/native-verification@1',
+      target: { os, architecture },
+      electron: '43.4.0',
+      electronAbi: '148',
+      runtimeManifestSha256: '0'.repeat(64),
+      nativeFiles: [],
+      result: 'passed',
+      verifiedAt: '2026-08-21T00:00:00.000Z',
+    },
+  };
+}
 
 test('catalog 是静态审计快照且明确 trusted-in-process 非隔离语义', () => {
   const catalog = loadStaticCatalog(path.join(root, 'catalog/catalog.yml'));
@@ -45,6 +63,36 @@ test('catalog 是静态审计快照且明确 trusted-in-process 非隔离语义'
   const changed = JSON.parse(JSON.stringify(catalog));
   changed.entries[0].capabilities.push('newCapability');
   assert.equal(requiresReaudit(firstEntry, changed.entries[0]!), true);
+  const sidebar = catalog.entries.find((entry) => entry.packageName === 'dsh-better-sidebar');
+  assert.deepEqual(sidebar?.dependencies, [
+    '@codemirror/commands',
+    '@codemirror/lang-cpp',
+    '@codemirror/lang-css',
+    '@codemirror/lang-go',
+    '@codemirror/lang-html',
+    '@codemirror/lang-java',
+    '@codemirror/lang-javascript',
+    '@codemirror/lang-json',
+    '@codemirror/lang-markdown',
+    '@codemirror/lang-php',
+    '@codemirror/lang-python',
+    '@codemirror/lang-rust',
+    '@codemirror/lang-sql',
+    '@codemirror/lang-xml',
+    '@codemirror/lang-yaml',
+    '@codemirror/language',
+    '@codemirror/legacy-modes',
+    '@codemirror/search',
+    '@codemirror/state',
+    '@codemirror/view',
+    '@lezer/highlight',
+    'clsx',
+    'mermaid',
+    'node-pty',
+    'rxjs',
+    'schemastery',
+    'ws',
+  ]);
   assert.throws(
     () => verifyCatalog(changed, { now: Date.parse('2027-12-31') }),
     (error: unknown) => error instanceof ForgeError && error.code === 'CATALOG_AUDIT_EXPIRED',
@@ -105,9 +153,10 @@ test('运行时闭包检查原生文件，生产发布拒绝未签名 smoke', ()
       {
         os: 'darwin',
         architectures: ['arm64'],
-        nativeFiles: [{ path: 'app.asar.unpacked/native.node', executable: true }],
+        nativeFiles: [],
       },
     ],
+    nativeAddons: [{ root: 'app.asar.unpacked', path: 'native.node', executable: true, sha256: '0'.repeat(64) }],
     signing: { signed: false },
   };
   const inspection = inspectPackage(manifest, { requireSignature: true });
@@ -125,11 +174,61 @@ test('运行时闭包检查原生文件，生产发布拒绝未签名 smoke', ()
         catalogVerified: { valid: true },
         manifest,
         updateConfigured: true,
-        packageSmoke: null,
+        packageSmokes: [],
         evidence: null,
       }),
     (error: unknown) => error instanceof ForgeError && error.code === 'RELEASE_GATE',
   );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('runtime manifest 必须完整记录三个受限资源根中的 native 文件摘要', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-native-manifest-'));
+  const native = path.join(dir, 'app.asar.unpacked', 'native.node');
+  fs.mkdirSync(path.dirname(native), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'profile'));
+  fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+  fs.writeFileSync(path.join(dir, 'profile', 'package.json'), '{}');
+  fs.writeFileSync(native, 'native-addon');
+  const manifest: RuntimeManifest = {
+    packageRoot: dir,
+    targets: [{ os: 'win32', architectures: ['x64'] }],
+    declaredTargets: [{ os: 'win32', architectures: ['x64'] }],
+    nativeAddons: [{ root: 'app.asar.unpacked', path: 'native.node', executable: false, sha256: sha256(native) }],
+    signing: { signed: false },
+  };
+  assert.equal(inspectPackage(manifest).valid, true);
+  const drift = {
+    ...manifest,
+    nativeAddons: [{ ...manifest.nativeAddons![0]!, sha256: 'f'.repeat(64) }],
+  };
+  assert.equal(
+    inspectPackage(drift).failures.some((failure) => failure.code === 'NATIVE_FILE_DIGEST_MISMATCH'),
+    true,
+  );
+  assert.equal(
+    inspectPackage({ ...manifest, nativeAddons: [] }).failures.some((failure) => failure.code === 'NATIVE_FILE_UNDECLARED'),
+    true,
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('非当前平台的预编译 native 文件保留在清单中但不参与当前架构校验', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-native-platform-'));
+  const native = path.join(dir, 'app.asar.unpacked', 'index.win32-x64-msvc.node');
+  fs.mkdirSync(path.dirname(native), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'profile'));
+  fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+  fs.writeFileSync(path.join(dir, 'profile', 'package.json'), '{}');
+  fs.writeFileSync(native, 'windows-native-addon');
+  const manifest: RuntimeManifest = {
+    packageRoot: dir,
+    targets: [{ os: 'darwin', architectures: ['arm64'] }],
+    declaredTargets: [{ os: 'darwin', architectures: ['arm64'] }],
+    nativeAddons: [{ root: 'app.asar.unpacked', path: 'index.win32-x64-msvc.node', executable: false, sha256: sha256(native) }],
+    signing: { signed: false },
+  };
+  assert.equal(inspectPackage(manifest).valid, true);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -147,6 +246,69 @@ test('产物证据要求 SBOM 与许可证通知同时存在', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('发布门禁拒绝缺少声明目标 native evidence 的单平台 smoke', () => {
+  const manifest: RuntimeManifest = {
+    packageRoot: null,
+    targets: [{ os: 'darwin', architectures: ['arm64'] }],
+    declaredTargets: [
+      { os: 'darwin', architectures: ['arm64', 'x64'] },
+      { os: 'win32', architectures: ['x64'] },
+    ],
+    signing: { signed: true },
+  };
+  assert.throws(
+    () =>
+      releaseGate({
+        profileVerified: true,
+        configDump: { healthy: true },
+        packageInspection: { valid: true },
+        catalogVerified: { valid: true },
+        manifest,
+        updateConfigured: true,
+        packageSmokes: [passingSmoke('darwin', 'arm64')],
+        evidence: { valid: true },
+      }),
+    /声明目标缺少 native evidence: darwin-x64.*win32-x64/,
+  );
+});
+
+test('发布门禁接受覆盖全部声明目标的独立 native evidence', () => {
+  const manifest: RuntimeManifest = {
+    packageRoot: null,
+    targets: [{ os: 'darwin', architectures: ['arm64'] }],
+    declaredTargets: [
+      { os: 'darwin', architectures: ['arm64', 'x64'] },
+      { os: 'win32', architectures: ['x64'] },
+    ],
+    signing: { signed: true },
+  };
+  assert.deepEqual(
+    releaseGate({
+      profileVerified: true,
+      configDump: { healthy: true },
+      packageInspection: { valid: true },
+      catalogVerified: { valid: true },
+      manifest,
+      updateConfigured: true,
+      packageSmokes: [passingSmoke('darwin', 'arm64'), passingSmoke('darwin', 'x64'), passingSmoke('win32', 'x64')],
+      evidence: { valid: true },
+    }),
+    { publishable: true },
+  );
+});
+
+test('Windows 可执行文件使用同级 resources 作为 runtime 根', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-windows-runtime-'));
+  const executable = path.join(root, 'DSH Forge.exe');
+  fs.writeFileSync(executable, '');
+  const paths = runtimePaths(executable, 'win32');
+  assert.equal(paths?.application, root);
+  assert.equal(paths?.resources, path.join(root, 'resources'));
+  assert.equal(paths?.profile, path.join(root, 'resources', 'dsh-forge', 'profile'));
+  assert.equal(paths?.runtime, path.join(root, 'resources', 'dsh-forge', 'runtime', 'node_modules'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('平台目标同时覆盖 macOS 与 Windows，并拒绝非法 native 相对路径', () => {
   assert.equal(
     validateRuntimeTargets([
@@ -156,7 +318,14 @@ test('平台目标同时覆盖 macOS 与 Windows，并拒绝非法 native 相对
     true,
   );
   assert.throws(
-    () => validateRuntimeTargets([{ os: 'win32', architectures: ['x64'], nativeFiles: [{ path: '../bad.node' }] }]),
+    () =>
+      validateRuntimeTargets([
+        {
+          os: 'win32',
+          architectures: ['x64'],
+          nativeFiles: [{ root: 'app.asar.unpacked', path: '../bad.node', executable: false, sha256: '0'.repeat(64) }],
+        },
+      ]),
     (error: unknown) => error instanceof ForgeError && error.code === 'RUNTIME_TARGETS',
   );
 });

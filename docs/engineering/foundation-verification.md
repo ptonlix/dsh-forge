@@ -53,3 +53,22 @@ openspec validate "align-repository-with-distribution-design" --type change --st
 当前仍没有 macOS 代码签名/公证身份或 Windows Authenticode 身份；本次 Electron 产物明确标记为
 `unsigned-smoke`，不能作为生产发布证据。Windows 目标、macOS 签名/公证、native ABI 和
 更新发布链路仍需在对应平台构建机与平台身份上执行。
+
+## 官方 profile 发行验证（2026-08-21）
+
+在本机 macOS arm64 对 `dsh-forge-official` 执行了 `profile:resolve`、`profile:verify`、config
+dump、catalog 验证、`package:desktop`、`package:inspect` 和 `package:smoke`。产物中的
+`Contents/Resources/dsh-forge/profile/node_modules` 是从物化 profile 解引用复制的完整闭包；Windows
+产物对应路径为可执行文件同级的 `resources/dsh-forge/profile/node_modules`。package inspect
+在打包 Electron runtime 中通过 Cordis Loader 导入每个 profile entry，覆盖
+`dsh-better-sidebar` 对 `@deepseek-ai/dsh-llm` 等 peer 的动态解析链。
+
+本次 native evidence 以 `native-verification.darwin-arm64.json` 和
+`package-smoke.darwin-arm64.json` 保存，记录 Electron `43.4.0`、ABI `148`，并引用同一 runtime
+manifest 的 SHA-256 `f340ff5fc1afb36b76433611836e8087cacc797b7f67f3e08b653000891462e1`。manifest 与
+evidence 均保存在对应 profile artifact 中，记录所有最终 `.node` 文件和 native helper 的安全相对路径、
+可执行位与 SHA-256。`release:gate` 汇总 artifact 内按目标命名的 smoke evidence，并要求每个声明目标
+都有独立的通过记录。
+
+`darwin-x64` 与 `win32-x64` 没有本机 native evidence，仍是发布门禁。它们不得因本次
+`darwin-arm64` smoke 通过而标记为已验证；`release:gate` 会继续拒绝缺少声明目标 evidence 的发布。

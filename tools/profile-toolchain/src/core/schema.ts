@@ -372,7 +372,7 @@ export function parseProfile(file: string): Profile {
     if (runtime[field] !== RUNTIME_MATRIX[field])
       fail(`runtime.${field} 与首版矩阵不一致: ${runtime[field]}`, 'RUNTIME_MATRIX_DRIFT');
   const bundles = (source.bundles as unknown[]).map((name, index): string => {
-    packageName(name, `profile.bundles[${index}]`);
+    npmPackageName(name, `profile.bundles[${index}]`);
     return name as string;
   });
   if (new Set(bundles).size !== bundles.length) fail('profile.bundles 不允许重复 bundle', 'SCHEMA_DUPLICATE');
@@ -412,7 +412,7 @@ export function parseBundleManifest(directory: string): BundleManifest {
   if (!fs.existsSync(packageFile)) fail(`bundle 缺少 package.json: ${directory}`, 'BUNDLE_REQUIRED');
   const pkg = object(JSON.parse(fs.readFileSync(packageFile, 'utf8')), `${directory}/package.json`) as BundlePackage;
   required(pkg, ['name', 'version', 'license', 'dsh'], `${directory}/package.json`);
-  packageName(pkg.name, 'bundle.name');
+  npmPackageName(pkg.name, 'bundle.name');
   version(pkg.version, 'bundle.version');
   const dsh = pkg.dsh !== undefined ? object(pkg.dsh, 'bundle.dsh') : null;
   const bundle = dsh?.bundle !== undefined ? object(dsh.bundle, 'bundle.dsh.bundle') : null;
@@ -503,7 +503,7 @@ export function parseCatalogEntry(input: unknown): CatalogEntry {
   );
   if (entry.schema !== 'dsh-forge/catalog@1') fail(`不支持的 catalog schema: ${entry.schema}`, 'SCHEMA_UNSUPPORTED');
   identifier(entry.id, 'catalog.id');
-  packageName(entry.packageName, 'catalog.packageName');
+  npmPackageName(entry.packageName, 'catalog.packageName');
   if (typeof entry.version !== 'string' || !STRICT_SEMVER.test(entry.version) || !parseSemVer(entry.version, { loose: false }))
     fail(`catalog 版本必须是精确 SemVer: ${entry.version}`, 'CATALOG_VERSION');
   if (typeof entry.tier !== 'string' || !['L0', 'L1', 'L2'].includes(entry.tier))
