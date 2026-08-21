@@ -30,6 +30,8 @@ const DSH_BOOT_RUNTIME_PACKAGES = Object.freeze([
   '@deepseek-ai/dsh-launch-environment',
 ]);
 
+const SHIPPED_STANDARD_PRESET = path.join('config', 'agent-presets', 'standard', 'agent.cordis.yml');
+
 interface RuntimePaths {
   readonly application: string;
   readonly resources: string;
@@ -252,6 +254,12 @@ function packageEntryExists(paths: RuntimePaths | null, packageName: string): bo
   }
 }
 
+/** 检查打包 runtime 是否带有恢复会话所需的官方 standard 预设。 */
+function shippedStandardPresetExists(paths: RuntimePaths | null): boolean {
+  const dshPackage = resolveRuntimePackage(paths, '@deepseek-ai/dsh');
+  return dshPackage !== null && fs.existsSync(path.join(path.dirname(dshPackage), SHIPPED_STANDARD_PRESET));
+}
+
 /** 使用平台工具检查 native 文件是否包含声明的目标架构。 */
 export function nativeArchitecture(file: string, architecture: RuntimeTarget['architectures'][number]): boolean {
   if (!fs.existsSync(file)) return false;
@@ -296,6 +304,8 @@ export function inspectPackage(
         else if (!packageEntryExists(paths, packageName))
           failures.push({ code: 'RUNTIME_PACKAGE_EXPORT_MISSING', package: packageName });
       }
+      if (!shippedStandardPresetExists(paths))
+        failures.push({ code: 'RUNTIME_PRESET_ASSET_MISSING', path: SHIPPED_STANDARD_PRESET });
       const macBin = path.join(paths.application, 'Contents', 'MacOS');
       if (
         process.platform === 'darwin' &&

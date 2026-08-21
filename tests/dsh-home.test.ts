@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveStartupProfile } from '../apps/desktop/main.ts';
+import { createShippedAgentPresetsPatch, resolveShippedAgentPresetsRoot, resolveStartupProfile } from '../apps/desktop/main.ts';
 import { resolveDesktopDshHome } from '../apps/desktop/runtime/dsh-home.ts';
 import { ensureManagedProfile } from '../apps/desktop/runtime/managed-profile.ts';
 import { ProfileStateStore } from '../apps/desktop/runtime/state-store.ts';
@@ -52,6 +52,34 @@ describe('Desktop DSH Home', () => {
       path: path.join(home, '.dsh'),
       source: 'default',
     });
+  });
+
+  it('从 runtime 应用包注入官方预设根，并保留既有 roster 配置', () => {
+    const runtime = temporaryDirectory('dsh-forge-runtime-presets-');
+    const packageFile = path.join(runtime, 'package.json');
+    const root = path.join(runtime, 'config', 'agent-presets');
+    writeFile(packageFile, '{}\n');
+    writeFile(path.join(root, 'standard', 'agent.cordis.yml'), '[]\n');
+
+    expect(resolveShippedAgentPresetsRoot(packageFile)).toBe(root);
+    expect(
+      createShippedAgentPresetsPatch(packageFile, { default: 'code', includeUserRoot: true }),
+    ).toEqual({
+      id: 'agent-presets',
+      config: {
+        default: 'code',
+        includeUserRoot: true,
+        roots: [{ path: root, trust: 'system' }],
+      },
+    });
+  });
+
+  it('拒绝缺少 standard 组合文件的 runtime', () => {
+    const runtime = temporaryDirectory('dsh-forge-missing-presets-');
+    const packageFile = path.join(runtime, 'package.json');
+    writeFile(packageFile, '{}\n');
+
+    expect(() => resolveShippedAgentPresetsRoot(packageFile)).toThrow(/缺少官方 agent preset/);
   });
 
 });

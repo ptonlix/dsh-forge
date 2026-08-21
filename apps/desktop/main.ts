@@ -25,6 +25,13 @@ interface Patch {
   readonly [key: string]: unknown;
 }
 
+interface ComposedEntry {
+  readonly id?: string;
+  readonly config?: unknown;
+}
+
+type PatchConfig = Readonly<Record<string, unknown>>;
+
 interface LoadedLayer {
   readonly packageName: string;
   readonly patches: readonly Patch[];
@@ -45,6 +52,7 @@ interface DshAppBoot {
   loadProfile(appName: string, profile: string, installAnchor: string, home: string): LoadedProfile;
   loadOverlayPatches(appName: string, file: string): readonly Patch[];
   loadOptionalPatches(appName: string, file: string): readonly Patch[] | null;
+  composeEntries(layers: readonly (readonly Patch[])[]): readonly ComposedEntry[];
   boot(
     appName: string,
     cordisFile: string,
@@ -125,6 +133,44 @@ function dshRequire(runtimeRoot?: string): RuntimeRequire {
     : require.resolve('@deepseek-ai/dsh/package.json');
   if (!fs.existsSync(packageFile)) fail(`缺少 DSH runtime 安装锚点: ${packageFile}`, 'DSH_RUNTIME_MISSING');
   return createRequire(fs.realpathSync(packageFile)) as RuntimeRequire;
+}
+
+/** 判断 Cordis 条目的配置是否可以作为浅层 patch 的基底。 */
+function isPatchConfig(value: unknown): value is PatchConfig {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 解析当前 DSH 安装随包发布的官方预设根目录。
+ *
+ * 预设由 `@deepseek-ai/dsh` 应用包维护，不复制到 DSH Forge；`standard`
+ * 组合文件缺失时必须在 Host 启动前失败，避免服务启动后才以空 roster
+ * 拒绝恢复会话。
+ */
+export function resolveShippedAgentPresetsRoot(dshPackageFile: string): string {
+  const root = path.join(path.dirname(dshPackageFile), 'config', 'agent-presets');
+  const standardComposition = path.join(root, 'standard', 'agent.cordis.yml');
+  if (!fs.existsSync(standardComposition) || !fs.statSync(standardComposition).isFile()) {
+    fail(`DSH runtime 缺少官方 agent preset: ${standardComposition}`, 'DSH_PRESET_ASSETS_MISSING');
+  }
+  return root;
+}
+
+/**
+ * 创建覆盖在 profile 与用户层之上的官方预设 patch。
+ *
+ * 上游 Web bundle 只注册 `agent-presets` 服务；官方预设目录属于应用
+ * 安装资源，必须由启动器作为最后一层注入。保留已有配置以便设置的默认
+ * 预设和用户根目录继续生效，系统根始终来自当前 runtime。
+ */
+export function createShippedAgentPresetsPatch(dshPackageFile: string, config: PatchConfig): Patch {
+  return {
+    id: 'agent-presets',
+    config: {
+      ...config,
+      roots: [{ path: resolveShippedAgentPresetsRoot(dshPackageFile), trust: 'system' }],
+    },
+  };
 }
 
 function describeBootError(error: unknown, depth = 0): string {
@@ -343,6 +389,11 @@ export async function startDshHost({
   patches.push(...loaded.patches);
   const homePatch = appBoot.loadOptionalPatches('dsh-forge-desktop', path.join(home, 'cordis.patch.yml'));
   if (homePatch) patches.push(...homePatch);
+  const agentPresets = appBoot.composeEntries([patches]).find((entry) => entry.id === 'agent-presets');
+  if (agentPresets === undefined || !isPatchConfig(agentPresets.config)) {
+    fail('desktop profile 缺少有效的 agent-presets 配置', 'DESKTOP_AGENT_PRESETS_MISSING');
+  }
+  patches.push(createShippedAgentPresetsPatch(installAnchor, agentPresets.config));
   const port = await allocatePort();
   let ctx: HostContext;
   try {
