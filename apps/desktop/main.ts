@@ -6,7 +6,10 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { compileProfile } from '@dsh-forge/profile-toolchain/compiler';
 import { fail } from '@dsh-forge/profile-toolchain/core/errors';
-import { createDesktopServices } from '@dsh-forge/desktop-plugin';
+import type { CatalogEntry } from '@dsh-forge/profile-toolchain/schema';
+import { createDesktopHostCapability } from '@dsh-forge/desktop-services-local/launcher';
+import type { DesktopProfileSummary } from '@dsh-forge/desktop-services';
+import type { DesktopHostCapability } from '@dsh-forge/desktop-services-local/launcher';
 import { GenerationManager } from './runtime/generation.ts';
 import { ensureManagedProfile } from './runtime/managed-profile.ts';
 import { ProfileStateStore } from './runtime/state-store.ts';
@@ -82,7 +85,6 @@ interface HostInstance {
 }
 
 interface LauncherGenerationState {
-  readonly services: ReturnType<typeof createDesktopServices>;
   readonly host: HostInstance;
   url?: string;
 }
@@ -99,12 +101,13 @@ interface LauncherOptions {
   readonly pnpm?: string;
   readonly pnpmArgs?: readonly string[];
   readonly pnpmEnv?: NodeJS.ProcessEnv;
+  readonly catalog: readonly CatalogEntry[];
 }
 
 export interface HostStartOptions {
   readonly profile: DesktopProfile;
   readonly generationId: string;
-  readonly capability: ReturnType<typeof createDesktopServices>;
+  readonly capability: DesktopHostCapability;
 }
 
 interface RendererWindow {
@@ -298,6 +301,20 @@ function isSelectableProfile(profile: ProfileSummary | undefined): profile is Pr
   return Boolean(profile && profile.exists !== false && profile.selectable && !profile.error);
 }
 
+/** 将 launcher 的可选 profile 字段收敛为跨包公开的完整只读 summary。 */
+function toDesktopServiceProfile(profile: DesktopProfile): DesktopProfileSummary {
+  return Object.freeze({
+    name: profile.name,
+    exists: profile.exists !== false,
+    bundles: Object.freeze([...(profile.bundles || [])]),
+    webCompatible: profile.webCompatible === true,
+    default: profile.default === true,
+    selectable: profile.selectable !== false,
+    error: profile.error || null,
+    reason: profile.reason || null,
+  });
+}
+
 /**
  * 清理不再存在或不可选择的启动状态，并返回本次应启动的 profile。
  *
@@ -362,7 +379,7 @@ export async function startDshHost({
   readonly runtimeRoot?: string;
   readonly profile: DesktopProfile;
   readonly generationId: string;
-  readonly capability: ReturnType<typeof createDesktopServices>;
+  readonly capability: DesktopHostCapability;
 }): Promise<HostInstance> {
   const runtimeRequire = dshRequire(runtimeRoot);
   const appBoot = await loadAppBoot(runtimeRequire);
@@ -433,6 +450,7 @@ export function createDesktopLauncher({
   pnpm,
   pnpmArgs,
   pnpmEnv,
+  catalog,
 }: LauncherOptions) {
   if (!userData || !host || !windowFactory || !probe) fail('桌面启动器缺少运行时提供方', 'LAUNCHER_CONFIG');
   let windowRef: RendererWindow | null = null;
@@ -451,17 +469,20 @@ export function createDesktopLauncher({
       async prepare(generation) {
         const profile = profiles.find((candidate) => candidate.name === generation.profile);
         if (!profile) fail(`profile 不存在: ${generation.profile}`, 'PROFILE_UNSELECTABLE');
-        const services = createDesktopServices({
+        const capability = createDesktopHostCapability({
           generation,
           manager,
-          profiles,
           profileDir: profile.dir,
+          profiles: profiles.map(toDesktopServiceProfile),
+          catalog,
           pnpm,
           pnpmArgs,
           pnpmEnv,
+          reconcile: async () => {},
+          verifyNextGeneration: async () => Boolean(generationStates.get(generation)?.host),
         });
-        const hostInstance = await host.start({ profile, generationId: generation.id, capability: services });
-        generationStates.set(generation, { services, host: hostInstance });
+        const hostInstance = await host.start({ profile, generationId: generation.id, capability });
+        generationStates.set(generation, { host: hostInstance });
       },
       async hostReady(generation) {
         await generationStates.get(generation)?.host.entriesSettled();

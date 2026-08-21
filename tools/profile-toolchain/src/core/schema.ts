@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { parse as parseSemVer } from 'semver';
 import { readYaml } from './yaml.ts';
 import { ForgeError, fail } from './errors.ts';
 import { RUNTIME_MATRIX } from './versions.ts';
@@ -114,6 +115,11 @@ export interface CatalogEntry {
   readonly audit: string;
   readonly enforcement: 'unavailable';
 }
+
+const STRICT_SEMVER = new RegExp(
+  '^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)' +
+    '(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$',
+);
 
 interface DistributionInput extends Record<string, unknown> {
   schema?: unknown;
@@ -498,6 +504,8 @@ export function parseCatalogEntry(input: unknown): CatalogEntry {
   if (entry.schema !== 'dsh-forge/catalog@1') fail(`不支持的 catalog schema: ${entry.schema}`, 'SCHEMA_UNSUPPORTED');
   identifier(entry.id, 'catalog.id');
   packageName(entry.packageName, 'catalog.packageName');
+  if (typeof entry.version !== 'string' || !STRICT_SEMVER.test(entry.version) || !parseSemVer(entry.version, { loose: false }))
+    fail(`catalog 版本必须是精确 SemVer: ${entry.version}`, 'CATALOG_VERSION');
   if (typeof entry.tier !== 'string' || !['L0', 'L1', 'L2'].includes(entry.tier))
     fail(`catalog tier 无效: ${entry.tier}`, 'CATALOG_TIER');
   if (entry.executionMode !== 'trusted-in-process') fail('executionMode 必须是 trusted-in-process', 'TRUST_MODE');
@@ -508,11 +516,19 @@ export function parseCatalogEntry(input: unknown): CatalogEntry {
     source.kind === 'npm' &&
     (typeof source.registry !== 'string' ||
       !source.registry.startsWith('https://') ||
+      typeof source.tarball !== 'string' ||
+      !source.tarball.startsWith('https://') ||
       source.package !== entry.packageName)
   )
-    fail('npm catalog 来源必须含 HTTPS registry 与同名 package', 'CATALOG_SOURCE');
-  if (source.kind === 'git' && (typeof source.commit !== 'string' || !/^[0-9a-f]{40}$/i.test(source.commit)))
-    fail('git catalog 来源必须固定完整 commit', 'CATALOG_SOURCE');
+    fail('npm catalog 来源必须含 HTTPS registry、tarball 与同名 package', 'CATALOG_SOURCE');
+  if (
+    source.kind === 'git' &&
+    (typeof source.repository !== 'string' ||
+      !source.repository.startsWith('https://') ||
+      typeof source.commit !== 'string' ||
+      !/^[0-9a-f]{40}$/i.test(source.commit))
+  )
+    fail('git catalog 来源必须含 HTTPS repository 与完整 commit', 'CATALOG_SOURCE');
   if (
     source.kind === 'workspace' &&
     (typeof source.path !== 'string' || !source.path || path.isAbsolute(source.path) || source.path.includes('..'))

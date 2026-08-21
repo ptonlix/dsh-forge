@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { createSecureWindowFactory } from './platform/electron-window.ts';
 
-/** Electron 对 DSH launcher 提供的内部能力；不从 desktop-plugin exports 暴露。 */
+/** Electron 对 DSH launcher 提供的内部能力；不从公开 desktop-services exports 暴露。 */
 export interface DesktopRuntime {
   readonly acquired: boolean;
   readonly userDataPath: string;

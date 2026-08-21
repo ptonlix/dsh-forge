@@ -1,0 +1,30 @@
+{
+  "name": "@dsh-forge/desktop-services-local",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "files": ["dist", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./launcher": {
+      "types": "./dist/launcher.d.ts",
+      "import": "./dist/launcher.js",
+      "default": "./dist/launcher.js"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@dsh-forge/desktop-services": "workspace:*",
+    "@dsh-forge/profile-toolchain": "workspace:*",
+    "semver": "7.8.5",
+    "yaml": "2.9.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}

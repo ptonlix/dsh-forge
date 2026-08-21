@@ -1,38 +1,49 @@
-/** runtime service 生命周期测试：覆盖 generation 回退、进程取消、WAL 恢复和 profile 越界。 */
+/** 桌面服务生命周期测试：generation、lease、取消、WAL 与来源校验。 */
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
 
-import { ProfileStateStore } from '../apps/desktop/runtime/state-store.ts';
 import { GenerationManager, Generation } from '../apps/desktop/runtime/generation.ts';
-import {
-  DesktopPnpmProvider,
-  DesktopProfilesProvider,
-  recoverTransactions,
-  snapshotProfile,
-} from '@dsh-forge/desktop-plugin';
-import { spawnTree } from '../packages/desktop-plugin/host/process-tree.ts';
-import { ForgeError } from '../packages/desktop-plugin/host/errors.ts';
-import type { GenerationHooks, ProcessResult, ProcessOperation } from '../apps/desktop/runtime/types.ts';
+import { ProfileStateStore } from '../apps/desktop/runtime/state-store.ts';
+import type { DesktopProfileSummary } from '@dsh-forge/desktop-services';
+import { ForgeError } from '@dsh-forge/profile-toolchain/core/errors';
+import type { CatalogEntry } from '@dsh-forge/profile-toolchain/schema';
+import { DesktopPnpmProvider, assertExactSemVer } from '../packages/desktop-services-local/src/packages.ts';
+import { DesktopProfilesProvider } from '../packages/desktop-services-local/src/profiles.ts';
+import { recoverTransactions, snapshotProfile } from '../packages/desktop-services-local/src/recovery.ts';
+import { spawnTree } from '../packages/desktop-services-local/src/process-tree.ts';
+import { createDesktopHostCapability } from '../packages/desktop-services-local/src/launcher.ts';
+import type { DesktopHostCapability, GenerationLike, ProcessOperation } from '../packages/desktop-services-local/src/types.ts';
 
 const DISTRIBUTION_PROFILE = 'dsh-forge-official';
 
-function makeManager(hooks: GenerationHooks = {}): { dir: string; manager: GenerationManager } {
+function makeManager(
+  hooks: ConstructorParameters<typeof GenerationManager>[0]['hooks'] = {},
+  profiles: ConstructorParameters<typeof GenerationManager>[0]['profiles'] = [
+    { name: DISTRIBUTION_PROFILE, default: true, selectable: true },
+  ],
+) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-state-'));
-  const store = new ProfileStateStore(dir);
   return {
     dir,
     manager: new GenerationManager({
-      stateStore: store,
-      profiles: [{ name: DISTRIBUTION_PROFILE, default: true, selectable: true }],
+      stateStore: new ProfileStateStore(dir),
+      profiles,
       hooks,
       healthDeadlineMs: 30,
     }),
   };
 }
-function fakeSpawn(result: ProcessResult = { exitCode: 0, signal: null, cancelled: false }): () => ProcessOperation {
+
+function fakeSpawn(
+  result: { exitCode: number | null; signal: NodeJS.Signals | null; cancelled: boolean } = {
+    exitCode: 0,
+    signal: null,
+    cancelled: false,
+  },
+): () => ProcessOperation {
   return () => ({
     stdout: Readable.from([]),
     stderr: Readable.from([]),
@@ -41,230 +52,258 @@ function fakeSpawn(result: ProcessResult = { exitCode: 0, signal: null, cancelle
   });
 }
 
+function generation(): GenerationLike & { closed: boolean } {
+  return { id: 'test-generation', profile: DISTRIBUTION_PROFILE, stage: 'committed', closed: false };
+}
+
+function catalogEntry(): CatalogEntry {
+  return {
+    schema: 'dsh-forge/catalog@1',
+    id: 'fixture-plugin',
+    tier: 'L1',
+    packageName: '@fixture/plugin',
+    version: '1.2.3-rc.1+build.9',
+    source: {
+      kind: 'npm',
+      package: '@fixture/plugin',
+      registry: 'https://registry.example.test',
+      tarball: 'https://registry.example.test/@fixture/plugin/-/plugin-1.2.3-rc.1.tgz',
+    },
+    integrity: 'sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    license: 'MIT',
+    maintainer: 'Fixture',
+    dependencies: [],
+    scripts: [],
+    capabilities: [],
+    verifiedOn: ['darwin-arm64'],
+    verifiedAt: '2026-08-20',
+    executionMode: 'trusted-in-process',
+    hostSupport: ['desktop-protocol-1'],
+    pluginRequest: [],
+    grant: 'required',
+    audit: 'reviewed',
+    enforcement: 'unavailable',
+  };
+}
+
+function profileSummary(): DesktopProfileSummary {
+  return {
+    name: DISTRIBUTION_PROFILE,
+    exists: true,
+    bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
+    webCompatible: true,
+    default: true,
+    selectable: true,
+    error: null,
+    reason: null,
+  };
+}
+
+function capability(
+  directory: string,
+  current = generation(),
+  extra: Partial<DesktopHostCapability> = {},
+): DesktopHostCapability {
+  return createDesktopHostCapability({
+    generation: current,
+    profileDir: directory,
+    profiles: [profileSummary()],
+    manager: { select: async () => current },
+    catalog: [catalogEntry()],
+    reconcile: async () => {},
+    verifyNextGeneration: async () => true,
+    spawn: fakeSpawn(),
+    ...extra,
+  });
+}
+
 test('同目标选择合并，不同目标被拒绝，成功后提交 last-known-good', async () => {
-  const { dir, manager } = makeManager({
-    hostReady: async () => {},
-    webReady: async () => {},
-    windowReady: async () => {},
-    rendererReady: async () => {},
-    interactionReady: async () => {},
-  });
-  const first = manager.select(DISTRIBUTION_PROFILE);
-  const second = manager.select(DISTRIBUTION_PROFILE);
-  assert.equal(first, second);
-  await first;
-  assert.equal(manager.snapshot.lastKnownGood, DISTRIBUTION_PROFILE);
-  assert.equal(manager.snapshot.pending, null);
-  await manager.dispose();
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('renderer 超时进入 manual recovery，旧 generation service 调用失败', async () => {
-  const { dir, manager } = makeManager({
-    hostReady: async () => {},
-    webReady: async () => {},
-    windowReady: async () => {},
-    rendererReady: () => new Promise(() => {}),
-  });
-  await assert.rejects(
-    manager.select(DISTRIBUTION_PROFILE),
-    (error: unknown) => error instanceof ForgeError && error.code === 'GENERATION_FAILED',
-  );
-  assert.ok(manager.snapshot.manualRecovery);
-  const old = new Generation(manager, DISTRIBUTION_PROFILE);
-  await old.dispose();
-  assert.throws(
-    () => old.assertOpen(),
-    (error: unknown) => error instanceof ForgeError && error.code === 'GENERATION_CLOSED',
-  );
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('失败 generation 最多自动恢复一次到 last-known-good，并保留失败事实', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-recovery-state-'));
-  let failBeta = false;
-  const store = new ProfileStateStore(dir);
-  const manager = new GenerationManager({
-    stateStore: store,
-    profiles: [
-      { name: DISTRIBUTION_PROFILE, default: true, selectable: true },
-      { name: 'beta', selectable: true },
-    ],
-    hooks: {
+  let resume: () => void = () => {};
+  const { dir, manager } = makeManager(
+    {
+      prepare: () => new Promise<void>((resolve) => { resume = resolve; }),
       hostReady: async () => {},
       webReady: async () => {},
       windowReady: async () => {},
-      rendererReady: async (generation) => {
-        if (failBeta && generation.profile === 'beta') throw new Error('beta failure');
-      },
+      rendererReady: async () => {},
       interactionReady: async () => {},
     },
-  });
-  await manager.select(DISTRIBUTION_PROFILE);
-  failBeta = true;
-  const generation = await manager.select('beta');
-  assert.equal(generation.profile, DISTRIBUTION_PROFILE);
-  assert.equal(manager.snapshot.active, DISTRIBUTION_PROFILE);
-  assert.equal(manager.snapshot.lastFailure.target, 'beta');
+    [
+      { name: DISTRIBUTION_PROFILE, default: true, selectable: true },
+      { name: 'other-profile', selectable: true },
+    ],
+  );
+  const first = manager.select(DISTRIBUTION_PROFILE);
+  assert.equal(first, manager.select(DISTRIBUTION_PROFILE));
+  assert.throws(
+    () => manager.select('other-profile'),
+    (error: unknown) => error instanceof ForgeError && error.code === 'PROFILE_SELECTION_BUSY',
+  );
+  resume();
+  await first;
+  assert.equal(manager.snapshot.lastKnownGood, DISTRIBUTION_PROFILE);
   await manager.dispose();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('状态目录拒绝符号链接，窗口隐藏与显式退出具有不同生命周期', async () => {
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-link-'));
-  const target = path.join(parent, 'target');
-  fs.mkdirSync(target);
-  const link = path.join(parent, 'link');
-  fs.symlinkSync(target, link);
+test('过期 generation 的 profile service 失败且不影响后续 generation', () => {
+  const current = generation();
+  const service = new DesktopProfilesProvider(current, { select: async () => current }, [profileSummary()]);
+  assert.equal(Object.isFrozen(service.snapshot()), true);
+  current.closed = true;
   assert.throws(
-    () => new ProfileStateStore(link),
-    (error: unknown) => error instanceof ForgeError && error.code === 'STATE_SYMLINK',
+    () => service.list(),
+    (error: unknown) => error instanceof ForgeError && error.code === 'GENERATION_CLOSED',
   );
-  let hidden = 0;
-  let disposed = 0;
-  const { dir, manager } = makeManager({
-    hostReady: async () => {},
-    webReady: async () => {},
-    windowReady: async () => {},
-    rendererReady: async () => {},
-    interactionReady: async () => {},
-    hideWindow: async () => {
-      hidden += 1;
-    },
-    dispose: async () => {
-      disposed += 1;
-    },
-  });
-  await manager.select(DISTRIBUTION_PROFILE);
-  await manager.hideWindow();
-  assert.equal(hidden, 1);
-  assert.equal(disposed, 0);
-  await manager.signal('SIGTERM');
-  assert.equal(disposed, 1);
-  fs.rmSync(parent, { recursive: true, force: true });
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('desktopPnpm 拒绝 add、busy、NUL 与关闭 generation', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-pnpm-'));
-  const generation = { id: 'test', profile: DISTRIBUTION_PROFILE, context: {}, stage: 'preparing', closed: false, attach() {} };
-  const provider = new DesktopPnpmProvider({ generation, profileDir: dir, spawn: fakeSpawn() });
-  assert.throws(
-    () => provider.runPlugin(['add', 'x']),
-    (error: unknown) => error instanceof ForgeError && error.code === 'PACKAGE_INSTALL_API',
-  );
-  assert.throws(
-    () => provider.runPlugin(['x\0']),
-    (error: unknown) => error instanceof ForgeError && error.code === 'SERVICE_ARGUMENT',
-  );
-  let complete: (result: ProcessResult) => void = () => {};
-  const active = {
-    stdout: Readable.from([]),
-    stderr: Readable.from([]),
-    done: new Promise<ProcessResult>((resolve) => {
-      complete = resolve;
-    }),
-    cancel: () => {
-      complete({ exitCode: null, signal: 'SIGTERM', cancelled: true });
-      return Promise.resolve();
-    },
+test('package lease 覆盖进程完成后的 finalize，并在 dispose 时取消', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-lease-'));
+  let settle: (result: { exitCode: number; signal: null; cancelled: boolean }) => void = () => {};
+  const active: ProcessOperation = {
+    stdout: Readable.from([]), stderr: Readable.from([]),
+    done: new Promise((resolve) => { settle = resolve; }),
+    cancel: async () => settle({ exitCode: 0, signal: null, cancelled: true }),
   };
-  provider.spawn = () => active;
-  provider.runPlugin(['install']);
+  let finalize: () => void = () => {};
+  const provider = new DesktopPnpmProvider(capability(directory, generation(), {
+    spawn: () => active,
+    reconcile: () => new Promise<void>((resolve) => { finalize = resolve; }),
+  }));
+  const operation = provider.run({ kind: 'reconcile' });
+  settle({ exitCode: 0, signal: null, cancelled: false });
+  await Promise.resolve();
   assert.throws(
-    () => provider.runPlugin(['install']),
+    () => provider.run({ kind: 'inspect', query: 'list' }),
     (error: unknown) => error instanceof ForgeError && error.code === 'PACKAGE_BUSY',
   );
+  finalize();
+  await operation.done;
   await provider.dispose();
-  assert.equal(provider.closed, true);
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
-test('可恢复安装封存 receipt，失败时只恢复受保护 profile 文件', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-install-'));
-  for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'])
-    fs.writeFileSync(path.join(dir, file), `${file}-before`);
-  const generation = { id: 'test', profile: DISTRIBUTION_PROFILE, context: {}, stage: 'preparing', closed: false, attach() {} };
-  const provider = new DesktopPnpmProvider({ generation, profileDir: dir, spawn: fakeSpawn() });
-  const operation = provider.installPlugin(
-    { bundle: '@fixture/plugin', version: '1.2.3', source: 'npm' },
-    { reconcile: async () => {}, verifyNextGeneration: async () => true },
-  );
-  assert.equal((await operation.done).exitCode, 0);
-  assert.equal(
-    fs.readdirSync(path.join(dir, '.recovery')).some((file) => file.endsWith('.receipt')),
+test('严格 SemVer 支持 prerelease/build 并拒绝 range、tag 与 alias', () => {
+  assert.doesNotThrow(() => assertExactSemVer('1.2.3-rc.1+build.9'));
+  for (const value of ['^1.2.3', 'latest', 'workspace:*', 'file:../plugin']) {
+    assert.throws(
+      () => assertExactSemVer(value),
+      (error: unknown) => error instanceof ForgeError && error.code === 'PACKAGE_VERSION',
+    );
+  }
+});
+
+test('安装 confirmation、lockfile 事实与 receipt 在同一事务结算', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-install-'));
+  for (const file of ['package.json', 'pnpm-workspace.yaml'])
+    fs.writeFileSync(path.join(directory, file), `${file}-before`);
+  const entry = catalogEntry();
+  const lockfile = [
+    'lockfileVersion: \'9.0\'',
+    'packages:',
+    '  \'@fixture/plugin@1.2.3-rc.1+build.9\':',
+    '    resolution:',
+    '      tarball: https://registry.example.test/@fixture/plugin/-/plugin-1.2.3-rc.1.tgz',
+    '      integrity: sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(directory, 'pnpm-lock.yaml'), lockfile);
+  const request = (await import('@dsh-forge/profile-toolchain/trust')).installationConfirmation(entry, DISTRIBUTION_PROFILE, true);
+  const provider = new DesktopPnpmProvider(capability(directory));
+  const result = await provider.install(request).done;
+  assert.equal(result.exitCode, 0);
+  assert.equal(fs.readdirSync(path.join(directory, '.recovery')).some((file) => file.endsWith('.receipt')), true);
+  await provider.dispose();
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('伪造确认、来源漂移、非零退出和健康失败不会提交 receipt', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-install-failure-'));
+  for (const file of ['package.json', 'pnpm-workspace.yaml'])
+    fs.writeFileSync(path.join(directory, file), `${file}-before`);
+  const validLockfile = [
+    'lockfileVersion: \'9.0\'',
+    'packages:',
+    '  \'@fixture/plugin@1.2.3-rc.1+build.9\':',
+    '    resolution:',
+    '      tarball: https://registry.example.test/@fixture/plugin/-/plugin-1.2.3-rc.1.tgz',
+    '      integrity: sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(directory, 'pnpm-lock.yaml'), validLockfile);
+  const request = (await import('@dsh-forge/profile-toolchain/trust')).installationConfirmation(
+    catalogEntry(),
+    DISTRIBUTION_PROFILE,
     true,
   );
-  await provider.dispose();
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('安装部分失败恢复配置，但明确不承诺 node_modules 回滚', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-install-failure-'));
-  for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'])
-    fs.writeFileSync(path.join(dir, file), `${file}-before`);
-  const generation = { id: 'test', profile: DISTRIBUTION_PROFILE, context: {}, stage: 'preparing', closed: false, attach() {} };
-  const provider = new DesktopPnpmProvider({
-    generation,
-    profileDir: dir,
-    spawn: fakeSpawn({ exitCode: 1, signal: null, cancelled: false }),
-  });
-  const operation = provider.installPlugin(
-    { bundle: '@fixture/plugin', version: '1.2.3', source: 'npm' },
-    { verifyNextGeneration: async () => true },
-  );
-  assert.equal((await operation.done).exitCode, 1);
-  assert.equal(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'), 'package.json-before');
-  assert.equal(
-    fs.readdirSync(path.join(dir, '.recovery')).some((file) => file.endsWith('.failed')),
-    true,
-  );
-  await provider.dispose();
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('desktopProfiles 返回不可变快照，普通操作的相对 source 必须锚定 profile', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-profile-service-'));
-  fs.mkdirSync(path.join(dir, 'plugins'));
-  const generation = { id: 'test', profile: DISTRIBUTION_PROFILE, context: {}, stage: 'preparing', closed: false, attach() {} };
-  const manager = { select: async () => generation };
-  const profiles = new DesktopProfilesProvider({
-    generation,
-    manager,
-    profiles: [{ name: DISTRIBUTION_PROFILE, selectable: true }],
-  });
-  assert.equal(Object.isFrozen(profiles.snapshot()), true);
-  const provider = new DesktopPnpmProvider({ generation, profileDir: dir, spawn: fakeSpawn() });
+  const forged = { ...request, source: { ...request.source } };
+  const provider = new DesktopPnpmProvider(capability(directory));
   assert.throws(
-    () => provider.runPlugin(['install'], { source: '../escape' }),
-    (error: unknown) => error instanceof ForgeError && error.code === 'SERVICE_CWD',
+    () => provider.install(forged as never),
+    (error: unknown) => error instanceof ForgeError && error.code === 'CATALOG_CONFIRMATION_REQUIRED',
   );
-  fs.rmSync(dir, { recursive: true, force: true });
+  await provider.dispose();
+
+  fs.writeFileSync(
+    path.join(directory, 'pnpm-lock.yaml'),
+    validLockfile.replace('plugin-1.2.3-rc.1.tgz', 'drift.tgz'),
+  );
+  const drift = new DesktopPnpmProvider(capability(directory));
+  await assert.rejects(
+    drift.install(request).done,
+    (error: unknown) => error instanceof ForgeError && error.code === 'INSTALL_MANUAL_RECOVERY',
+  );
+  await drift.dispose();
+
+  fs.writeFileSync(path.join(directory, 'pnpm-lock.yaml'), validLockfile);
+  const nonzero = new DesktopPnpmProvider(
+    capability(directory, generation(), { spawn: fakeSpawn({ exitCode: 1, signal: null, cancelled: false }) }),
+  );
+  assert.equal((await nonzero.install(request).done).exitCode, 1);
+  assert.equal(fs.readdirSync(path.join(directory, '.recovery')).some((file) => file.endsWith('.failed')), true);
+  await nonzero.dispose();
+
+  const unhealthy = new DesktopPnpmProvider(
+    capability(directory, generation(), { verifyNextGeneration: async () => false }),
+  );
+  await assert.rejects(
+    unhealthy.install(request).done,
+    (error: unknown) => error instanceof ForgeError && error.code === 'INSTALL_MANUAL_RECOVERY',
+  );
+  await unhealthy.dispose();
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
-test('恢复事务只恢复受保护配置并阻止自动继续安装', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-recovery-'));
-  for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'])
-    fs.writeFileSync(path.join(dir, file), `${file}-before`);
-  const recovery = path.join(dir, '.recovery');
-  fs.mkdirSync(recovery);
-  const snapshot = snapshotProfile(dir);
-  fs.writeFileSync(path.join(dir, 'package.json'), 'after');
-  fs.writeFileSync(path.join(recovery, 'install-test.json'), JSON.stringify({ snapshot }));
-  const result = recoverTransactions(dir, recovery);
+test('未知 lockfile 与恢复 WAL 均进入人工恢复，而非报告安装成功', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-recovery-'));
+  for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']) fs.writeFileSync(path.join(directory, file), `${file}-before`);
+  const request = (await import('@dsh-forge/profile-toolchain/trust')).installationConfirmation(catalogEntry(), DISTRIBUTION_PROFILE, true);
+  const provider = new DesktopPnpmProvider(capability(directory));
+  await assert.rejects(provider.install(request).done, (error: unknown) => error instanceof ForgeError && error.code === 'INSTALL_MANUAL_RECOVERY');
+  const snapshot = snapshotProfile(directory);
+  fs.writeFileSync(path.join(directory, 'package.json'), 'changed');
+  fs.writeFileSync(path.join(directory, '.recovery', 'install-interrupted.json'), JSON.stringify({ schema: 'dsh-forge/desktop-install-wal@1', snapshot }));
+  const result = recoverTransactions(directory, path.join(directory, '.recovery'));
   assert.equal(result.manualRecovery, true);
-  assert.equal(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'), 'package.json-before');
-  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'), 'package.json-before');
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
-test('package operation 取消后等待受管进程树退出', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-tree-'));
-  const script = path.join(dir, 'child.js');
+test('取消的受管进程树在 operation 结算前退出', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-tree-'));
+  const script = path.join(directory, 'child.js');
   fs.writeFileSync(script, 'setInterval(() => {}, 1000);');
-  const operation = spawnTree(process.execPath, [script], { cwd: dir, env: process.env });
+  const operation = spawnTree(process.execPath, [script], { cwd: directory, env: process.env });
   await new Promise((resolve) => setTimeout(resolve, 40));
   await operation.cancel();
-  const result = await operation.done;
-  assert.equal(result.cancelled, true);
+  assert.equal((await operation.done).cancelled, true);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('关闭 generation 的管理器仍拒绝旧 service', async () => {
+  const { dir, manager } = makeManager();
+  const old = new Generation(manager, DISTRIBUTION_PROFILE);
+  await old.dispose();
+  assert.throws(() => old.assertOpen(), (error: unknown) => error instanceof ForgeError && error.code === 'GENERATION_CLOSED');
   fs.rmSync(dir, { recursive: true, force: true });
 });

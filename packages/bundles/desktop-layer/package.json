@@ -3,6 +3,6 @@
   "version": "0.1.0",
   "license": "MIT",
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "dependencies": { "@dsh-forge/desktop-plugin": "file:../../desktop-plugin" },
+  "dependencies": { "@dsh-forge/desktop-services-local": "workspace:*" },
   "peerDependencies": { "@deepseek-ai/cordis": "4.0.1" }
 }

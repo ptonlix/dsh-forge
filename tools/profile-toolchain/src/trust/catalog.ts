@@ -1,6 +1,7 @@
 import { readYaml } from '../core/yaml.ts';
 import { parseCatalogEntry, type CatalogEntry } from '../core/schema.ts';
 import { fail } from '../core/errors.ts';
+import type { ConfirmedPluginInstall, ConfirmedPluginInstallSource } from '@dsh-forge/desktop-services';
 
 const TRUST_MODE = 'trusted-in-process';
 const NON_ISOLATION_NOTICE = '该插件与 DSH Host 同进程运行；元数据审查和用户授权不构成 Node/Electron 技术隔离。';
@@ -89,29 +90,48 @@ export function loadStaticCatalog(file: string): Readonly<{ schema: string; entr
   return catalog;
 }
 
+function confirmedSource(entry: CatalogEntry): ConfirmedPluginInstallSource {
+  const source = entry.source;
+  if (source.kind === 'npm') {
+    return Object.freeze({
+      kind: 'registry',
+      registry: source.registry as string,
+      tarball: source.tarball as string,
+      integrity: entry.integrity!,
+    });
+  }
+  if (source.kind === 'git') {
+    return Object.freeze({
+      kind: 'git',
+      repository: source.repository as string,
+      commit: source.commit as string,
+    });
+  }
+  return Object.freeze({ kind: 'workspace', path: source.path as string });
+}
+
 /** 生成安装确认记录；未明确确认时抛出错误且不允许调用安装流程。 */
 export function installationConfirmation(
   entry: CatalogEntry,
   profile: string,
   userConfirmed = false,
-  profileChanges = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'],
-) {
+  confirmedAt = new Date().toISOString(),
+): ConfirmedPluginInstall {
   parseCatalogEntry(entry);
   const confirmation = Object.freeze({
+    catalogId: entry.id,
+    profile,
     packageName: entry.packageName,
     version: entry.version,
-    source: entry.source,
+    source: confirmedSource(entry),
     integrity: entry.integrity,
-    license: entry.license,
-    capabilities: entry.capabilities,
-    scripts: entry.scripts,
-    executionMode: entry.executionMode,
-    notice: NON_ISOLATION_NOTICE,
-    profile,
-    profileChanges: profileChanges.slice(),
-    userConfirmed,
-  });
-  if (!userConfirmed) fail('安装必须由用户明确确认', 'CATALOG_CONFIRMATION_REQUIRED', confirmation);
+    allowBuilds: Object.freeze((entry.scripts || []).filter((script): script is string => typeof script === 'string')),
+    confirmedAt,
+    confirmation: Object.freeze({ kind: 'dsh-forge/catalog-confirmation@1' as const, userConfirmed: true as const }),
+    [Symbol.for('@dsh-forge/desktop-services.confirmed-plugin-install')]: true as const,
+  }) as unknown as ConfirmedPluginInstall;
+  if (!userConfirmed)
+    fail('安装必须由用户明确确认', 'CATALOG_CONFIRMATION_REQUIRED', confirmation as unknown as Record<string, unknown>);
   return confirmation;
 }
 

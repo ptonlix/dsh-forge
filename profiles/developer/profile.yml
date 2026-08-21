@@ -10,4 +10,3 @@ runtime:
 bundles:
   - '@deepseek-ai/dsh-base'
   - '@deepseek-ai/dsh-web-app'
-  - '@dsh-forge/product-base'

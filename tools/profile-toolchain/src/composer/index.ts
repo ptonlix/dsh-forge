@@ -160,7 +160,7 @@ function verifyEntryPackages(entries: readonly ConfigEntry[], compiled: Compiled
       diagnostics.push({ code: 'ENTRY_PACKAGE_UNRESOLVED', id: entry.id || null, package: entry.name });
   }
   if (!ids.has('dsh-forge-desktop-services'))
-    diagnostics.push({ code: 'DESKTOP_INJECTION_UNRESOLVED', package: '@dsh-forge/desktop-plugin' });
+    diagnostics.push({ code: 'DESKTOP_INJECTION_UNRESOLVED', package: '@dsh-forge/desktop-services-local' });
   return diagnostics;
 }
 

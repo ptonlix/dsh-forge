@@ -36,7 +36,8 @@ export async function startElectron() {
   await app.whenReady();
   const root = app.getAppPath();
   reportDevelopmentPhase(`Electron 已就绪，加载应用根目录: ${root}`);
-  assertNoStartupInstall(loadStaticCatalog(path.join(root, 'catalog', 'catalog.yml')));
+  const catalog = loadStaticCatalog(path.join(root, 'catalog', 'catalog.yml'));
+  assertNoStartupInstall(catalog);
   const runtimeRoot = app.isPackaged ? packagedResourcePath('dsh-forge', 'runtime') : root;
   const template = app.isPackaged ? packagedResourcePath('dsh-forge', 'profile') : null;
   const distribution = parseDistribution(path.join(root, 'distribution.yml'));
@@ -79,6 +80,7 @@ export async function startElectron() {
     pnpm: process.execPath,
     pnpmArgs: [path.join(runtimeRoot, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')],
     pnpmEnv: { ELECTRON_RUN_AS_NODE: '1' },
+    catalog: catalog.entries,
   });
   runtime.setSecondInstanceHandler(() => launcher.show());
   const requestExit = async (reason: string): Promise<void> => {

@@ -2,6 +2,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { resolveProfile, verifyProfile, findLatestArtifact } from '../compiler/index.ts';
 import { composeCompiled, writeConfigDump } from '../composer/index.ts';
 import { loadStaticCatalog, verifyCatalog } from '../trust/catalog.ts';
@@ -57,11 +58,13 @@ function validateDocumentContracts(files: readonly string[]): void {
       const command = match[1];
       if (command && !packageScripts[command]) throw new Error(`文档命令不存在: ${file} -> ${command}`);
     }
-    for (const match of content.matchAll(/@dsh-forge\/desktop-plugin\/([a-z0-9-]+)/g)) {
-      const subpath = match[1];
-      if (subpath && !['profile-service', 'pnpm'].includes(subpath))
-        throw new Error(`文档引用未公开 desktop-plugin 子路径: ${file} -> ${subpath}`);
-    }
+    if (content.includes('@dsh-forge/desktop-plugin'))
+      throw new Error(`文档引用已删除 desktop-plugin: ${file}`);
+    if (
+      /(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"]@dsh-forge\/desktop-services-local(?:['"]|\/)/.test(content) &&
+      !file.endsWith(`${path.sep}desktop-services-local${path.sep}README.md`)
+    )
+      throw new Error(`文档不得将私有 provider 作为 consumer 接口: ${file}`);
     for (const [name, parser] of [
       ['distribution', (filePath: string) => parseDistribution(filePath)],
       ['profile', (filePath: string) => parseProfile(filePath)],
@@ -83,6 +86,24 @@ function validateDocumentContracts(files: readonly string[]): void {
       }
     }
   }
+}
+
+/** README 示例与 NodeNext consumer fixture 必须同步验证，避免文档导入私有路径。 */
+function validateDesktopServiceReadme(root: string): void {
+  const readme = path.join(root, 'packages', 'desktop-services', 'README.md');
+  const content = fs.readFileSync(readme, 'utf8');
+  const marker = '<!-- dsh-forge-example:desktop-services-consumer -->';
+  const start = content.indexOf(marker);
+  const example = start < 0 ? null : content.slice(start).match(/```ts\s*\n([\s\S]*?)\n```/);
+  if (!example?.[1]) throw new Error('desktop-services README 缺少标记 TypeScript 示例');
+  if (!example[1].includes("from '@dsh-forge/desktop-services'"))
+    throw new Error('desktop-services README 示例没有使用公开 import');
+  if (example[1].includes('desktop-services-local') || example[1].includes('desktop-plugin'))
+    throw new Error('desktop-services README 示例引用私有或已删除路径');
+  const consumer = path.join(root, 'tests', 'fixtures', 'desktop-services-consumer', 'tsconfig.json');
+  const tsc = path.join(root, 'node_modules', '.bin', 'tsc');
+  const result = spawnSync(tsc, ['-p', consumer, '--noEmit'], { cwd: root, encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`desktop-services consumer 编译失败: ${(result.stderr || result.stdout).trim()}`);
 }
 
 /** 执行一个已声明子命令；未知命令返回 2 并打印固定用法。 */
@@ -181,6 +202,13 @@ export function main(command = process.argv[2], profileName = process.argv[3]): 
     };
     walk(path.join(root, 'docs'));
     walk(path.join(root, 'openspec'));
+    for (const packageReadme of [
+      path.join(root, 'packages', 'desktop-services', 'README.md'),
+      path.join(root, 'packages', 'desktop-services-local', 'README.md'),
+    ]) {
+      if (!fs.existsSync(packageReadme)) throw new Error(`缺少桌面服务 README: ${packageReadme}`);
+      files.push(packageReadme);
+    }
     for (const file of files) {
       const content = fs.readFileSync(file, 'utf8');
       if (/[ \t]+$/m.test(content)) throw new Error(`文档尾随空格: ${file}`);
@@ -195,6 +223,7 @@ export function main(command = process.argv[2], profileName = process.argv[3]): 
       }
     }
     validateDocumentContracts(files.filter((file) => file.includes(`${path.sep}docs${path.sep}`)));
+    validateDesktopServiceReadme(root);
     json({ valid: true, files: files.length });
     return 0;
   }

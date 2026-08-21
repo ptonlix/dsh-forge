@@ -8,7 +8,13 @@ export interface BoundaryCheckResult {
 }
 
 const SOURCE_ROOTS = Object.freeze(['apps', 'packages', 'tools', 'scripts', 'tests']);
-const REQUIRED_ROOTS = Object.freeze(['apps/desktop', 'packages/desktop-plugin', 'packages/bundles', 'tools']);
+const REQUIRED_ROOTS = Object.freeze([
+  'apps/desktop',
+  'packages/desktop-services',
+  'packages/desktop-services-local',
+  'packages/bundles',
+  'tools',
+]);
 const GENERATED_ROOTS = Object.freeze(['dist', 'artifacts', 'node_modules', 'tests/fixtures']);
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs']);
 
@@ -30,6 +36,18 @@ function walk(directory: string, files: string[] = []): string[] {
     }
   }
 
+  return files;
+}
+
+/** third-party fixture 代表外部 consumer，必须与生产 bundle 一样拒绝私有 provider。 */
+function walkFixtureFiles(directory: string, files: string[] = []): string[] {
+  if (!fs.existsSync(directory)) return files;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) walkFixtureFiles(file, files);
+    else if (SOURCE_EXTENSIONS.has(path.extname(entry.name)) || entry.name === 'package.json') files.push(file);
+  }
   return files;
 }
 
@@ -60,6 +78,11 @@ export function checkBoundaries(root: string): BoundaryCheckResult {
     failures.push('禁止保留根级生产目录: src');
   }
 
+  for (const file of walkFixtureFiles(path.join(root, 'tests', 'fixtures'))) {
+    if (fs.readFileSync(file, 'utf8').includes('@dsh-forge/desktop-services-local'))
+      failures.push(`${path.relative(root, file)} 第三方 fixture 不得导入私有 desktop-services-local`);
+  }
+
   for (const file of SOURCE_ROOTS.flatMap((directory) => walk(path.join(root, directory)))) {
     const content = fs.readFileSync(file, 'utf8');
     const owner = packageRoot(file, root);
@@ -69,11 +92,26 @@ export function checkBoundaries(root: string): BoundaryCheckResult {
         continue;
       }
 
-      if (/(?:^|\/)src(?:\/|$)/.test(imported)) {
+      const testLocalProviderSource =
+        owner === 'tests' &&
+        imported.startsWith('../packages/desktop-services-local/src/');
+      if (/(?:^|\/)src(?:\/|$)/.test(imported) && !testLocalProviderSource) {
         failures.push(`${path.relative(root, file)} 依赖旧 src 路径: ${imported}`);
       }
 
       if (!imported.startsWith('.')) {
+        if (imported === '@dsh-forge/desktop-services-local' || imported.startsWith('@dsh-forge/desktop-services-local/')) {
+          const allowed =
+            owner === 'apps/desktop' && imported === '@dsh-forge/desktop-services-local/launcher'
+              ? true
+              : owner === 'packages/bundles' && file.includes(`${path.sep}desktop-layer${path.sep}`) && imported === '@dsh-forge/desktop-services-local'
+                ? true
+                : owner === 'tests' && !file.includes(`${path.sep}tests${path.sep}fixtures${path.sep}`);
+          if (!allowed)
+            failures.push(`${path.relative(root, file)} 不得导入私有 desktop-services-local 接口: ${imported}`);
+        }
+        if (imported === '@dsh-forge/desktop-plugin' || imported.startsWith('@dsh-forge/desktop-plugin/'))
+          failures.push(`${path.relative(root, file)} 引用已删除 desktop-plugin: ${imported}`);
         continue;
       }
 

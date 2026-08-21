@@ -28,7 +28,7 @@
 
 ## 1.1 实施契约
 
-本设计的可执行需求由 [OpenSpec 基础契约](../../openspec/changes/establish-dsh-forge-foundation-contracts/proposal.md) 定义。验收规则分为 [发行版身份](../../openspec/changes/establish-dsh-forge-foundation-contracts/specs/distribution-identity/spec.md)、[profile 编译](../../openspec/changes/establish-dsh-forge-foundation-contracts/specs/profile-compilation/spec.md)、[组合语义](../../openspec/changes/establish-dsh-forge-foundation-contracts/specs/composition-semantics/spec.md)、[generation 生命周期](../../openspec/changes/establish-dsh-forge-foundation-contracts/specs/desktop-generation-lifecycle/spec.md)、[桌面服务](../../openspec/changes/establish-dsh-forge-foundation-contracts/specs/desktop-plugin-services/spec.md)、[插件信任](../../openspec/changes/establish-dsh-forge-foundation-contracts/specs/plugin-trust-policy/spec.md)和[发布运行时](../../openspec/changes/establish-dsh-forge-foundation-contracts/specs/packaged-runtime-release/spec.md)。配置字段、公共 service 和运行时清单请查阅[基础契约参考](../reference/foundation-contracts.md)，源平面、恢复事务和发布限制请查阅[工程边界](../engineering/foundation-boundaries.md)。
+桌面 capability 的现行验收规则由 [公开 capability seam](../../openspec/changes/redesign-desktop-plugin-capability-seam/specs/desktop-capability-seam/spec.md)、[服务 contract](../../openspec/changes/redesign-desktop-plugin-capability-seam/specs/desktop-plugin-services/spec.md)和[插件信任](../../openspec/changes/redesign-desktop-plugin-capability-seam/specs/plugin-trust-policy/spec.md)定义。配置字段和公开 service 请查阅[基础契约参考](../reference/foundation-contracts.md)；provider 所有权、安装来源验证与 `trusted-in-process` 非隔离限制请查阅[工程边界](../engineering/foundation-boundaries.md)。
 
 ## 2. 核心结论
 
@@ -119,9 +119,10 @@ dsh-forge/
 │       ├── platform/
 │       └── runtime/
 ├── packages/
-│   ├── desktop-plugin/
-│   │   ├── contracts/
-│   │   └── host/
+│   ├── desktop-services/
+│   │   └── src/
+│   ├── desktop-services-local/
+│   │   └── src/
 │   ├── bundles/
 │   ├── features/
 │   └── generators/
@@ -153,25 +154,24 @@ dsh-forge/
 
 `apps/desktop` 可以替换为未来的 `apps/desktop-tauri`，但二者必须实现同一组宿主能力定义。
 
-### 4.2 `packages/desktop-plugin`
+### 4.2 `packages/desktop-services` 与 `packages/desktop-services-local`
 
-这是可安装的 DSH 插件包，包含 Host 面、Web Client 面和公开 service contract。
-
-- `host/`：generation-scoped desktop service provider、进程树和安装恢复。
-- `client/`：桌面布局或状态展示；兼容模式下不替换官方布局。
-- `contracts/`：第三方可依赖的 TypeScript 类型和模块导出。
-- Electron `desktopRuntime` 不属于公开 exports，第三方插件不能 inject。
+`desktop-services` 是 ESM 公开 contract，声明 Cordis service、协议、判别 command 与
+已确认安装请求。`desktop-services-local` 是私有 ESM provider：默认 export 只由
+desktop layer 注册，`./launcher` 只由 `apps/desktop` 创建 capability。Electron
+`desktopRuntime`、profile 路径、恢复文件与 launcher 事实都不属于公开 exports。
 
 ### 4.3 `packages/bundles`
 
 该目录只放可复用的 `dsh.bundle` 包，不放具体发行版。
 
-- `product-base`：以官方 `dsh-base`、`dsh-web-app` 的默认运行配置为基线，补充本发行版的产品默认值、通用设置和发行策略。
 - `curated`：经过审查并默认启用的 L0 能力。
 - `optional`：已验证兼容但默认关闭或按需安装的能力。
 - `desktop-ui`：只在确实需要桌面呈现时加载的 Web UI 组合。
 
-`product-base` 是轻量的发行版覆盖层，不是官方 bundle 的副本。官方 `dsh-base` 和 `dsh-web-app` 继续拥有 DSH 的运行基线；`product-base` 只通过自己的 `cordis.patch.yml` 增加或覆盖发行版确实需要的配置，不复制上游配置源码。没有必要改变官方默认值时，`product-base` 不应重复声明；必须偏离时，应在 patch 中明确写出完整覆盖值，并在 catalog 或设计记录中说明偏离原因。
+官方 profile 只选择 `dsh-base` 与 `dsh-web-app` 作为持久运行基线，launcher 随后临时
+注入 desktop layer。产品策略 bundle 只能在同一变更中带有非空 patch、完整覆盖值、偏离
+理由与验证时进入 profile；空扩展锚点不得保留。
 
 场景发行版不应命名为 `dshd-flavor-*` 并放在 bundle 目录；场景是 profile 清单，不是通用运行时层。
 
@@ -241,7 +241,6 @@ profile 只选择 bundle，示例为：
 bundles:
   - '@deepseek-ai/dsh-base'
   - '@deepseek-ai/dsh-web-app'
-  - '@dsh-forge/desktop-plugin'
   - '@dsh-forge/bundle-calendar'
 ```
 
@@ -348,7 +347,6 @@ runtime:
 bundles:
   - '@deepseek-ai/dsh-base'
   - '@deepseek-ai/dsh-web-app'
-  - '@dsh-forge/product-base'
 ```
 <!-- /dsh-forge-example:profile -->
 
@@ -366,8 +364,8 @@ bundles:
 ```text
 dsh-base
   -> dsh-web-app
-  -> desktop layer
-  -> product bundles
+  -> desktop layer（launcher 临时注入）
+  -> selected product bundles
   -> selected plugins
   -> profile patch
   -> home patch
@@ -376,12 +374,12 @@ dsh-base
 
 desktop layer 可以由启动器按 generation 注入，但不能把自身永久写入用户选择的 bundle 列表。
 
-所有发行版默认继承官方运行配置，加载顺序中的 `product-base` 只负责发行版级覆盖：
+所有发行版默认继承官方运行配置。只有存在实际覆盖时，产品策略 bundle 才会加入 profile：
 
 ```text
 dsh-base / dsh-web-app（官方运行基线）
-  -> desktop-plugin
-  -> product-base（发行版默认值和策略）
+  -> desktop layer（私有 provider）
+  -> 非空 product-policy bundle（可选）
   -> curated / optional
   -> 用户 profile 补丁
 ```
@@ -398,12 +396,12 @@ dsh-base / dsh-web-app（官方运行基线）
 
 锁文件只能证明构建使用了某个依赖结果，不能证明插件作者可信。Git 依赖只允许固定 commit；生产构建默认拒绝浮动 branch、tag 和未审查的安装脚本。
 
-## 7. 桌面插件公开接口
+## 7. 桌面服务公开接口
 
 ### 7.1 `desktopProfiles`
 
 ```ts
-import type { DesktopProfiles, DesktopProfileSnapshot } from '@dsh-forge/desktop-plugin/profile-service'
+import type { DesktopProfiles, DesktopProfileSnapshot } from '@dsh-forge/desktop-services'
 
 interface DesktopProfiles {
   readonly current: string | null
@@ -419,7 +417,7 @@ interface DesktopProfiles {
 
 ```ts
 import type { Readable } from 'node:stream'
-import type { DesktopPnpm, DesktopPnpmOperation } from '@dsh-forge/desktop-plugin/pnpm'
+import type { ConfirmedPluginInstall, DesktopPnpm, DesktopPnpmOperation } from '@dsh-forge/desktop-services'
 
 interface DesktopPnpmOperation {
   readonly stdout: Readable
@@ -429,12 +427,14 @@ interface DesktopPnpmOperation {
 }
 
 interface DesktopPnpm {
-  runPlugin(args: readonly string[], options?: object): DesktopPnpmOperation
-  installPlugin(request: object, options?: object): DesktopPnpmOperation
+  run(command: { kind: 'inspect'; query: 'list' | 'why' }): DesktopPnpmOperation
+  install(request: ConfirmedPluginInstall): DesktopPnpmOperation
 }
 ```
 
-插件管理必须使用 `runPlugin()`，让上游 DSH CLI 继续拥有 profile 初始化、相对路径解析、`dsh.profile.bundles` reconcile 和依赖修复语义。`run()` 只用于调用方明确不需要这些语义的低层 pnpm 操作。
+插件管理只能使用判别 command 或由 catalog confirmation 派生的 `install()`。provider
+始终拥有 profile 初始化、reconcile、来源校验与恢复语义，第三方不能传递原始 pnpm
+参数、路径或任意 options。
 
 两个方法都必须返回 stdout、stderr、完成状态和取消句柄。调用方负责 deadline、进度显示、非零退出码处理、取消和 teardown 等待。
 
@@ -554,7 +554,7 @@ pnpm run package:smoke -- developer
 
 本仓库的公共维护面和官方发行版必须保持可分离：
 
-- 公共维护面包括 `apps/desktop` 的通用启动流程、`packages/desktop-plugin` 的公开 service、bundle manifest、profile 编译器、模板和构建工具。
+- 公共维护面包括 `apps/desktop` 的通用启动流程、`packages/desktop-services` 的公开 service、bundle manifest、profile 编译器、模板和构建工具。
 - 官方发行版包括 `distribution.yml` 的默认身份、`profiles/dsh-forge-official/`、官方精选 bundle 和官方 catalog 快照。
 - Fork 发行版拥有自己的 `distribution.yml`、`profiles/<name>/`、品牌资源、可选 bundle、插件 catalog 和签名配置。
 
@@ -583,9 +583,9 @@ Fork 不得把 `artifacts/`、生成的 profile 目录或第三方插件源码�
 新仓库应按以下顺序创建：
 
 1. 创建 `distribution.yml` 和 `profiles/dsh-forge-official/`，固定官方发行版身份、DSH runtime 和最小 bundle 栈。
-2. 创建 `apps/desktop` 和 `packages/desktop-plugin`，只实现兼容模式。
+2. 创建 `apps/desktop`、`packages/desktop-services` 和私有 `desktop-services-local`，建立 capability seam。
 3. 实现 `profile:resolve`、`profile:verify` 和安装包启动 smoke。
-4. 增加 `packages/bundles/product-base`，再逐项加入 L0 插件。
+4. 只在有实际覆盖时增加产品策略 bundle，再逐项加入 L0 插件。
 5. 提供可复制的 profile、bundle 和发行版模板，并用模板生成一个独立的 Fork 示例。
 6. 最后实现插件目录、profile 管理、更新和其他发行版 flavor。
 

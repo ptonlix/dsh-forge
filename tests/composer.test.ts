@@ -21,11 +21,10 @@ test('真实 DSH dump 按 bundle 顺序临时注入 desktop layer', () => {
     '@deepseek-ai/dsh-base',
     '@deepseek-ai/dsh-web-app',
     '@dsh-forge/desktop-layer',
-    '@dsh-forge/product-base',
   ]);
   assert.equal(
     dump.entries.some(
-      (entry) => entry.id === 'dsh-forge-desktop-services' && entry.name === '@dsh-forge/desktop-plugin',
+      (entry) => entry.id === 'dsh-forge-desktop-services' && entry.name === '@dsh-forge/desktop-services-local',
     ),
     true,
   );

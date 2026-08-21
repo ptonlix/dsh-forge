@@ -223,7 +223,8 @@ function inspectAsar(paths: RuntimePaths, failures: InspectionFailure[]): void {
   for (const required of [
     'dist/apps/desktop/electron-main.js',
     'dist/apps/desktop/preload.js',
-    'packages/desktop-plugin/dist/index.js',
+    'packages/desktop-services-local/dist/index.js',
+    'packages/desktop-services/dist/index.js',
   ]) {
     if (!files.has(required)) failures.push({ code: 'ASAR_RUNTIME_ENTRY_MISSING', path: required });
   }

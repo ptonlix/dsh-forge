@@ -14,9 +14,19 @@
 
 健康提交依次需要 Host entry settle、loopback readiness、沙箱化窗口和 renderer boot report。pending 失败最多自动恢复一次到 last-known-good；恢复再失败后进入 manual recovery。窗口关闭仅隐藏；显式退出、信号、profile 切换和失败恢复等待 Host 与受管子进程完成有界 teardown。
 
+`@dsh-forge/desktop-services-local` 是 private provider，只能由 desktop layer 注册；
+`apps/desktop` 只能从其 `./launcher` export 注入 generation、profile、catalog 与 pnpm
+事实。provider 的 Cordis fiber 拥有 profile service、package lease、进程树和 WAL；
+fiber disposal 会停止新请求、取消活动 operation 并等待完整 finalization。第三方只可从
+`@dsh-forge/desktop-services` 读取公开 contract。
+
 ## 安装与更新
 
-插件安装必须由明确用户确认触发。启动期只读取静态 catalog，禁止自动下载或执行 package manager。安装 WAL 保护 profile 配置文件，不能声称回滚依赖目录。
+插件安装必须由明确用户确认触发。启动期只读取静态 catalog，禁止自动下载或执行
+package manager。confirmation 绑定 catalog 条目、目标 profile、精确 SemVer、来源、
+完整性、允许构建脚本和确认时间；provider 重新比对静态 catalog 后才启动 pnpm。安装
+WAL 保护 profile 配置文件，不能声称回滚依赖目录；未知 lockfile、来源漂移、非零退出、
+取消或健康失败都必须恢复或记录人工恢复。
 
 更新在独立暂存目录下载。应用前验证 channel 元数据签名、发行版身份、平台/架构、产物摘要、信任根和严格版本升级；然后 dispose generation 并交给平台安装器。未签名产物只能标记为本地或 CI smoke，不能进入生产更新 channel。macOS 生产产物需要签名与公证，Windows 生产产物需要 Authenticode 发布者验证。
 

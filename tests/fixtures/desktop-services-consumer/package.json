@@ -1,0 +1,5 @@
+{
+  "name": "desktop-services-consumer-fixture",
+  "private": true,
+  "type": "module"
+}

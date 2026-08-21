@@ -28,6 +28,8 @@
     "@deepseek-ai/dsh": "0.1.0-rc.7",
     "@deepseek-ai/dsh-invariants": "0.1.0-rc.7",
     "@electron/asar": "3.4.1",
+    "@dsh-forge/desktop-services": "workspace:*",
+    "semver": "7.8.5",
     "yaml": "2.9.0"
   },
   "devDependencies": {

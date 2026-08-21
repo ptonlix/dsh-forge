@@ -19,17 +19,29 @@
 
 ## desktopProfiles
 
-`@dsh-forge/desktop-plugin/profile-service` 公开 protocol `1` 的 profile service 类型。`current` 是 generation 内不可变的名称快照；`snapshot()` 返回深度冻结的 profile 快照；`list()` 只读返回 profile 摘要、可选择性和诊断；`select(name)` 先原子持久化 pending，再完整 dispose 当前 generation 后重启。
+`@dsh-forge/desktop-services` 是唯一公开 import。它以 Cordis `Context` 声明
+`desktopProfiles`、`desktopPnpm` 和 `desktopServices`，并通过
+`assertDesktopServicesProtocol()` 协商 protocol `1`。`desktopProfiles.current` 是
+generation 内不可变的名称快照；`snapshot()` 返回深度冻结的 profile 快照；`list()`
+只读返回 profile 摘要、可选择性和诊断；`select(name)` 先原子持久化 pending，再完整
+dispose 当前 generation 后重启。
 
 同一 generation 并发选择同一个目标共享同一 operation；选择不同目标会失败，且不会覆盖已持久化 pending。generation dispose 后的 service 引用必须失败，不能影响新 generation。
 
 ## desktopPnpm
 
-`@dsh-forge/desktop-plugin/pnpm` 公开受管 package operation。operation 提供 Node `Readable` 的 `stdout` 与 `stderr`、包含 `exitCode`、`signal` 和 `cancelled` 的 `done` Promise，以及返回 Promise 的幂等 `cancel()`。`done` 在完整受管进程树退出后才完成。
+公开 `DesktopPnpm` 只接受判别 command 或 catalog confirmation 派生的
+`ConfirmedPluginInstall`，不接受原始 pnpm 参数数组或任意 `object` options。operation
+提供 Node `Readable` 的 `stdout` 与 `stderr`、包含 `exitCode`、`signal` 和 `cancelled`
+的 `done` Promise，以及返回 Promise 的幂等 `cancel()`。`done` 直到完整进程树、
+reconcile、来源验证、健康检查和 receipt 或恢复完成才结算。
 
 第三方插件只能依赖上述 exports；Electron `desktopRuntime`、host provider、原生路径和启动事实均为内部实现。
 
-每个 generation 同时最多一个 operation。空参数、NUL、无效绝对路径、已取消 signal、busy 状态或已关闭 generation 都会在启动子进程前失败。`runPlugin()` 禁止 `add`；安装必须调用独立 `installPlugin()`，使用精确版本和恢复事务。
+每个 generation 同时最多一个 operation。已取消 signal、busy 状态或已关闭 generation
+都会在启动子进程前失败。registry 安装必须使用 catalog 确认的 registry、tarball 和
+integrity；Git 安装必须使用完整 commit。provider 在提交 receipt 前比较 lockfile 的名称、
+精确版本、来源与完整性。
 
 恢复事务只保护 `package.json`、`pnpm-lock.yaml` 与 `pnpm-workspace.yaml`。它不承诺回滚 `node_modules`；下一 generation 健康失败或无法证明 profile 一致时，状态会标记为人工恢复。
 
