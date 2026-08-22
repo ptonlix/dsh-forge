@@ -24,7 +24,7 @@ entries:
     enforcement: unavailable
   - schema: dsh-forge/catalog@1
     id: dsh-better-sidebar
-    tier: L1
+    tier: L0
     packageName: dsh-better-sidebar
     version: 0.14.0
     source:

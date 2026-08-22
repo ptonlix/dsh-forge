@@ -38,9 +38,11 @@
 
 Tauri 不进入首版实现，但宿主能力必须通过独立的 `desktopRuntime` 提供方抽象。未来的 Tauri 宿主只能替换该提供方，不能迫使 DSH bundle 或第三方插件改写。
 
-### 2.2 桌面行为以 DSH 插件实现
+### 2.2 桌面行为以固定发行 profile 运行
 
-Electron 启动器只保留不可由 Cordis 完成的职责：单实例锁、进程启动、原生运行时初始化、打包入口和最终退出。窗口、导航、profile 选择、插件管理、更新和桌面设置都由 DSH Host 插件通过 effect 管理。
+Electron 启动器负责单实例锁、进程启动、原生运行时初始化、打包入口、窗口、导航、打包时绑定的 profile 和最终退出。DSH Host Cordis generation 负责该 profile 内的 Agent、工具、会话、模型和 Web 服务；desktop layer 只在 generation 内发布受控桌面 service。
+
+当前发行包不提供运行时 profile 切换、插件目录或动态下载插件的页面入口。第三方依赖由 profile 在构建期解析、锁定并随安装包交付；Fork 通过修改 profile 后重新构建选择自己的组合。
 
 桌面包具有普通 DSH Host 和 Web Client 两个面。第三方插件继续使用标准 `dsh.bundle` 和 `dsh.client` 元数据，不依赖 Electron 专用注册表。
 
@@ -56,7 +58,7 @@ profile 生成物不能作为手工修改的第二个事实来源。用户修改
 
 Electron、DSH 和第三方插件仍在同一个 Node 进程中运行。首版插件执行模式为 `trusted-in-process`：插件安装和权限提示是信任、授权与审核机制，不构成对 Node 或 Electron 能力的技术隔离。
 
-### 2.5 本仓库是一等的可 Fork 发行版模板
+### 2.5 本仓库是一等的可 Fork 发行版基础
 
 本仓库同时交付一个官方参考发行版和一套可 Fork 的桌面发行版工具包。官方发行版用于验证 DSH、桌面插件、bundle 和构建流程；Fork 用户通过 `distribution.yml`、自己的 profile 和自有 bundle 生成不同名称、品牌、插件组合和更新渠道的桌面应用。
 
@@ -86,7 +88,7 @@ renderer 必须启用 Chromium sandbox 和 context isolation，关闭 Node integ
 
 ### 3.1 启动生命周期
 
-1. Electron 启动器获取单实例锁并解析用户选择的发行版。
+1. Electron 启动器获取单实例锁，并解析打包时绑定的 profile；开发态可以通过 `--profile` 选择仓库中的 profile。
 2. 启动器解析 Node、pnpm、共享 DSH Home 和发行 profile 目录，但不修改系统环境变量。
 3. 启动器提供 `desktopRuntime` 和启动事实，然后创建 Host Cordis generation。
 4. Loader 按序加载官方 bundle、发行版 bundle、desktop layer 和用户补丁。
@@ -100,11 +102,11 @@ DSH 的用户数据根目录遵循上游优先级：显式配置路径、`DSH_HO
 
 Electron 的 `userData` 只保存窗口、Chromium 数据和启动器 generation 状态。Desktop 不读取、迁移或复制任何历史私有 DSH Home；所有 DSH 会话、凭据、设置、存储和 profile 都只通过共享 Home 访问。
 
-官方发行版的 `defaultProfile` 与发行版 ID 均为 `dsh-forge-official`；该名称既是仓库编译源目录，也是共享 DSH Home 中的受管 profile 目录 `~/.dsh/profiles/dsh-forge-official`。开发态通过 `--profile <name>` 选择 `profiles/<name>/` 后，启动器会编译该 profile 并安装到 `~/.dsh/profiles/<name>`；只更新带有当前发行版归属和来源 profile 标记的目录，无法证明归属的同名目录必须拒绝覆盖。打包应用只包含构建时选定的一个 profile，并从随包的 resolved manifest 读取其名称，不能在启动时切换到未随包交付的 profile。用户自定义 profile 仍位于 `~/.dsh/profiles/<name>`，用户覆盖继续通过共享 Home 的 `cordis.patch.yml` 生效。
+官方发行版的 `defaultProfile` 与发行版 ID 均为 `dsh-forge-official`；该名称既是仓库编译源目录，也是共享 DSH Home 中的受管 profile 目录 `~/.dsh/profiles/dsh-forge-official`。开发态通过 `--profile <name>` 选择 `profiles/<name>/` 后，启动器会编译该 profile 并安装到 `~/.dsh/profiles/<name>`；只更新带有当前发行版归属和来源 profile 标记的目录，无法证明归属的同名目录必须拒绝覆盖。打包应用只包含构建时选定的一个 profile，并从随包的 resolved manifest 读取其名称，不会发现或启动其他用户 profile。用户覆盖仅对该受管 profile 的共享 Home `cordis.patch.yml` 生效。
 
 ### 3.2 重启边界
 
-profile 切换、桌面呈现模式切换和 DSH 核心升级都通过完整 generation dispose 后重启。桌面插件不得在运行中的根 Loader tree 中替换窗口、根布局或持久化服务。
+开发态切换 profile、桌面呈现模式切换和 DSH 核心升级都通过完整 generation dispose 后重启。打包发行包不提供运行时 profile 切换；桌面插件不得在运行中的根 Loader tree 中替换窗口、根布局或持久化服务。
 
 失败的 pending generation 必须保留目标记录，允许同一目标重试；新 generation 成功完成 Host 和窗口挂载后才能成为 last-known-good。
 
@@ -123,9 +125,7 @@ dsh-forge/
 │   │   └── src/
 │   ├── desktop-services-local/
 │   │   └── src/
-│   ├── bundles/
-│   ├── features/
-│   └── generators/
+│   └── bundles/
 ├── tools/
 │   └── profile-toolchain/
 ├── profiles/
@@ -133,7 +133,6 @@ dsh-forge/
 ├── schemas/
 ├── tests/
 │   └── fixtures/
-├── templates/
 ├── scripts/
 ├── docs/
 ├── distribution.yml
@@ -163,11 +162,7 @@ desktop layer 注册，`./launcher` 只由 `apps/desktop` 创建 capability。El
 
 ### 4.3 `packages/bundles`
 
-该目录只放可复用的 `dsh.bundle` 包，不放具体发行版。
-
-- `curated`：经过审查并默认启用的 L0 能力。
-- `optional`：已验证兼容但默认关闭或按需安装的能力。
-- `desktop-ui`：只在确实需要桌面呈现时加载的 Web UI 组合。
+该目录只放可复用的 `dsh.bundle` 包，不放具体发行版。当前仓库中的 `desktop-layer` 是 launcher 临时注入的本地 bundle；其他 bundle 可以由 Fork 在有实际组合需求时新增。
 
 官方 profile 选择 `dsh-base`、`dsh-web-app` 和经审计的第三方 bundle 作为持久运行组合，
 launcher 随后临时注入 desktop layer。产品策略 bundle 只能在同一变更中带有非空 patch、完整
@@ -192,7 +187,7 @@ bundle 的 `package.json` 必须声明 `dsh.bundle.patch`，并在 `dependencies
 
 已发布且自身声明有效 `dsh.bundle.patch` 的第三方 npm bundle 可以被官方 profile 直接选择，
 不得再创建只用于重复挂载同一 entry 的空 wrapper。例如官方 profile 直接选择
-`dsh-better-sidebar@0.14.0`；它是 L1 catalog 条目，固定 npm tarball integrity、许可证、
+`dsh-better-sidebar@0.14.0`；它是 L0 catalog 条目，固定 npm tarball integrity、许可证、
 维护者、依赖与安装脚本摘要、能力范围和已验证平台。该包在 profile 中只出现一次，避免重复
 注册 sidebar 路由。
 
@@ -228,7 +223,7 @@ Cordis Loader 动态导入检查。打包前，profile 内的 `node-pty` 必须�
 }
 ```
 
-`packages/bundles/optional/calendar/cordis.patch.yml` 只负责把插件加入 Loader：
+bundle 自己的 `cordis.patch.yml` 只负责把已安装插件加入 Loader：
 
 ```yaml
 - insert:
@@ -252,7 +247,7 @@ GitHub 依赖必须满足以下条件：
 
 - 仓库根目录或指定子目录包含合法的 `package.json`、可加载入口和许可证声明。
 - TypeScript 源码依赖必须提供自包含的 `prepare` 或其他构建脚本；安装时执行构建脚本需要在该 profile 生成的 `pnpm-workspace.yaml` 的 `allowBuilds` 中显式授权，并在审核记录中说明原因。
-- GitHub monorepo 的 `subdirectory` 写入 catalog，组合编译器负责生成实际的包管理器依赖地址，不能让不同 profile 手工拼接地址。
+- GitHub monorepo 的子目录必须由 bundle `package.json` 中固定 commit 的 Git 依赖规范表达；catalog 仍只记录 `kind: git`、`repository`、`commit` 和审核事实，不能让不同 profile 手工拼接来源地址。
 - 仓库不是合法 npm/Node 包时，不能直接写入 profile；应由原作者补齐包元数据，或由维护者创建不复制源码的薄适配 bundle，封装构建和 Loader 注册。
 
 profile 只选择 bundle，示例为：
@@ -264,41 +259,33 @@ bundles:
   - '@dsh-forge/bundle-calendar'
 ```
 
-GitHub 插件的 catalog 条目至少记录 `kind: github`、仓库、commit、可选的 `subdirectory`、包名、许可证、tier 和最近验证时间。解析后生成的 lockfile 记录最终版本和完整性；发布前必须执行 profile dump、Loader smoke、SBOM 和依赖审查。commit 锁定只能保证构建来源可复现，不能证明插件作者可信。
+GitHub 仓库在 catalog 中使用 `kind: git`，并记录 HTTPS `repository`、完整 `commit`、包名、许可证、tier 和最近验证时间；不为 GitHub 再创建第二种来源类型。依赖子目录由 bundle 的固定 Git 依赖规范表达。解析后生成的 lockfile 记录最终版本和完整性；发布前必须执行 profile dump、Loader smoke、SBOM 和依赖审查。commit 锁定只能保证构建来源可复现，不能证明插件作者可信。
 
-L1 插件建议按功能拆成独立 bundle，而不是集中到一个巨大的 `optional` bundle。这样用户可以逐项查看来源、权限、版本和失败回滚结果，也允许其他仓库直接复用其中一个 bundle。
+L1 插件建议按功能拆成独立 bundle，而不是集中到一个巨大的集合。Fork 维护者可以逐项审查来源、权限、版本和验证结果，并按需将 bundle 写入自己的 profile 后重新构建。
 
-### 4.4 `packages/features`
-
-这里放能够独立演进的产品功能，例如插件目录、来源展示、版本检查和安装确认 UI。功能包可以在普通 DSH 中运行；只有确实需要时才探测 `desktopProfiles` 或 `desktopPnpm`，否则保留普通 DSH fallback。
-
-### 4.5 `profiles`
+### 4.4 `profiles`
 
 每个目录是一个可复制的发行版定义。最小文件集合如下：
 
 ```text
 profiles/developer/
 ├── profile.yml
-├── cordis.patch.yml
-├── pnpm-lock.yaml
-└── README.md
+└── cordis.patch.yml # 可选
 ```
 
-`profile.yml` 是组合源文件；`cordis.patch.yml` 是发行版拥有的最终覆盖层；锁文件记录精确解析结果。编译后的 `package.json`、profile 目录、SBOM 和安装包暂存到 `artifacts/`，不手工编辑。
+`profile.yml` 是组合源文件；`cordis.patch.yml` 是可选的发行版最终覆盖层。profile-local lockfile、编译后的 `package.json`、profile 目录、SBOM 和安装包暂存到 `artifacts/`，不手工编辑。
 
 包含 GitHub 源码依赖时，编译器还必须生成 profile 专属的 `pnpm-workspace.yaml`，把经过审核的构建脚本写入 `allowBuilds`；用户修改授权后必须重新解析、锁定并验证 profile。
 
 `profiles/dsh-forge-official/` 是本仓库维护的参考发行版；Fork 用户创建 `profiles/<name>/`，通过复制发行 profile 并替换自己的 bundle 和插件形成组合，不直接改写 `dsh-forge-official`。每个 Fork profile 都必须可以独立执行 `profile:resolve`、`profile:verify` 和安装包冒烟。
 
-### 4.6 `catalog`、`tools` 和 `templates`
+### 4.5 `catalog` 和 `tools`
 
-`catalog` 保存插件目录快照、来源和审核事实；它不在应用启动时动态决定加载内容。
+`catalog` 保存静态插件快照、来源和审核事实；它不在应用启动时动态决定加载内容，也不向当前发行包提供下载入口。
 
-`tools/profile-toolchain` 保存清单解析、组合、profile 验证、SBOM、catalog、发布和 CLI；这些工具不是 DSH 运行时插件。`packages/features` 与 `packages/generators` 是真实功能包和生成器包的集合根，没有实际消费者时不创建空实现。
+`tools/profile-toolchain` 保存清单解析、组合、profile 验证、SBOM、catalog、发布和 CLI；这些工具不是 DSH 运行时插件。
 
-`templates` 为第三方提供新插件、新 bundle 和新 profile 的起始结构。模板必须生成可通过同一质量门禁的最小项目。
-
-### 4.7 `distribution.yml`
+### 4.6 `distribution.yml`
 
 `distribution.yml` 是 Fork 用户的发行版身份入口，不属于 DSH 运行时插件。它保存应用 ID、产品名称、包作用域、默认 profile、品牌资源和更新渠道；构建器将这些值传给 Electron 打包、安装器、更新器和桌面插件。
 
@@ -330,9 +317,9 @@ branding:
 ```
 <!-- /dsh-forge-example:distribution -->
 
-Fork 用户应优先修改 `distribution.yml` 和 `profiles/<name>/`。需要新增能力时，再创建自己的 bundle 或 feature；只有确实涉及窗口、托盘或平台 API 时才修改 `apps/desktop` 的平台适配层。
+Fork 用户应优先修改 `distribution.yml` 和 `profiles/<name>/`。需要新增能力时，再创建自己的 bundle 或独立 DSH 包；只有确实涉及窗口或平台 API 时才修改 `apps/desktop` 的平台适配层。
 
-### 4.8 上游同步边界
+### 4.7 上游同步边界
 
 新仓库不创建 `upstream.json` 或 `upstream/`。本项目直接使用固定版本的官方 DSH 包，不复制 DSH 核心源码，也不把上游源码快照作为发行版的维护源文件；这两个路径会模糊公共框架、官方发行版和 Fork 定制代码的所有权。
 
@@ -378,7 +365,7 @@ bundles:
 - 依赖版本、来源、完整性和许可证信息可追溯。
 - 同一 Cordis peer 版本不会产生重复运行时实例。
 - bundle 顺序、禁用项和 patch 目标能够被 `dsh --dump-config` 解释。
-- 启用插件的声明权限不超过发行版允许的能力上限。
+- 外部 bundle 的来源、完整性、许可证、能力和审核事实与静态 catalog 一致。
 
 加载顺序固定为：
 
@@ -386,8 +373,7 @@ bundles:
 dsh-base
   -> dsh-web-app
   -> desktop layer（launcher 临时注入）
-  -> selected product bundles
-  -> selected plugins
+  -> profile 声明的其余 bundle
   -> profile patch
   -> home patch
   -> launcher overlay
@@ -395,23 +381,22 @@ dsh-base
 
 desktop layer 可以由启动器按 generation 注入，但不能把自身永久写入用户选择的 bundle 列表。
 
-所有发行版默认继承官方运行配置。只有存在实际覆盖时，产品策略 bundle 才会加入 profile：
+所有 profile 使用同一固定运行时矩阵。只有存在实际覆盖时，产品策略 bundle 才会加入 profile：
 
 ```text
 dsh-base / dsh-web-app（官方运行基线）
   -> desktop layer（私有 provider）
-  -> 非空 product-policy bundle（可选）
-  -> curated / optional
-  -> 用户 profile 补丁
+  -> profile 声明的非空 bundle
+  -> profile 补丁
 ```
 
 ## 6. 插件分层与信任模型
 
-插件目录的分类描述兼容性和交付状态，不宣称代码安全：
+静态 catalog 的分层描述兼容性和交付状态，不宣称代码安全：
 
 - L0：随安装包交付并默认启用；通过源码、依赖、权限和平台冒烟审查。
-- L1：目录中可发现，经过兼容性验证；默认不加载，安装或启用前需要用户确认。
-- L2：只提供来源链接或独立安装方式；不进入发行版安装包。
+- L1：经过兼容性验证但不进入默认 profile；Fork 维护者可以在审查后将其写入自己的 profile 并重新构建。
+- L2：只记录来源和审核事实；不进入默认 profile 或发行版安装包。
 
 每个插件记录以下事实：来源、精确版本、提交或 tarball 完整性、许可证、维护者、依赖、需要的 Host 能力、模型可见工具和最近一次验证结果。
 
@@ -419,47 +404,11 @@ dsh-base / dsh-web-app（官方运行基线）
 
 ## 7. 桌面服务公开接口
 
-### 7.1 `desktopProfiles`
+`@dsh-forge/desktop-services` 的精确类型、返回值和失败语义由[基础契约参考](../reference/foundation-contracts.md)与包内 README 定义。它提供 generation 范围的 `desktopProfiles`、`desktopPnpm` 和 `desktopServices`，但当前固定 profile 发行包不提供调用这些 service 切换 profile 或下载插件的页面入口。
 
-```ts
-import type { DesktopProfiles, DesktopProfileSnapshot } from '@dsh-forge/desktop-services'
+`desktopProfiles.select()` 仅服务于开发态或未来多 profile Host；`desktopPnpm.install()` 保留受 catalog 确认、来源校验和恢复保护的底层能力，不代表当前产品支持运行时插件安装。第三方不能传递原始 pnpm 参数、路径或任意 options。
 
-interface DesktopProfiles {
-  readonly current: string | null
-  snapshot(): Readonly<DesktopProfileSnapshot>
-  list(): readonly DesktopProfileSummary[]
-  select(name: string): Promise<DesktopProfileSelection>
-}
-```
-
-`current` 是一个 generation 内不可变的快照。`select()` 是持久化后重启的 operation，不是就地修改 Loader tree。插件不能通过 argv、settings、`ctx.baseUrl` 或 `$DSH_HOME` 猜测当前 profile。
-
-### 7.2 `desktopPnpm`
-
-```ts
-import type { Readable } from 'node:stream'
-import type { ConfirmedPluginInstall, DesktopPnpm, DesktopPnpmOperation } from '@dsh-forge/desktop-services'
-
-interface DesktopPnpmOperation {
-  readonly stdout: Readable
-  readonly stderr: Readable
-  readonly done: Promise<Readonly<{ exitCode: number | null; signal: NodeJS.Signals | null; cancelled: boolean }>>
-  cancel(): Promise<void>
-}
-
-interface DesktopPnpm {
-  run(command: { kind: 'inspect'; query: 'list' | 'why' }): DesktopPnpmOperation
-  install(request: ConfirmedPluginInstall): DesktopPnpmOperation
-}
-```
-
-插件管理只能使用判别 command 或由 catalog confirmation 派生的 `install()`。provider
-始终拥有 profile 初始化、reconcile、来源校验与恢复语义，第三方不能传递原始 pnpm
-参数、路径或任意 options。
-
-两个方法都必须返回 stdout、stderr、完成状态和取消句柄。调用方负责 deadline、进度显示、非零退出码处理、取消和 teardown 等待。
-
-### 7.3 跨环境插件
+### 7.1 跨环境插件
 
 普通 DSH 插件不能把 Desktop service 放进顶层必需依赖。它应在 Desktop service 存在时挂载 Desktop adapter，在普通 Web 或 headless 环境中保留原实现。
 
@@ -472,7 +421,7 @@ interface DesktopPnpm {
 1. 从 `profile.yml` 解析依赖、bundle、插件和 patch。
 2. 在干净环境安装锁定依赖，运行 `dump-config`、Loader smoke 和插件兼容性测试。
 3. 生成 profile 目录、SBOM、许可证通知、resolved manifest 和平台资源。
-4. 启动真实安装包，验证窗口、loopback Web、profile、退出、更新和回滚。
+4. 启动真实安装包，验证窗口、loopback Web、固定 profile 和退出；更新与回滚只在启用生产发布链路后验证。
 
 profile 工具命令支持显式 profile；省略名称时使用 `distribution.yml` 的 `defaultProfile`：
 
@@ -508,7 +457,7 @@ pnpm run package:smoke -- developer
 
 任何层都不能把任意第三方 Node 插件变成进程级安全隔离。需要真正隔离的能力必须另行设计进程协议或远程 provider，不能只依赖 `enabled: false`、Electron sandbox 或 Tauri capability。
 
-桌面插件安装只能由明确的用户或管理员操作触发。应用必须展示插件名称、来源、版本、许可证、请求的 Host 能力和将修改的 profile；退出码为零不能替代安装后的 profile 和 Loader 验证。
+当前发行包不提供运行时插件安装。插件名称、来源、版本、许可证、能力和审核事实由维护者在 catalog 与 profile 审查中确认，解析后随安装包交付。未来若引入运行时安装，必须在独立变更中定义用户确认、展示、来源校验、恢复与健康检查契约。
 
 ## 10. 版本与升级
 
@@ -522,7 +471,7 @@ pnpm run package:smoke -- developer
 
 上游升级必须同时通过源码溯源、npm artifact、profile dump、平台打包和真实安装包启动验证。会话数据、profile 数据和插件依赖使用不同的迁移策略；不能因为桌面壳升级而隐式修改用户会话记录。
 
-更新采用“下载、校验、用户确认、完整重启”的流程。更新器不得在运行中的 Cordis generation 内替换已加载的 Node 依赖。
+当前官方发行版关闭更新入口。工具链可以验证更新元数据、信任根和签名，但 Electron 应用尚未接入下载或安装流程；启用更新前必须在独立发布变更中实现“下载、校验、用户确认、完整重启”，且不得在运行中的 Cordis generation 内替换已加载的 Node 依赖。
 
 ## 11. 测试要求
 
@@ -531,31 +480,27 @@ pnpm run package:smoke -- developer
 - 每个 profile 都有确定性的 `dump-config` 快照或结构化断言。
 - 每个 bundle 的 patch 都有加载和冲突失败测试。
 - 第三方插件夹具通过真实 package resolution 加载，而不是只使用 mock。
-- profile 切换验证持久化顺序、失败回滚和旧 service 失效。
+- 开发态 profile 重新启动验证持久化顺序、失败恢复和旧 service 失效；打包发行包不提供运行时切换入口。
 
 ### 11.2 桌面测试
 
 - Electron 启动、随机端口、URL readiness 和窗口加载。
 - renderer 的 sandbox、context isolation、无 Node integration 和导航 allowlist。
 - 关闭窗口隐藏、显式退出、SIGTERM、崩溃和自动重启。
-- macOS 和 Windows 的窗口、托盘、终端、更新和安装包启动。
+- 每个声明平台在生产发布前执行真实安装包启动、窗口、退出和 native evidence 验证；托盘、终端与更新 UI 不属于当前范围。
 
 ### 11.3 供应链测试
 
 - 锁文件完整性和依赖来源检查。
 - 许可证通知和 SBOM 完整性检查。
 - 安装脚本、native addon 和 Electron ABI 检查。
-- 每个发行包启动后执行真实 profile 和插件管理冒烟。
+- 每个发行包启动后执行固定 profile、bundle 闭包和 Loader 的真实冒烟。
 
 ## 12. 开发顺序
 
-第一阶段只实现兼容模式、单个 `developer` profile、`desktopProfiles`、随机 loopback 端口和安装包启动验证。
+当前范围是固定 profile 的发行构建、桌面启动、静态 catalog、依赖闭包审计和安装包 smoke。Fork 通过修改发行版身份与 profile 后重新构建，不在运行时切换 profile 或下载插件。
 
-第二阶段加入 `curated` bundle、插件目录、用户确认安装和 `desktopPnpm`；插件目录先使用静态审核快照，不做运行时自动安装。
-
-第三阶段加入多个 flavor、profile 回滚、SBOM、签名更新和跨平台发布流水线。
-
-第四阶段再评估高级桌面布局、远程控制、独立插件进程和 Tauri 宿主。任何新宿主都必须实现既有 `desktopRuntime` 和 Desktop service contract。
+签名更新、跨平台发布流水线、高级桌面布局、远程控制、独立插件进程和 Tauri 宿主均不属于当前范围。任何后续宿主都必须实现既有 `desktopRuntime` 和 Desktop service contract。
 
 ## 13. 验收标准
 
@@ -575,7 +520,7 @@ pnpm run package:smoke -- developer
 
 本仓库的公共维护面和官方发行版必须保持可分离：
 
-- 公共维护面包括 `apps/desktop` 的通用启动流程、`packages/desktop-services` 的公开 service、bundle manifest、profile 编译器、模板和构建工具。
+- 公共维护面包括 `apps/desktop` 的通用启动流程、`packages/desktop-services` 的公开 service、bundle manifest、profile 编译器和构建工具。
 - 官方发行版包括 `distribution.yml` 的默认身份、`profiles/dsh-forge-official/`、官方精选 bundle 和官方 catalog 快照。
 - Fork 发行版拥有自己的 `distribution.yml`、`profiles/<name>/`、品牌资源、可选 bundle、插件 catalog 和签名配置。
 
@@ -607,7 +552,7 @@ Fork 不得把 `artifacts/`、生成的 profile 目录或第三方插件源码�
 2. 创建 `apps/desktop`、`packages/desktop-services` 和私有 `desktop-services-local`，建立 capability seam。
 3. 实现 `profile:resolve`、`profile:verify` 和安装包启动 smoke。
 4. 只在有实际覆盖时增加产品策略 bundle，再逐项加入 L0 插件。
-5. 提供可复制的 profile、bundle 和发行版模板，并用模板生成一个独立的 Fork 示例。
-6. 最后实现插件目录、profile 管理、更新和其他发行版 flavor。
+5. 通过文档和现有 profile 说明 Fork 配置方式；不提供模板目录或生成器。
+6. 仅在独立产品变更中评估运行时插件安装、profile 管理、更新和其他发行版 flavor。
 
 完成上述入口后，再根据真实运行时失败和升级成本调整公开 service；不要先根据假设扩展 Electron API 或插件市场协议。
