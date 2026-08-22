@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "20.19.1"
+  NODE_VERSION: "22.14.0"
   PNPM_VERSION: "11.7.0"
   PROFILE: ${{ inputs.profile || 'dsh-forge-official' }}
 
@@ -40,13 +40,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
       - run: pnpm run lint
-      - run: pnpm run profile:resolve -- "$PROFILE"
-      - run: pnpm run profile:verify -- "$PROFILE"
-      - run: pnpm run dump-config -- "$PROFILE"
+      - run: pnpm run profile:resolve -- "${{ env.PROFILE }}"
+      - run: pnpm run profile:verify -- "${{ env.PROFILE }}"
+      - run: pnpm run dump-config -- "${{ env.PROFILE }}"
       - run: pnpm run catalog:verify
       - run: pnpm run docs:check
+      - name: 校验 tag 版本
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: bash
+        run: |
+          expected="$(pnpm exec tsx -e "import {parseDistribution} from './tools/profile-toolchain/src/core/schema.ts'; console.log(parseDistribution('distribution.yml').version)")"
+          test "${GITHUB_REF_NAME#v}" = "$expected"
 
   package:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     needs: validate
     strategy:
       fail-fast: false
@@ -75,17 +82,17 @@ jobs:
         run: node -p "JSON.stringify({platform:process.platform,arch:process.arch,target:'${{ matrix.target }}',profile:process.env.PROFILE,node:process.version})"
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm run profile:resolve -- "$PROFILE"
-      - run: pnpm run profile:verify -- "$PROFILE"
-      - run: pnpm run dump-config -- "$PROFILE"
+      - run: pnpm run profile:resolve -- "${{ env.PROFILE }}"
+      - run: pnpm run profile:verify -- "${{ env.PROFILE }}"
+      - run: pnpm run dump-config -- "${{ env.PROFILE }}"
       - run: pnpm run catalog:verify
-      - run: pnpm run package:desktop -- "$PROFILE" --target "${{ matrix.target }}" --formats "${{ matrix.formats }}"
-      - run: pnpm run package:inspect -- "$PROFILE"
-      - run: pnpm run package:smoke -- "$PROFILE" --target "${{ matrix.target }}"
+      - run: pnpm run package:desktop -- "${{ env.PROFILE }}" --target "${{ matrix.target }}" --formats "${{ matrix.formats }}"
+      - run: pnpm run package:inspect -- "${{ env.PROFILE }}"
+      - run: pnpm run package:smoke -- "${{ env.PROFILE }}" --target "${{ matrix.target }}"
       - name: 汇总目标 artifact
         shell: bash
         run: |
-          artifact_dir="$(find "artifacts/dsh-forge-official/$PROFILE" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+          artifact_dir="$(find "artifacts/dsh-forge-official/${{ env.PROFILE }}" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
           test -n "$artifact_dir"
           mkdir -p "ci-artifact/${{ matrix.target }}/packages"
           cp -R "$artifact_dir"/* "ci-artifact/${{ matrix.target }}/"
@@ -99,7 +106,7 @@ jobs:
           retention-days: 14
 
   summary:
-    if: ${{ always() }}
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.package.result == 'success' }}
     needs: package
     runs-on: ubuntu-22.04
     steps:
@@ -125,7 +132,7 @@ jobs:
             --targets darwin-universal,win32-x64,linux-x64 \
             --distribution dsh-forge-official \
             --version "$version" \
-            --profile "$PROFILE" \
+            --profile "${{ env.PROFILE }}" \
             --run-id "$GITHUB_RUN_ID" \
             --output release-index.json
       - uses: actions/upload-artifact@v4
@@ -136,7 +143,7 @@ jobs:
           retention-days: 14
 
   release:
-    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.summary.result == 'success' && needs.package.result == 'success' }}
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.summary.result == 'success' && needs.package.result == 'success' && vars.DSH_FORGE_PRODUCTION_RELEASE == 'true' }}
     needs: [package, summary]
     runs-on: ubuntu-22.04
     environment: desktop-release
@@ -159,7 +166,7 @@ jobs:
         shell: bash
         run: |
           digest="$(node -e "const fs=require('fs'); const i=JSON.parse(fs.readFileSync('release-artifacts/release-index/release-index.json','utf8')); console.log(i.inputDigest)")"
-          target_dir="artifacts/dsh-forge-official/$PROFILE/$digest"
+          target_dir="artifacts/dsh-forge-official/${{ env.PROFILE }}/$digest"
           mkdir -p "$target_dir"
           cp "release-artifacts/darwin-universal/runtime-manifest.json" "$target_dir/"
           cp "release-artifacts/darwin-universal/package-evidence.json" "$target_dir/"
@@ -170,13 +177,8 @@ jobs:
             cp "release-artifacts/$target/package-smoke.$target.json" "$target_dir/"
           done
       - run: pnpm install --frozen-lockfile
-      - name: 校验 tag 版本
-        shell: bash
-        run: |
-          expected="$(pnpm exec tsx -e "import {parseDistribution} from './tools/profile-toolchain/src/core/schema.ts'; console.log(parseDistribution('distribution.yml').version)")"
-          test "${GITHUB_REF_NAME#v}" = "$expected"
       - name: 执行 release gate
-        run: pnpm run release:gate -- "$PROFILE"
+        run: pnpm run release:gate -- "${{ env.PROFILE }}"
       - name: 创建 GitHub Release
         shell: bash
         env:

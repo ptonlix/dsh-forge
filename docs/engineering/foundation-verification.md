@@ -105,11 +105,17 @@ runner 目标：`macos-14` 构建一个同时包含 `arm64/x64` 的 `darwin-univ
 `runtime-manifest.json`、`package-evidence.json`、native verification、smoke report、resolved
 manifest、SBOM 输入和许可证通知。
 
-工作流分为 `validate`、原生 `package` 矩阵和 `summary`/`release`。summary 使用
+工作流分为 `validate`、原生 `package` 矩阵和 `summary`/`release`。Pull request 与
+`workflow_dispatch` 只执行 `validate`，不会启动 macOS、Windows 或 Linux runner；只有与
+`distribution.yml.version` 一致的 `v*` tag 才启动三平台 package 和 summary。summary 使用
 `pnpm run release:index` 检查三个目标是否齐全，并比较 distribution、version、profile、input
-digest 及文件 SHA-256；缺少或漂移的 evidence 会阻止后续 job。Pull request 和手动运行只有
-`contents: read`，只产生 run-scoped artifact；只有 `v*` tag 且 tag 版本等于
-`distribution.yml.version` 时才进入受保护的 release job。
+digest 及文件 SHA-256；缺少或漂移的 evidence 会阻止后续 job。普通 job 只有
+`contents: read`，tag 打包只产生 run-scoped artifact。生产 Release 默认关闭；只有仓库变量
+`DSH_FORGE_PRODUCTION_RELEASE=true`、签名/公证证据齐全且 `release:gate` 通过时，受保护的
+release job 才会请求 `contents: write`。
+
+工作流固定使用 Node.js `22.14.0` 和 pnpm `11.7.0`。pnpm 11.7 的 engine 下限为 Node
+`>=22.13`，Node 20 缺少其使用的 `node:sqlite`，不能作为仓库安装或 CI runtime。
 
 当前仍未配置或执行代码签名、公证和 Windows Authenticode。unsigned smoke artifact 可以用于
 诊断和平台验证，但 `release:gate` 会拒绝未签名或缺少更新信任根的生产 Release。Linux 只承诺

@@ -15,7 +15,8 @@
   LTS 的 x64 主机，避免用户下载两个 macOS 架构安装包。
 - 让构建、证据、上传和 Release 汇总使用同一 profile 名称、distribution version 和
   输入 digest；失败目标不能被汇总 job 忽略。
-- 让 pull request/手动运行可获得不发布的 artifact，让版本 tag 走严格的 Release 门禁。
+- 让 pull request 和手动运行只执行代码、profile、catalog 与文档检查，让版本 tag 才使用
+  原生 runner 构建 artifact 并走严格的 Release 门禁。
 - 复用现有 profile-toolchain、`package:inspect`、`package:smoke` 和 `release:gate`，不在
   workflow 中重写解析、信任或恢复逻辑。
 
@@ -44,8 +45,11 @@ Linux 构建使用 Ubuntu 22.04 runner，生成 x64 `AppImage` 与 `deb`；包�
 ### 2. 分离验证 job、构建 job 和汇总 job
 
 `validate` 在 Ubuntu 上运行与平台无关的 typecheck、lint、profile/catalog/docs 门禁。
-`package` 使用 `needs: validate` 的矩阵 job 执行 profile resolve、config dump、目标打包、
-inspect、smoke，并上传一个按目标命名的 artifact。`release` 等待完整矩阵（不使用
+根 `typecheck` 在执行无输出的根 TypeScript 检查前，按 package exports 的依赖顺序构建
+`desktop-services`、`profile-toolchain` 和 `desktop-services-local`；干净检出不得依赖本机残留的
+`dist/*.d.ts`。
+`package` 仅在 `v*` tag 上使用 `needs: validate` 的矩阵 job 执行 profile resolve、config
+dump、目标打包、inspect、smoke，并上传一个按目标命名的 artifact。`release` 等待完整矩阵（不使用
 `fail-fast`），下载全部 artifact 后验证 manifest 的 distribution/profile/version/target
 一致性，再运行 `release:gate`；任何目标失败都阻止 Release。
 
@@ -74,10 +78,12 @@ macOS 生成 `dmg,zip`，产物名中的架构固定为 `universal`；Windows �
 
 ### 5. 触发和权限采用最小授权
 
-工作流响应 `pull_request`（只验证不上传发布包）、`workflow_dispatch`（可选 profile，
-只上传 CI artifact）和 `push` 到 `v*`（要求 tag 与 `distribution.yml.version` 一致，
-通过门禁后创建 Release）。默认权限为 `contents: read`；只有 release job 使用环境保护和
-`contents: write`。不把 secrets 暴露给 PR，签名相关环境变量只在受保护 release job 注入。
+工作流响应 `pull_request` 和 `workflow_dispatch` 时只运行 `validate`，不创建 package、summary
+或 Release job；只有 `push` 到 `v*` 才运行三平台 package 和 summary，且 tag 必须与
+`distribution.yml.version` 一致。生产 Release 还要求仓库变量
+`DSH_FORGE_PRODUCTION_RELEASE=true`，默认只保留 tag 对应的 run-scoped artifact。默认权限为
+`contents: read`；只有启用后的 release job 使用环境保护和 `contents: write`。不把 secrets
+暴露给 PR，签名相关环境变量只在受保护 release job 注入。
 
 ### 6. 失败与重跑语义
 
@@ -88,7 +94,8 @@ artifact，不覆盖源文件。
 
 ## Risks / Trade-offs
 
-- [GitHub runner label 或镜像工具链变化] -> workflow 固定 Node 20、pnpm 11.7，并在 job
+- [GitHub runner label 或镜像工具链变化] -> `pnpm 11.7.0` 要求 Node `>=22.13`，workflow
+  固定 Node `22.14.0` 并在 job
   开始打印 runner、Electron、pnpm、profile 和 target；label 变化由验证失败暴露。
 - [macOS/Windows secret 不完整] -> unsigned smoke 仍可上传诊断 artifact；tag Release 在
   `release:gate` 处明确失败，不创建生产 Release。
@@ -99,7 +106,8 @@ artifact，不覆盖源文件。
 
 ## Migration Plan
 
-1. 先合并 workflow、脚本参数和 CI fixture，在手动运行中只验证并上传 unsigned artifact。
+1. 先合并 workflow、脚本参数和 CI fixture；pull request 和手动运行只验证代码与发行配置，
+   使用版本 tag 生成 unsigned artifact。
 2. 为仓库配置所需的 macOS/Windows 签名凭据和受保护 environment 后，使用版本 tag 验证
    `release:gate` 与 GitHub Release 权限。
 3. 若需要回滚，禁用 workflow 的 tag trigger 并保留本地 `package:desktop`；不删除既有

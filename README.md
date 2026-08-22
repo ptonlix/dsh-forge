@@ -20,7 +20,7 @@ The packaged application binds one profile at build time. Development commands m
 
 ### Requirements
 
-- Node.js `>=20.0.0`.
+- Node.js `>=22.13.0`.
 - pnpm `11.7.0`.
 - A macOS or Windows environment that can run Electron.
 

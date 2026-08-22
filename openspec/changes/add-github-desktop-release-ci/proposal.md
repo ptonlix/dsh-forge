@@ -8,7 +8,8 @@
 ## What Changes
 
 - 新增 GitHub Actions 工作流，按 `darwin-universal`、`win32-x64` 和 `linux-x64` 矩阵构建
-  desktop 包；macOS 只发布一个同时包含 arm64/x64 的 universal 包，Linux 面向 Ubuntu LTS。
+  desktop 包；矩阵只由版本 tag 触发，macOS 只发布一个同时包含 arm64/x64 的 universal 包，
+  Linux 面向 Ubuntu LTS。Pull request 和手动运行只执行代码与配置检查，不占用原生打包 runner。
 - 在构建前执行 profile resolve/verify、config dump、catalog 校验和仓库静态门禁；构建
   后执行 package inspect、平台 smoke 和 `release:gate` 所需的证据收集。
 - 扩展 desktop 打包入口，使 CI 能为当前平台生成可下载的安装包/归档，同时保留现有
@@ -20,6 +21,8 @@
   不得进入生产更新发布。
 - 将官方 profile 使用的外部 bundle `dsh-better-sidebar` 的 catalog tier 与编译器契约对齐为
   `L1`，使 CI 的 profile resolve/verify 能在固定输入上运行；不改变 bundle 版本、来源或执行模式。
+- 将仓库工具链 Node 下限调整为 `>=22.13.0`，CI 固定使用 Node `22.14.0`，满足
+  `pnpm 11.7.0` 对 `node:sqlite` 的运行要求；不改变 profile 描述的 Electron/DSH runtime 下限。
 - **不包含**代码签名、公证、Authenticode 证书或自动更新通道的实现；这些仍由现有发布
   契约约束，并需要独立的凭据与变更。
 
@@ -28,7 +31,7 @@
 ### New Capabilities
 
 - `github-desktop-release-ci`: 定义 GitHub Actions 的平台矩阵、universal macOS 构建、
-  Ubuntu Linux 构建、产物证据归档、手动/tag 触发和生产 Release 门禁。
+  Ubuntu Linux 构建、产物证据归档、PR 检查、tag 打包和生产 Release 门禁。
 
 ### Modified Capabilities
 
