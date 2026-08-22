@@ -152,6 +152,7 @@ export interface NativeFile {
 export interface RuntimeManifest {
   /** 已打包运行时的可审计清单；targets 与 nativeAddons 用于发布前平台校验。 */
   readonly packageRoot: string | null;
+  readonly inputDigest?: string;
   readonly targets: readonly RuntimeTarget[];
   readonly declaredTargets?: readonly RuntimeTarget[];
   readonly nativeAddons?: readonly NativeFile[];

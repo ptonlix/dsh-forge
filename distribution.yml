@@ -11,6 +11,8 @@ platforms:
     architectures: [arm64, x64]
   - os: win32
     architectures: [x64]
+  - os: linux
+    architectures: [x64]
 updates:
   enabled: false
   channel: stable

@@ -127,6 +127,17 @@ export function runtimePaths(packageRoot: string | null | undefined, platform = 
       runtime: path.join(resources, 'dsh-forge', 'runtime', 'node_modules'),
     };
   }
+  if (platform === 'linux' && fs.existsSync(path.join(packageRoot, 'resources'))) {
+    const resources = path.join(packageRoot, 'resources');
+    return {
+      application: packageRoot,
+      resources,
+      asar: path.join(resources, 'app.asar'),
+      unpacked: path.join(resources, 'app.asar.unpacked'),
+      profile: path.join(resources, 'dsh-forge', 'profile'),
+      runtime: path.join(resources, 'dsh-forge', 'runtime', 'node_modules'),
+    };
+  }
   return {
     application: packageRoot,
     resources: packageRoot,
@@ -229,7 +240,7 @@ export function validateRuntimeTargets(targets: readonly RuntimeTarget[], label 
   for (const target of targets) {
     if (
       !target ||
-      !['darwin', 'win32'].includes(target.os) ||
+      !['darwin', 'win32', 'linux'].includes(target.os) ||
       !Array.isArray(target.architectures) ||
       target.architectures.length === 0
     )
@@ -274,6 +285,7 @@ export function createRuntimeManifest({
   const nativeAddons = paths ? collectPackagedNativeFiles(paths) : [];
   return {
     schema: 'dsh-forge/runtime-manifest@1',
+    inputDigest: resolved.inputDigest,
     distribution: resolved.distribution,
     profile: resolved.profile,
     runtime: {
@@ -362,6 +374,22 @@ function packagedElectronExecutable(paths: RuntimePaths): string | null {
       .readdirSync(paths.application)
       .filter((name) => name.endsWith('.exe'))
       .map((name) => path.join(paths.application, name));
+    return candidates.length === 1 ? candidates[0]! : null;
+  }
+  if (process.platform === 'linux') {
+    if (!fs.existsSync(paths.application)) return null;
+    const candidates = fs
+      .readdirSync(paths.application)
+      .map((name) => path.join(paths.application, name))
+      .filter((candidate) => {
+        const name = path.basename(candidate);
+        if (name === 'chrome-sandbox' || name === 'chrome_crashpad_handler') return false;
+        try {
+          return fs.statSync(candidate).isFile() && (fs.statSync(candidate).mode & 0o111) !== 0;
+        } catch {
+          return false;
+        }
+      });
     return candidates.length === 1 ? candidates[0]! : null;
   }
   return null;
@@ -613,11 +641,11 @@ export function verifyEvidence(
 }
 
 /** 汇总 profile、配置、包、catalog、smoke 和证据检查，决定是否允许发布。 */
-function nativeEvidenceTarget(evidence: unknown): string | null {
-  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
+function nativeEvidenceTargets(evidence: unknown): readonly string[] {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return [];
   const record = evidence as Record<string, unknown>;
   const target = record.target;
-  if (!target || typeof target !== 'object' || Array.isArray(target)) return null;
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return [];
   const targetRecord = target as Record<string, unknown>;
   if (
     record.schema !== 'dsh-forge/native-verification@1' ||
@@ -628,16 +656,18 @@ function nativeEvidenceTarget(evidence: unknown): string | null {
     !/^[a-f0-9]{64}$/i.test(record.runtimeManifestSha256) ||
     !Array.isArray(record.nativeFiles) ||
     typeof record.verifiedAt !== 'string' ||
-    !['darwin', 'win32'].includes(String(targetRecord.os)) ||
-    !['arm64', 'x64', 'ia32'].includes(String(targetRecord.architecture))
-  )
-    return null;
+    !['darwin', 'win32', 'linux'].includes(String(targetRecord.os))
+  ) return [];
+  const architectures = Array.isArray(targetRecord.architectures)
+    ? targetRecord.architectures
+    : [targetRecord.architecture];
+  if (architectures.length === 0 || architectures.some((architecture) => !['arm64', 'x64', 'ia32'].includes(String(architecture)))) return [];
   try {
     for (const native of record.nativeFiles) validateNativeFile(native as NativeFile, 'native verification evidence');
   } catch {
-    return null;
+    return [];
   }
-  return `${targetRecord.os}-${targetRecord.architecture}`;
+  return architectures.map((architecture) => `${targetRecord.os}-${String(architecture)}`);
 }
 
 export function releaseGate({
@@ -672,13 +702,15 @@ export function releaseGate({
       failures.push('真实安装包 smoke 未通过');
       continue;
     }
-    const target = nativeEvidenceTarget(smoke.nativeEvidence);
-    if (!target) {
+    const targets = nativeEvidenceTargets(smoke.nativeEvidence);
+    if (!targets.length) {
       failures.push('native verification evidence 无效');
       continue;
     }
-    if (verifiedTargets.has(target)) failures.push(`native verification evidence 重复: ${target}`);
-    verifiedTargets.add(target);
+    for (const target of targets) {
+      if (verifiedTargets.has(target)) failures.push(`native verification evidence 重复: ${target}`);
+      verifiedTargets.add(target);
+    }
   }
   for (const declared of manifest?.declaredTargets || [])
     for (const architecture of declared.architectures || []) {

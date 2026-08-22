@@ -1,0 +1,188 @@
+name: Desktop Release
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "要构建的 profile"
+        required: false
+        default: dsh-forge-official
+        type: string
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20.19.1"
+  PNPM_VERSION: "11.7.0"
+  PROFILE: ${{ inputs.profile || 'dsh-forge-official' }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+      - run: pnpm run profile:resolve -- "$PROFILE"
+      - run: pnpm run profile:verify -- "$PROFILE"
+      - run: pnpm run dump-config -- "$PROFILE"
+      - run: pnpm run catalog:verify
+      - run: pnpm run docs:check
+
+  package:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-universal
+            runner: macos-14
+            formats: dmg,zip
+          - target: win32-x64
+            runner: windows-2022
+            formats: nsis,zip
+          - target: linux-x64
+            runner: ubuntu-22.04
+            formats: AppImage,deb
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: 打印构建身份
+        run: node -p "JSON.stringify({platform:process.platform,arch:process.arch,target:'${{ matrix.target }}',profile:process.env.PROFILE,node:process.version})"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run profile:resolve -- "$PROFILE"
+      - run: pnpm run profile:verify -- "$PROFILE"
+      - run: pnpm run dump-config -- "$PROFILE"
+      - run: pnpm run catalog:verify
+      - run: pnpm run package:desktop -- "$PROFILE" --target "${{ matrix.target }}" --formats "${{ matrix.formats }}"
+      - run: pnpm run package:inspect -- "$PROFILE"
+      - run: pnpm run package:smoke -- "$PROFILE" --target "${{ matrix.target }}"
+      - name: 汇总目标 artifact
+        shell: bash
+        run: |
+          artifact_dir="$(find "artifacts/dsh-forge-official/$PROFILE" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+          test -n "$artifact_dir"
+          mkdir -p "ci-artifact/${{ matrix.target }}/packages"
+          cp -R "$artifact_dir"/* "ci-artifact/${{ matrix.target }}/"
+          cp -R "$artifact_dir/desktop-dist" "ci-artifact/${{ matrix.target }}/packages/"
+          printf '%s\n' "${{ matrix.target }}" > "ci-artifact/${{ matrix.target }}/target.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ci-artifact/${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 14
+
+  summary:
+    if: ${{ always() }}
+    needs: package
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: false
+      - run: pnpm install --frozen-lockfile
+      - name: 校验矩阵结果并生成索引
+        shell: bash
+        run: |
+          version="$(pnpm exec tsx -e "import {parseDistribution} from './tools/profile-toolchain/src/core/schema.ts'; console.log(parseDistribution('distribution.yml').version)")"
+          pnpm run release:index -- \
+            --root release-artifacts \
+            --targets darwin-universal,win32-x64,linux-x64 \
+            --distribution dsh-forge-official \
+            --version "$version" \
+            --profile "$PROFILE" \
+            --run-id "$GITHUB_RUN_ID" \
+            --output release-index.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-index
+          path: release-index.json
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.summary.result == 'success' && needs.package.result == 'success' }}
+    needs: [package, summary]
+    runs-on: ubuntu-22.04
+    environment: desktop-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: false
+      - name: 重建 release gate 输入目录
+        shell: bash
+        run: |
+          digest="$(node -e "const fs=require('fs'); const i=JSON.parse(fs.readFileSync('release-artifacts/release-index/release-index.json','utf8')); console.log(i.inputDigest)")"
+          target_dir="artifacts/dsh-forge-official/$PROFILE/$digest"
+          mkdir -p "$target_dir"
+          cp "release-artifacts/darwin-universal/runtime-manifest.json" "$target_dir/"
+          cp "release-artifacts/darwin-universal/package-evidence.json" "$target_dir/"
+          cp "release-artifacts/darwin-universal/sbom.input.json" "$target_dir/"
+          cp "release-artifacts/darwin-universal/THIRD-PARTY-NOTICES.txt" "$target_dir/"
+          for target in darwin-universal win32-x64 linux-x64; do
+            cp "release-artifacts/$target/native-verification.$target.json" "$target_dir/"
+            cp "release-artifacts/$target/package-smoke.$target.json" "$target_dir/"
+          done
+      - run: pnpm install --frozen-lockfile
+      - name: 校验 tag 版本
+        shell: bash
+        run: |
+          expected="$(pnpm exec tsx -e "import {parseDistribution} from './tools/profile-toolchain/src/core/schema.ts'; console.log(parseDistribution('distribution.yml').version)")"
+          test "${GITHUB_REF_NAME#v}" = "$expected"
+      - name: 执行 release gate
+        run: pnpm run release:gate -- "$PROFILE"
+      - name: 创建 GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t files < <(find release-artifacts -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' \) | sort)
+          test "${#files[@]}" -gt 0
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" release-artifacts/release-index/release-index.json \
+            --verify-tag --title "$GITHUB_REF_NAME" --generate-notes

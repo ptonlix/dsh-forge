@@ -99,7 +99,9 @@ export function main(command = process.argv[2], profileName = process.argv[3]): 
     const smokes = artifact
       ? fs
         .readdirSync(artifact)
-        .filter((file) => /^package-smoke\.(?:darwin|win32)-(?:arm64|x64|ia32)\.json$/.test(file))
+        .filter((file) =>
+          /^package-smoke\.(?:darwin-universal|(?:darwin|win32|linux)-(?:arm64|x64|ia32))\.json$/.test(file),
+        )
         .sort()
         .map((file) => JSON.parse(fs.readFileSync(path.join(artifact, file), 'utf8')))
       : [];

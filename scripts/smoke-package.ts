@@ -24,7 +24,28 @@ function applicationExecutable(application: string): string {
     if (names.length !== 1) throw new Error('Windows 安装包缺少唯一可执行入口');
     return path.join(application, names[0]!);
   }
+  if (process.platform === 'linux') {
+    const names = fs.readdirSync(application).filter((name) => {
+      if (name === 'chrome-sandbox' || name === 'chrome_crashpad_handler') return false;
+      const candidate = path.join(application, name);
+      try {
+        return fs.statSync(candidate).isFile() && (fs.statSync(candidate).mode & 0o111) !== 0;
+      } catch {
+        return false;
+      }
+    });
+    if (names.length !== 1) throw new Error('Linux 安装包缺少唯一可执行入口');
+    return path.join(application, names[0]!);
+  }
   throw new Error(`当前 smoke 平台尚未实现: ${process.platform}`);
+}
+
+function targetName(argv: readonly string[]): 'darwin-universal' | 'win32-x64' | 'linux-x64' | undefined {
+  const index = argv.indexOf('--target');
+  const value = index >= 0 ? argv[index + 1] : undefined;
+  if (value === 'darwin-universal' || value === 'win32-x64' || value === 'linux-x64') return value;
+  if (value !== undefined) throw new Error(`smoke target 无效: ${value}`);
+  return undefined;
 }
 
 function runtimeFact(runtime: RuntimeManifest, name: string): string {
@@ -40,7 +61,17 @@ function main(): void {
   const distribution = parseDistribution(path.join(root, 'distribution.yml'), {
     profilesRoot: path.join(root, 'profiles'),
   });
-  const profileName = (process.argv[2] === '--' ? process.argv[3] : process.argv[2]) || distribution.defaultProfile;
+  const args = process.argv.slice(2);
+  const positional = args.filter((argument, index) => argument !== '--' && argument !== '--target' && args[index - 1] !== '--target');
+  const profileName = positional[0] || distribution.defaultProfile;
+  const selectedTarget = targetName(args);
+  if (selectedTarget && selectedTarget.startsWith('darwin') && process.platform !== 'darwin')
+    throw new Error(`smoke target 与当前 runner 不匹配: ${selectedTarget}/${process.platform}-${process.arch}`);
+  if (selectedTarget === 'win32-x64' && (process.platform !== 'win32' || process.arch !== 'x64'))
+    throw new Error(`smoke target 与当前 runner 不匹配: ${selectedTarget}/${process.platform}-${process.arch}`);
+  if (selectedTarget === 'linux-x64' && (process.platform !== 'linux' || process.arch !== 'x64'))
+    throw new Error(`smoke target 与当前 runner 不匹配: ${selectedTarget}/${process.platform}-${process.arch}`);
+  const expectedArchitectures = selectedTarget === 'darwin-universal' ? ['arm64', 'x64'] : [process.arch];
   const profile = parseProfile(path.join(root, 'profiles', profileName, 'profile.yml'));
   if (profile.name !== profileName) throw new Error(`profile manifest 名称不一致: ${profileName} / ${profile.name}`);
   const artifact = findLatestArtifact(root, distribution.id, profileName);
@@ -86,7 +117,9 @@ function main(): void {
       throw new Error('安装包 Electron runtime 与 manifest 不一致');
     const nativeEvidence = {
       schema: 'dsh-forge/native-verification@1',
-      target: { os: process.platform, architecture: process.arch },
+      target: selectedTarget === 'darwin-universal'
+        ? { os: 'darwin', architectures: expectedArchitectures }
+        : { os: process.platform, architecture: expectedArchitectures[0] },
       electron,
       electronAbi,
       runtimeManifestSha256: sha256(runtimeFile),
@@ -94,7 +127,7 @@ function main(): void {
       result: 'passed',
       verifiedAt: new Date().toISOString(),
     };
-    const target = `${process.platform}-${process.arch}`;
+    const target = selectedTarget || `${process.platform}-${process.arch}`;
     fs.writeFileSync(path.join(artifact, `native-verification.${target}.json`), `${JSON.stringify(nativeEvidence, null, 2)}\n`, {
       mode: 0o600,
     });

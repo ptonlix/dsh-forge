@@ -66,7 +66,10 @@ git diff --check
 
 文档站构建输出 14 个双语路由、raw Markdown twin 和 `llms.txt`，并通过站内链接、fragment、发布清单与 GitHub Pages base path 检查。构建只使用仓库内容和 website workspace 依赖，不读取 Electron、DSH Home、profile 产物或外部插件状态。
 
-`pnpm run check:all` 已实际运行，但整体未通过：既有运行时测试要求官方外部 bundle `dsh-better-sidebar` 的 catalog tier 为 `L1`，当前仓库 `catalog/catalog.yml` 仍记录为 `L0`，因此 compiler、composer、acceptance 和 profile selection 测试在该事实冲突处失败。该冲突不属于本次文档变更，未通过修改 catalog 或运行时语义掩盖。
+`pnpm run check:all` 曾在文档站变更期间运行但未通过：当时既有运行时测试要求官方外部 bundle
+`dsh-better-sidebar` 的 catalog tier 为 `L1`，而 `catalog/catalog.yml` 记录为 `L0`，因此
+compiler、composer、acceptance 和 profile selection 测试在该事实冲突处失败。当前发行 CI 变更已
+按编译器契约将该外部 bundle 记录修正为 `L1`，本段保留历史验证事实，不代表当前门禁状态。
 
 本次没有执行 GitHub Pages 实际部署、token/凭据验证、平台签名、公证、Authenticode 或生产发布 smoke；这些能力不属于本变更的授权范围。
 
@@ -92,3 +95,22 @@ evidence 均保存在对应 profile artifact 中，记录所有最终 `.node` �
 
 `darwin-x64` 与 `win32-x64` 没有本机 native evidence，仍是发布门禁。它们不得因本次
 `darwin-arm64` smoke 通过而标记为已验证；`release:gate` 会继续拒绝缺少声明目标 evidence 的发布。
+
+## GitHub Desktop Release CI（2026-08-22）
+
+`add-github-desktop-release-ci` 引入 `.github/workflows/release-desktop.yml`，使用三个原生
+runner 目标：`macos-14` 构建一个同时包含 `arm64/x64` 的 `darwin-universal`，`windows-2022`
+构建 `win32-x64`，`ubuntu-22.04` 构建面向 Ubuntu 22.04 及以上 LTS 的 `linux-x64`。对应输出为
+`universal.dmg`/zip、Windows x64 `nsis`/zip 和 Linux x64 `AppImage`/deb；每个目标还上传
+`runtime-manifest.json`、`package-evidence.json`、native verification、smoke report、resolved
+manifest、SBOM 输入和许可证通知。
+
+工作流分为 `validate`、原生 `package` 矩阵和 `summary`/`release`。summary 使用
+`pnpm run release:index` 检查三个目标是否齐全，并比较 distribution、version、profile、input
+digest 及文件 SHA-256；缺少或漂移的 evidence 会阻止后续 job。Pull request 和手动运行只有
+`contents: read`，只产生 run-scoped artifact；只有 `v*` tag 且 tag 版本等于
+`distribution.yml.version` 时才进入受保护的 release job。
+
+当前仍未配置或执行代码签名、公证和 Windows Authenticode。unsigned smoke artifact 可以用于
+诊断和平台验证，但 `release:gate` 会拒绝未签名或缺少更新信任根的生产 Release。Linux 只承诺
+Ubuntu LTS x64；未覆盖 ARM Linux、其他发行版和跨平台交叉编译。
