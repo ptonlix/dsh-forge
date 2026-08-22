@@ -3,6 +3,11 @@ node_modules/
 .pnpm-store/
 dist/
 
+# Documentation-site build output
+website/.generated/
+website/.dist/
+website/.vitepress/cache/
+website/.vitepress/dist/
+
 # AI
 .serena/
-

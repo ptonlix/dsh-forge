@@ -20,6 +20,7 @@
     "./core/yaml": "./dist/core/yaml.js",
     "./schema": "./dist/core/schema.js",
     "./release": "./dist/release/index.js",
+    "./docs": "./dist/docs/index.js",
     "./trust": "./dist/trust/catalog.js",
     "./types": "./dist/types.js"
   },

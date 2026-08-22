@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "README.zh.md", "README.i18n.yaml"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

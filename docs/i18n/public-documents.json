@@ -1,0 +1,22 @@
+{
+  "public": [
+    "README.md",
+    "docs/README.md",
+    "docs/design/dsh-forge.md",
+    "docs/reference/foundation-contracts.md",
+    "docs/engineering/foundation-boundaries.md",
+    "packages/desktop-services/README.md",
+    "tools/profile-toolchain/README.md"
+  ],
+  "internalBilingual": [
+    "packages/desktop-services-local/README.md"
+  ],
+  "excluded": [
+    "AGENTS.md",
+    "docs/i18n/",
+    "docs/engineering/documentation-inventory.md",
+    "docs/engineering/foundation-verification.md",
+    "openspec/",
+    "packages/desktop-services-local/README.md"
+  ]
+}

@@ -1,28 +1,33 @@
 # @dsh-forge/desktop-services-local
 
-`@dsh-forge/desktop-services` 的私有 Cordis provider。它把 launcher 已验证的
-`dshForgeDesktopCapability` 转换为当前 generation 的 `desktopProfiles`、`desktopPnpm`
-和 `desktopServices`，并负责受管 pnpm operation、安装事务、来源复核、健康检查和
-恢复事实。
+English | [中文](README.zh.md)
 
-这是一个**内部实现包**，不是第三方插件扩展点。只有以下两个位置可以使用它：
+Private Cordis provider for `@dsh-forge/desktop-services`. It turns the launcher's verified
+`dshForgeDesktopCapability` into the current generation's `desktopProfiles`, `desktopPnpm`,
+and `desktopServices`, and owns managed pnpm operations, install transactions, source
+verification, health checks, and recovery facts.
 
-- `@dsh-forge/desktop-layer` 通过根入口加载默认 provider；
-- `apps/desktop` 通过 `@dsh-forge/desktop-services-local/launcher` 创建 capability。
+This is an **internal implementation package**, not a third-party plugin extension point.
+Only these two locations may use it:
 
-其他 bundle、feature、generator、Fork、测试 fixture 和普通 DSH 插件都不得导入本包。
-第三方只应依赖 [`@dsh-forge/desktop-services`](../desktop-services/README.md)。
+- `@dsh-forge/desktop-layer` loads the default provider through the root entry;
+- `apps/desktop` creates the capability through `@dsh-forge/desktop-services-local/launcher`.
 
-## 导出与加载边界
+Other bundles, features, generators, Forks, test fixtures, and ordinary DSH plugins MUST NOT
+import this package. Third parties should depend only on
+[`@dsh-forge/desktop-services`](../desktop-services/README.md).
 
-| 导出 | 使用者 | 作用 |
+## Export and loading boundary
+
+| Export | Consumer | Purpose |
 |---|---|---|
-| 默认导出 | desktop layer | 注册当前 generation 的三个公开 desktop service。 |
-| `./launcher` | `apps/desktop` | 创建冻结的 launcher capability；不导出给业务 bundle。 |
+| Default export | desktop layer | Registers the three public desktop services for the current generation. |
+| `./launcher` | `apps/desktop` | Creates the frozen launcher capability; it is not exported to business bundles. |
 
-根入口不是 standalone provider：它需要 Cordis Context 中已有
-`dshForgeDesktopCapability`。缺少 capability 时不会伪造 profile、package 或 descriptor
-service；正常的加载路径由 desktop layer 的 `cordis.patch.yml` 负责。
+The root entry is not a standalone provider: it requires an existing
+`dshForgeDesktopCapability` in the Cordis Context. Without the capability it does not fabricate
+profile, package, or descriptor services; the normal loading path is owned by the desktop
+layer's `cordis.patch.yml`.
 
 ```yaml
 - insert:
@@ -30,7 +35,7 @@ service；正常的加载路径由 desktop layer 的 `cordis.patch.yml` 负责�
       name: '@dsh-forge/desktop-services-local'
 ```
 
-`apps/desktop` 创建 capability 后再加载该 provider：
+`apps/desktop` loads the provider after creating the capability:
 
 ```ts
 import { Context } from '@deepseek-ai/cordis';
@@ -59,148 +64,153 @@ ctx.provide('dshForgeDesktopCapability', capability);
 await ctx.plugin(localProvider);
 ```
 
-示例中的绝对路径、profile 摘要、catalog、manager 和生命周期 hook 必须由 launcher
-使用真实已验证事实填充；业务插件不能自行构造 capability。
+The absolute path, profile summary, catalog, manager, and lifecycle hooks in the example MUST
+be populated by the launcher with real, verified facts; business plugins MUST NOT construct a
+capability themselves.
 
 ## Launcher capability
 
-`createDesktopHostCapability(options)` 会复制并冻结 launcher 交给 provider 的事实，避免
-provider 或第三方代码反向修改 launcher 状态。
+`createDesktopHostCapability(options)` copies and freezes the facts passed from the launcher to
+the provider, preventing the provider or third-party code from mutating launcher state.
 
-| 字段 | 必填 | 含义 |
+| Field | Required | Meaning |
 |---|---:|---|
-| `generation` | 是 | `{ id, profile, stage, closed }`；所有 service 和 operation 的生命周期边界。 |
-| `profileDir` | 是 | 当前受管 profile 的绝对目录，必须已存在。pnpm 的 cwd 固定为此目录。 |
-| `profiles` | 是 | launcher 已解析的只读 profile 摘要列表。 |
-| `manager` | 是 | 提供 `select(profile)` 的 generation 管理器；provider 不直接访问 state store。 |
-| `catalog` | 是 | 当前 generation 使用的静态 catalog 快照。安装确认只能绑定此快照。 |
-| `reconcile` | 是 | pnpm 成功后刷新受管 profile 的解析事实。 |
-| `verifyNextGeneration` | 是 | receipt 提交前验证下一 generation 是否健康。返回 `false` 会进入人工恢复。 |
-| `pnpm` | 否 | pnpm 可执行文件；默认 `pnpm`。 |
-| `pnpmArgs` / `pnpmEnv` | 否 | launcher 维护的固定参数和环境；消费者不能覆盖。 |
-| `transactionDir` | 否 | WAL 目录；默认是 `<profileDir>/.recovery`。 |
-| `spawn` | 否 | 测试或宿主提供的进程树启动器；生产默认使用受管 `spawnTree`。 |
-| `initializeProfile` | 否 | 启动 package operation 前初始化 profile 的 hook。 |
+| `generation` | Yes | `{ id, profile, stage, closed }`; the lifecycle boundary for all services and operations. |
+| `profileDir` | Yes | Absolute path to the managed profile directory; it MUST already exist. pnpm always uses it as cwd. |
+| `profiles` | Yes | Readonly profile summaries resolved by the launcher. |
+| `manager` | Yes | Generation manager providing `select(profile)`; the provider does not access the state store directly. |
+| `catalog` | Yes | Static catalog snapshot used by the current generation. Install confirmations can bind only to this snapshot. |
+| `reconcile` | Yes | Hook that refreshes managed profile resolution facts after pnpm succeeds. |
+| `verifyNextGeneration` | Yes | Checks whether the next generation is healthy before receipt submission. `false` enters manual recovery. |
+| `pnpm` | No | pnpm executable; defaults to `pnpm`. |
+| `pnpmArgs` / `pnpmEnv` | No | Fixed arguments and environment maintained by the launcher; consumers cannot override them. |
+| `transactionDir` | No | WAL directory; defaults to `<profileDir>/.recovery`. |
+| `spawn` | No | Process-tree launcher supplied by tests or the host; production uses managed `spawnTree`. |
+| `initializeProfile` | No | Hook that initializes the profile before starting a package operation. |
 
-`createDesktopHostCapability()` 只负责冻结和转交事实，不验证 catalog 业务正确性，也不
-改变 generation；profile、来源和平台验证由 launcher 与 profile-toolchain 在更早阶段完成。
+`createDesktopHostCapability()` only freezes and forwards facts. It does not validate catalog
+business correctness or change the generation; the launcher and profile-toolchain complete
+profile, source, and platform validation earlier.
 
 ## Provider service
 
-### 注册与释放
+### Registration and disposal
 
-provider 在同一个 Cordis generation 内发布：
+The provider publishes these services within one Cordis generation:
 
-- `desktopProfiles`：由 `DesktopProfilesProvider` 持有 generation、manager 和只读 profile 摘要；
-- `desktopPnpm`：由 `DesktopPnpmProvider` 持有 profile 目录、catalog、进程 lease 和恢复状态；
-- `desktopServices`：协议 `1`、执行模式 `trusted-in-process` 及三个 service 名称的冻结 descriptor。
+- `desktopProfiles`: `DesktopProfilesProvider` owns the generation, manager, and readonly profile summaries;
+- `desktopPnpm`: `DesktopPnpmProvider` owns the profile directory, catalog, process lease, and recovery state;
+- `desktopServices`: frozen descriptor with protocol `1`, execution mode `trusted-in-process`, and the three service names.
 
-fiber 卸载时，provider 先将 package service 标记为关闭，取消受管进程树，等待当前
-operation 的 `done` 完整结算，再移除 service。已关闭 generation 的旧引用不能访问或
-改变新 generation。
+When the fiber unloads, the provider first marks the package service closed, cancels the managed
+process tree, waits for the current operation's `done` to settle completely, and then removes
+the service. Old references from a closed generation cannot access or modify a new generation.
 
-profile service 的公开方法、只读快照和 `select()` 语义见
-[`@dsh-forge/desktop-services` README](../desktop-services/README.md#service-desktopprofilesctx-键-desktopprofiles)。
-本包只负责把 launcher 的真实 manager 接到该 contract，不在 provider 内实现第二套
-profile 状态机。
+The public profile service methods, readonly snapshots, and `select()` semantics are documented
+in the [`@dsh-forge/desktop-services` README](../desktop-services/README.md#services). This
+package only connects the launcher's real manager to that contract; it does not implement a
+second profile state machine.
 
 ## Package operation
 
-所有 pnpm 调用都从 `profileDir` 启动，并由一个 generation 级 lease 串行化。provider
-不接受原始参数数组；公开 command 会被转换为固定参数：
+All pnpm calls start from `profileDir` and are serialized by a generation-level lease. The
+provider does not accept raw argument arrays; public commands become fixed arguments:
 
-| 公共 command | 固定 pnpm 参数 | 成功后的动作 |
+| Public command | Fixed pnpm arguments | Action after success |
 |---|---|---|
-| `inspect/list` | `list [--depth=N] --filter ./` | 只读，不执行 reconcile。 |
-| `inspect/why` | `why <package> [--depth=N] --filter ./` | 只读，不执行 reconcile。 |
-| `reconcile` | `install --lockfile-only --ignore-scripts --filter ./` | 成功后调用 `reconcile()`。 |
-| `remove` | `remove --ignore-scripts <package> --filter ./` | 成功后调用 `reconcile()`。 |
-| `install` | `add --save-exact --ignore-scripts <spec> [--registry=...] --config.allowBuilds=... --filter ./` | 成功后执行 reconcile、lockfile 来源复核、下一 generation 健康检查和 receipt 提交。 |
+| `inspect/list` | `list [--depth=N] --filter ./` | Readonly; no reconcile. |
+| `inspect/why` | `why <package> [--depth=N] --filter ./` | Readonly; no reconcile. |
+| `reconcile` | `install --lockfile-only --ignore-scripts --filter ./` | Calls `reconcile()`. |
+| `remove` | `remove --ignore-scripts <package> --filter ./` | Calls `reconcile()`. |
+| `install` | `add --save-exact --ignore-scripts <spec> [--registry=...] --config.allowBuilds=... --filter ./` | Runs reconcile, lockfile source verification, next-generation health check, and receipt submission. |
 
-`inspect.depth` 只能是 `0..20` 的整数；`why` 必须提供 package 名称；所有 package
-名称和精确版本都会在启动子进程前校验。operation 运行时，第二个 operation 以
-`PACKAGE_BUSY` 失败；取消 signal 会在启动前以 `PACKAGE_CANCELLED` 失败。
+`inspect.depth` MUST be an integer from `0..20`; `why` MUST provide a package name. Every
+package name and exact version is validated before starting a child process. While an operation
+is running, a second operation fails with `PACKAGE_BUSY`; a cancellation signal fails with
+`PACKAGE_CANCELLED` before startup.
 
-## 安装确认与来源复核
+## Install confirmation and source verification
 
-`install()` 只接受带运行时 brand、深度冻结且绑定当前 generation profile 的
-`ConfirmedPluginInstall`。provider 会重新读取当前静态 catalog，逐项比较 package 名称、
-精确版本、来源和 integrity，不能信任调用方自行修改的展示对象。
+`install()` accepts only a runtime-branded, deeply frozen `ConfirmedPluginInstall` bound to the
+current generation profile. The provider rereads the static catalog and compares package name,
+exact version, source, and integrity item by item; it does not trust a display object modified by
+the caller.
 
-支持的来源：
+Supported sources:
 
-- **registry**：使用 catalog 的 HTTPS registry、tarball 和 integrity；lockfile 必须保留
-  相同 tarball 与 integrity。
-- **git**：使用 catalog 的 repository 和完整 40 位 commit；lockfile 必须保留相同仓库和
-  commit，禁止 branch、tag、`main` 或 `latest`。
-- **workspace**：可以进入 catalog 和构建 profile，但明确拒绝动态安装。
+- **registry**: uses the catalog's HTTPS registry, tarball, and integrity; the lockfile MUST retain the same tarball and integrity.
+- **git**: uses the catalog's repository and a complete 40-character commit; the lockfile MUST retain the same repository and commit, and branches, tags, `main`, and `latest` are forbidden.
+- **workspace**: may enter the catalog and build profile, but dynamic installation is explicitly rejected.
 
-构建脚本只来自 request 的 `allowBuilds` 白名单，并作为 pnpm `allowBuilds` 配置传入；
-provider 默认仍使用 `--ignore-scripts`。catalog 确认是来源和审核事实的绑定，不是对
-Node/Electron 代码的安全隔离。
+Build scripts come only from the request's `allowBuilds` allowlist and are passed as pnpm
+`allowBuilds` configuration; the provider still defaults to `--ignore-scripts`. Catalog
+confirmation binds source and review facts; it is not a security boundary for Node or Electron
+code.
 
-## 安装事务与恢复
+## Install transactions and recovery
 
-安装事务使用 `<transactionDir>/install-*.json` WAL。一次安装的结算顺序是：
+Install transactions use `<transactionDir>/install-*.json` WAL files. One install settles in this order:
 
-1. 占用 generation lease，校验 signal、generation、确认 brand 和 catalog。
-2. 对 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 保存写前快照并写入 WAL。
-3. 在受管 profile 目录启动 pnpm，并把 stdout、stderr 和取消句柄暴露给 operation。
-4. 进程非零退出、信号终止或取消时恢复受保护文件，写入 `.failed` 记录并结束事务。
-5. 进程成功时执行 `reconcile()`，从实际 lockfile 验证 package 来源和完整性。
-6. 启动下一 generation 做健康检查；通过后写入 `.receipt` 并删除 WAL。
+1. Acquire the generation lease and validate the signal, generation, confirmation brand, and catalog.
+2. Save pre-write snapshots for `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml`, then write the WAL.
+3. Start pnpm in the managed profile directory and expose stdout, stderr, and the cancellation handle through the operation.
+4. On a non-zero exit, signal termination, or cancellation, restore protected files, write a `.failed` record, and end the transaction.
+5. On success, run `reconcile()` and verify package source and integrity from the actual lockfile.
+6. Start the next generation for a health check; on success, write a `.receipt` and delete the WAL.
 
-reconcile、lockfile 解析或健康检查失败时，provider 会恢复受保护文件，写入
-`.manual-recovery`，将状态标记为人工恢复，并以 `INSTALL_MANUAL_RECOVERY` 拒绝后续
-package operation，直到 launcher 重新建立可验证 profile。WAL 只保护上述三个声明和
-lockfile 文件，**不承诺回滚 `node_modules`**；恢复事实会明确要求人工检查。
+If reconcile, lockfile parsing, or the health check fails, the provider restores protected files,
+writes `.manual-recovery`, marks the state for manual recovery, and rejects later package
+operations with `INSTALL_MANUAL_RECOVERY` until the launcher creates a verifiable profile again.
+The WAL protects only the three declarations and lockfile above; it **does not promise to roll
+back `node_modules`**. Recovery facts explicitly require manual inspection.
 
-进程结束不等于 operation 结束：`done` 还会等待 reconcile、来源复核、健康检查和
-receipt/恢复完成。dispose 同样等待这一完整结算，避免旧 generation 的延迟回调写入
-新 generation。
+Process exit does not mean the operation is complete: `done` also waits for reconcile, source
+verification, health checks, and receipt or recovery. `dispose` waits for the same complete
+settlement, preventing delayed callbacks from an old generation from writing to a new one.
 
-## 错误与生命周期边界
+## Error and lifecycle boundaries
 
-provider 使用 profile-toolchain 的 `ForgeError`，调用方应按稳定 code 分支，而不是匹配
-错误文案。常见 code 包括：
+The provider uses profile-toolchain's `ForgeError`; callers should branch on stable codes rather
+than error text. Common codes include:
 
-| Code | 触发条件 |
+| Code | Trigger |
 |---|---|
-| `SERVICE_CWD` | `profileDir` 不是绝对路径或目录不存在。 |
-| `SERVICE_ARGUMENT` | profile 名称、package 名称或 inspect depth 无效。 |
-| `GENERATION_CLOSED` | provider 或 generation 已关闭。 |
-| `PACKAGE_BUSY` | 当前 generation 已有 operation。 |
-| `PACKAGE_CANCELLED` | operation 在启动前已被取消。 |
-| `CATALOG_CONFIRMATION_REQUIRED` | 安装请求未冻结、未确认或不匹配 catalog。 |
-| `CATALOG_PROFILE_MISMATCH` | 请求绑定了其他 profile。 |
-| `CATALOG_INSTALL_SOURCE` | 来源类型不支持或 workspace 被用于动态安装。 |
-| `INSTALL_SOURCE_DRIFT` | lockfile 来源或完整性与确认事实不一致。 |
-| `INSTALL_LOCKFILE_UNKNOWN` | lockfile 缺失、格式未知或没有目标 package。 |
-| `INSTALL_MANUAL_RECOVERY` | 安装后 reconcile、来源复核或健康检查无法证明 profile 可用。 |
+| `SERVICE_CWD` | `profileDir` is not an absolute path or the directory does not exist. |
+| `SERVICE_ARGUMENT` | Profile name, package name, or inspect depth is invalid. |
+| `GENERATION_CLOSED` | Provider or generation is closed. |
+| `PACKAGE_BUSY` | The current generation already has an operation. |
+| `PACKAGE_CANCELLED` | The operation was cancelled before startup. |
+| `CATALOG_CONFIRMATION_REQUIRED` | Install request is not frozen, confirmed, or catalog-matching. |
+| `CATALOG_PROFILE_MISMATCH` | Request is bound to another profile. |
+| `CATALOG_INSTALL_SOURCE` | Source type is unsupported or workspace is used for dynamic installation. |
+| `INSTALL_SOURCE_DRIFT` | Lockfile source or integrity differs from the confirmed facts. |
+| `INSTALL_LOCKFILE_UNKNOWN` | Lockfile is missing, has an unknown format, or has no target package. |
+| `INSTALL_MANUAL_RECOVERY` | Reconcile, source verification, or health check cannot prove the installed profile is usable. |
 
-`dispose()` 会关闭 provider、取消当前 operation 并等待其 `done`；它不会伪造成功结果，
-也不会删除人工恢复记录。
+`dispose()` closes the provider, cancels the current operation, and waits for its `done`; it does
+not fabricate a successful result or delete manual recovery records.
 
-## 模型体验
+## Model impact
 
-无直接模型影响。该 provider 只注册桌面 service 和受管 package operation，不注册 prompt、
-tool、session event 或模型可见文本。若上层插件将 package 输出或 profile 摘要展示给模型，
-应由上层 README 单独说明内容来源和 token 行为。
+No direct model impact. This provider registers desktop services and managed package operations;
+it does not register prompts, tools, session events, or model-visible text. If an upper-level
+plugin displays package output or profile summaries to a model, that plugin's README must explain
+the content source and token behavior separately.
 
-#### KV Cache 影响
+#### KV cache impact
 
-无直接影响；任何模型请求前缀变化都由上层消费方负责。
+No direct impact; any change to a model request prefix is owned by the upper-level consumer.
 
-## 已知限制与暂缓事项
+## Known limitations and deferred work
 
-- **私有 provider，不是扩展点**：第三方 bundle 不能依赖本包；其 API 只服务 launcher 和 desktop layer。
-- **当前没有页面端安装流程**：`install()` 是受控底层能力，首版发行包不提供插件目录、确认 UI 或在线下载入口。
-- **单 generation 单 operation**：同一 generation 不支持并行 reconcile、remove 或 install；必须等待上一 operation 完整结算。
-- **不回滚 node_modules**：失败恢复只覆盖声明文件和 lockfile，node_modules 状态必须通过下一 generation 验证或人工检查确认。
-- **不提供跨版本迁移**：WAL、receipt 和恢复记录使用当前 schema；格式变化需要独立迁移设计。
-- **执行模式不是隔离边界**：`trusted-in-process` 下的 Node 插件仍与 Host 共用进程权限。
+- **Private provider, not an extension point**: Third-party bundles cannot depend on this package; its API serves only the launcher and desktop layer.
+- **No page-side install flow today**: `install()` is a controlled lower-level capability; the first packaged release has no plugin directory, confirmation UI, or online download entry point.
+- **One operation per generation**: A generation does not support concurrent reconcile, remove, or install; the previous operation must settle completely.
+- **No `node_modules` rollback**: Failure recovery covers declarations and the lockfile only; the next generation or a manual check must verify the `node_modules` state.
+- **No cross-version migration**: WAL, receipt, and recovery records use the current schema; format changes require a separate migration design.
+- **Execution mode is not isolation**: Under `trusted-in-process`, Node plugins still share process permissions with the Host.
 
-## 维护验证
+## Maintenance verification
 
 ```sh
 pnpm --filter @dsh-forge/desktop-services-local build
@@ -208,11 +218,12 @@ pnpm run test:desktop-services-local
 pnpm run boundaries:check
 ```
 
-公开 contract 的消费方类型检查使用：
+Consumer type checking for the public contract uses:
 
 ```sh
 pnpm run test:desktop-services-consumer
 ```
 
-真实加载、service teardown、generation 失效、WAL、来源漂移、健康失败和受管进程取消
-覆盖在 `tests/desktop-loader.test.ts` 与 `tests/runtime-services.test.ts`。
+Real loading, service teardown, generation invalidation, WAL, source drift, health failures, and
+managed process cancellation are covered by `tests/desktop-loader.test.ts` and
+`tests/runtime-services.test.ts`.

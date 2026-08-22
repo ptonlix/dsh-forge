@@ -1,0 +1,4 @@
+# 已确认中英文内容的 Git blob hash。修改任一侧后，必须同步对侧并重新生成。
+# pnpm run docs:pair --write README.md
+README.md: c4bff9d9106a3c144a1a1560c4a0b05697605715
+README.zh.md: 55023b0a06ffe29a3398031cda825b8006c308a1

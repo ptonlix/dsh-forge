@@ -1,36 +1,34 @@
-# DSH Forge 基础工程边界
+# DSH Forge Engineering Boundaries
 
-本文描述源平面、产物平面、恢复事务和更新发布的维护边界。适用于首版 `trusted-in-process` 兼容模式。
+English | [中文](foundation-boundaries.zh.md)
 
-## 源平面与产物平面
+This document owns maintenance boundaries for source files, generated evidence, generation recovery, package operations, and release work. The architecture is in [`../design/dsh-forge.md`](../design/dsh-forge.md); configuration and public service facts are in [`../reference/foundation-contracts.md`](../reference/foundation-contracts.md).
 
-可维护源只有 `distribution.yml`、`profiles/*/profile.yml`、profile patch、bundle manifest 和静态 catalog。`artifacts/` 可以删除并重建；构建与运行时禁止回写源 profile 或 source patch。
+## Source and Derived Files
 
-`profile:verify` 比较规范化输入、锁定依赖、工具版本和生成的 resolved manifest。锁文件说明一次解析结果，SBOM 说明组成；两者都不单独证明来源可信、许可证正确、签名有效或插件安全。
+Hand-maintained composition sources are `distribution.yml`, `profiles/*/profile.yml`, profile patches, bundle manifests, and the static catalog. `artifacts/` is generated and may be removed and rebuilt. Build and runtime code must not write back to source profiles or source patches.
 
-## Generation 与恢复
+`profile:verify` compares normalized inputs, resolved dependencies, tool versions, lockfiles, and the resolved manifest. A lockfile records one resolution and an SBOM records composition; neither independently proves trustworthy source, correct licensing, valid signing, or plugin safety.
 
-状态文件位于私有用户目录，版本化字段包括 active、pending、lastKnownGood、generation ID 与最近失败事实。写入拒绝符号链接，使用 `wx` 临时文件与原子 rename。状态损坏不会被静默接受，而是记录恢复诊断并回退到可验证的目标。
+## Generation and Recovery
 
-健康提交依次需要 Host entry settle、loopback readiness、沙箱化窗口和 renderer boot report。pending 失败最多自动恢复一次到 last-known-good；恢复再失败后进入 manual recovery。窗口关闭仅隐藏；显式退出、信号、profile 切换和失败恢复等待 Host 与受管子进程完成有界 teardown。
+Private state records active, pending, last-known-good, generation ID, and recent failures. Writes reject symlinks and use exclusive temporary files plus atomic rename. Corrupted state is diagnosed and falls back to a verifiable target; it is never silently accepted.
 
-`@dsh-forge/desktop-services-local` 是 private provider，只能由 desktop layer 注册；
-`apps/desktop` 只能从其 `./launcher` export 注入 generation、profile、catalog 与 pnpm
-事实。provider 的 Cordis fiber 拥有 profile service、package lease、进程树和 WAL；
-fiber disposal 会停止新请求、取消活动 operation 并等待完整 finalization。第三方只可从
-`@dsh-forge/desktop-services` 读取公开 contract。
+Health commit requires Host entry settlement, loopback readiness, a sandboxed window, and renderer boot report. A pending failure can recover once to the last known-good target, then requires manual recovery. Window close hides by default; explicit exit, signals, profile selection, and recovery wait for bounded Host and managed-process teardown.
 
-## 安装与更新
+`@dsh-forge/desktop-services-local` is a private provider. Only the desktop layer registers it, and `apps/desktop` creates its launcher capability through the `./launcher` export. Its Cordis fiber owns the profile service, package lease, process tree, and WAL. Consumers use only `@dsh-forge/desktop-services`.
 
-插件安装必须由明确用户确认触发。启动期只读取静态 catalog，禁止自动下载或执行
-package manager。confirmation 绑定 catalog 条目、目标 profile、精确 SemVer、来源、
-完整性、允许构建脚本和确认时间；provider 重新比对静态 catalog 后才启动 pnpm。安装
-WAL 保护 profile 配置文件，不能声称回滚依赖目录；未知 lockfile、来源漂移、非零退出、
-取消或健康失败都必须恢复或记录人工恢复。
+## Package Operations
 
-更新在独立暂存目录下载。应用前验证 channel 元数据签名、发行版身份、平台/架构、产物摘要、信任根和严格版本升级；然后 dispose generation 并交给平台安装器。未签名产物只能标记为本地或 CI smoke，不能进入生产更新 channel。macOS 生产产物需要签名与公证，Windows 生产产物需要 Authenticode 发布者验证。
+An install starts only after explicit confirmation. Startup reads the static catalog and must not download or run a package manager. Confirmation binds catalog entry, profile, exact SemVer, source, integrity, allowed build scripts, and time; the provider compares those facts against the current catalog before starting pnpm.
 
-## 本地验证
+The installation WAL protects `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml`. It does not roll back `node_modules`. Unknown lockfiles, source drift, nonzero process exit, cancellation, reconcile failure, or next-generation health failure must restore protected files or record manual recovery.
+
+## Release Boundary
+
+Updates stage downloads separately and validate channel metadata signatures, distribution identity, platform/architecture, artifact digest, trust root, and strict version advancement before disposing a generation and handing control to a platform installer. Unsigned packages are local or CI smoke evidence only; they cannot enter a production update channel. macOS production packages need signing and notarization, and Windows production packages need Authenticode publisher validation.
+
+## Maintenance Checks
 
 ```sh
 pnpm run check
@@ -41,6 +39,4 @@ pnpm run package:inspect
 pnpm run boundaries:check
 ```
 
-生产发布还需要在每个声明的平台执行真实安装包启动、renderer boot、退出、更新入口和诊断导出 smoke，并完成平台签名验证。
-
-已执行的本地命令与适用范围见[基础契约验证记录](foundation-verification.md)。
+The actual local-command record and platform coverage are kept in [`foundation-verification.md`](foundation-verification.md). That record is internal and is not a public documentation-site page.

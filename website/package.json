@@ -1,0 +1,15 @@
+{
+  "name": "@dsh-forge/website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx ../scripts/build-site.ts --dev",
+    "build": "tsx ../scripts/build-site.ts && tsx ../scripts/verify-site.ts",
+    "preview": "vitepress preview . --host 127.0.0.1 --port 4173"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4",
+    "vitepress": "1.6.4"
+  }
+}

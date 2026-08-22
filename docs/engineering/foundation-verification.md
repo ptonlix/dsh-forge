@@ -50,6 +50,26 @@ openspec validate "align-repository-with-distribution-design" --type change --st
 
 当前没有 macOS 代码签名/公证身份或 Windows Authenticode 身份。`pnpm run package:signing -- darwin` 因缺少身份以退出码 2 结束，明确只允许 `unsigned-smoke`；`release:gate` 必须拒绝生产发布。
 
+## 文档站实施验证（2026-08-22）
+
+本次双语文档与静态站变更实际运行了以下门禁：
+
+```sh
+pnpm exec vitest run tests/bilingual-docs.test.ts tests/website-docs.test.ts
+pnpm run docs:check
+pnpm run docs:build
+DOCS_BASE=/dsh-forge/ pnpm run docs:build
+./node_modules/.bin/tsc -p tsconfig.json --noEmit
+pnpm dlx @fission-ai/openspec@latest validate redesign-bilingual-documentation-site --type change --strict --no-interactive
+git diff --check
+```
+
+文档站构建输出 14 个双语路由、raw Markdown twin 和 `llms.txt`，并通过站内链接、fragment、发布清单与 GitHub Pages base path 检查。构建只使用仓库内容和 website workspace 依赖，不读取 Electron、DSH Home、profile 产物或外部插件状态。
+
+`pnpm run check:all` 已实际运行，但整体未通过：既有运行时测试要求官方外部 bundle `dsh-better-sidebar` 的 catalog tier 为 `L1`，当前仓库 `catalog/catalog.yml` 仍记录为 `L0`，因此 compiler、composer、acceptance 和 profile selection 测试在该事实冲突处失败。该冲突不属于本次文档变更，未通过修改 catalog 或运行时语义掩盖。
+
+本次没有执行 GitHub Pages 实际部署、token/凭据验证、平台签名、公证、Authenticode 或生产发布 smoke；这些能力不属于本变更的授权范围。
+
 当前仍没有 macOS 代码签名/公证身份或 Windows Authenticode 身份；本次 Electron 产物明确标记为
 `unsigned-smoke`，不能作为生产发布证据。Windows 目标、macOS 签名/公证、native ABI 和
 更新发布链路仍需在对应平台构建机与平台身份上执行。

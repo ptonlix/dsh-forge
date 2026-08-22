@@ -3,6 +3,7 @@ packages:
   - packages/*
   - packages/bundles/*
   - tools/*
+  - website
 allowBuilds:
   '@deepseek-ai/dsh-subprocess-local': true
   '@google/genai': false
