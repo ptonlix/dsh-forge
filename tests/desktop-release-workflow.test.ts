@@ -51,8 +51,12 @@ describe('Desktop Release workflow', () => {
     const packageManifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
       readonly engines?: { readonly node?: string };
       readonly packageManager?: string;
+      readonly scripts?: Readonly<Record<string, string>>;
     };
     expect(packageManifest.packageManager).toBe('pnpm@11.7.0');
     expect(packageManifest.engines?.node).toBe('>=22.13.0');
+    expect(packageManifest.scripts?.typecheck).toBe(
+      'pnpm run build:desktop-services && tsc -p tsconfig.json --noEmit',
+    );
   });
 });

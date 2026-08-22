@@ -34,7 +34,7 @@
     "test:desktop-services-local": "pnpm exec vitest run tests/runtime-services.test.ts",
     "test": "pnpm run build && vitest run",
     "test:node": "pnpm run build && node --import tsx --test tests/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm run build:desktop-services && tsc -p tsconfig.json --noEmit",
     "lint": "oxlint --config .oxlintrc.json --tsconfig tsconfig.json apps packages tools scripts tests",
     "lint:fix": "pnpm run lint -- --fix",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run test",

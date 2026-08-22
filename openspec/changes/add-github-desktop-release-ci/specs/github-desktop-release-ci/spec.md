@@ -34,6 +34,8 @@ CI SHALL 在打包前选择一个明确 profile，执行 `profile:resolve`、`pr
 config dump、`catalog:verify` 以及 lockfile 冻结安装。发行包必须把该 profile 的 resolved
 manifest、SBOM 输入和 license notice 作为证据随包归档；工作流不得在运行时切换 profile。
 CI SHALL 使用满足 `pnpm 11.7.0` engine 的 Node.js `>=22.13`；当前固定版本为 `22.14.0`。
+根 `typecheck` SHALL 在干净检出中先生成 workspace package exports 指向的类型声明，不得要求
+仓库预先包含未跟踪的 `dist` 目录。
 
 #### Scenario: profile 或依赖输入漂移
 
@@ -44,6 +46,11 @@ CI SHALL 使用满足 `pnpm 11.7.0` engine 的 Node.js `>=22.13`；当前固定�
 
 - **WHEN** Actions 安装或调用固定的 `pnpm 11.7.0`
 - **THEN** job 使用 Node.js `22.14.0`，可以加载 `node:sqlite`，且不得在 Node 20 上继续执行
+
+#### Scenario: 干净检出执行 typecheck
+
+- **WHEN** Actions 完成 frozen install 且 workspace package 尚无 `dist/*.d.ts`
+- **THEN** `pnpm run typecheck` 先按依赖顺序构建 workspace 类型出口，再执行根 TypeScript 检查
 
 #### Scenario: 手动运行选择 profile
 

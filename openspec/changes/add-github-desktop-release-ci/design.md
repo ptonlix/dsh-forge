@@ -45,6 +45,9 @@ Linux 构建使用 Ubuntu 22.04 runner，生成 x64 `AppImage` 与 `deb`；包�
 ### 2. 分离验证 job、构建 job 和汇总 job
 
 `validate` 在 Ubuntu 上运行与平台无关的 typecheck、lint、profile/catalog/docs 门禁。
+根 `typecheck` 在执行无输出的根 TypeScript 检查前，按 package exports 的依赖顺序构建
+`desktop-services`、`profile-toolchain` 和 `desktop-services-local`；干净检出不得依赖本机残留的
+`dist/*.d.ts`。
 `package` 仅在 `v*` tag 上使用 `needs: validate` 的矩阵 job 执行 profile resolve、config
 dump、目标打包、inspect、smoke，并上传一个按目标命名的 artifact。`release` 等待完整矩阵（不使用
 `fail-fast`），下载全部 artifact 后验证 manifest 的 distribution/profile/version/target

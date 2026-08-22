@@ -25,3 +25,7 @@
 ## 5. CI Node 与 pnpm 兼容性
 
 - [x] 5.1 将仓库工具链 Node 下限对齐到 pnpm 11.7 要求，并将 CI 固定到 Node 22.14；增加静态回归测试并同步开发环境文档
+
+## 6. 干净检出 typecheck
+
+- [x] 6.1 让根 typecheck 在检查应用前构建 workspace 类型出口，验证 fresh CI 不依赖未跟踪的 dist 声明文件
