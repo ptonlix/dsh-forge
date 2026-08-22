@@ -17,7 +17,7 @@ Ubuntu 22.04 及以上 LTS 可运行的 `x64` 包。任务必须拒绝未在
 
 - **WHEN** 工作流以有效 profile 运行且 `distribution.yml` 声明 macOS `arm64/x64` 与
   Windows `x64` 以及 Linux `x64`
-- **THEN** Actions 产生两个可区分的矩阵任务，macOS 上传一个包含两个架构的
+- **THEN** Actions 产生三个可区分的矩阵任务，macOS 上传一个包含两个架构的
   `universal.dmg`（以及对应 zip），Windows 只上传 x64 安装包和 zip，Linux 上传 x64
   `AppImage` 和 `deb`；每个任务记录 runner、target、Electron ABI，并只上传自身交付目标
   的包和证据
@@ -42,8 +42,8 @@ manifest、SBOM 输入和 license notice 作为证据随包归档；工作流不
 #### Scenario: 手动运行选择 profile
 
 - **WHEN** `workflow_dispatch` 提供一个有效 profile 名称
-- **THEN** 所有矩阵任务使用同一 profile 名称，并在 artifact 名称、runtime manifest 和汇总
-  索引中保持一致
+- **THEN** `validate` 使用该 profile 执行 resolve、verify 和 config dump，且不得启动平台打包
+  矩阵或上传 desktop package artifact
 
 ### Requirement: 每个平台必须完成结构检查和真实 smoke
 
@@ -85,7 +85,7 @@ manifest 和最终包结构。
 
 仅 `v*` tag 触发的发布路径可以创建 GitHub Release；tag 版本 SHALL 等于
 `distribution.yml.version`，且所有目标的 `release:gate` 必须通过。unsigned smoke artifact
-可以用于 pull request、手动运行和诊断，但不得被标记为生产更新包或绕过签名/公证要求。
+可以用于 tag 构建和诊断，但不得被标记为生产更新包或绕过签名/公证要求。
 
 #### Scenario: 版本 tag 且门禁通过
 
@@ -103,11 +103,18 @@ manifest 和最终包结构。
 ### Requirement: PR 和手动工作流不得取得发布写权限
 
 Pull request 和 `workflow_dispatch` 路径 SHALL 只使用 `contents: read`，不得读取发布 secrets，
-并且只能上传 run-scoped artifact。只有受保护的 tag release job 可以请求 `contents: write`
-和平台签名相关 secrets。
+不得启动 package、summary 或 release job。只有 `v*` tag 可以生成 run-scoped desktop artifact；
+只有同时显式启用生产发布的受保护 tag release job 可以请求 `contents: write` 和平台签名相关
+secrets。
 
 #### Scenario: 外部 pull request
 
 - **WHEN** 外部 pull request 触发工作流
-- **THEN** 工作流执行验证/构建但不注入签名 secrets、不创建 Release，并将 artifact 限定在
-  当前 run
+- **THEN** 工作流只执行 `validate`，不注入签名 secrets、不启动原生 runner、不上传 desktop
+  package artifact，也不创建 Release
+
+#### Scenario: 版本 tag 触发平台打包
+
+- **WHEN** 仓库收到与 `distribution.yml.version` 一致的 `v*` tag
+- **THEN** 工作流在 `validate` 通过后启动三个原生 package 任务和 summary，并将产物限定在
+  当前 run；未显式启用生产发布时 release job 保持跳过

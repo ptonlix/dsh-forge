@@ -16,3 +16,8 @@
 - [x] 3.1 增加 tag 版本与 `distribution.yml.version` 校验，并让 release job 仅在完整矩阵和 `release:gate` 成功时创建 GitHub Release；验证 unsigned、版本不匹配和签名缺失均不会发布
 - [x] 3.2 更新工程验证记录和发布参考，说明 CI 目标、artifact 内容、unsigned smoke 限制、所需 secrets 和未覆盖平台；验证 `pnpm run docs:check` 与 `git diff --check`
 - [x] 3.3 运行受影响的 package build、测试、`pnpm run boundaries:check`、OpenSpec 严格校验，并记录 universal macOS、Windows x64、Ubuntu Linux x64 及未执行的平台签名/公证结果
+
+## 4. Tag-only 打包触发
+
+- [x] 4.1 将 package/summary 限定为 `v*` tag，PR 与 `workflow_dispatch` 只运行 validate；修正 Windows runner 的 profile 参数引用，并让未显式启用的生产 Release 默认跳过
+- [x] 4.2 增加 workflow 静态测试并更新工程文档，验证 PR/tag job 条件、最小权限、OpenSpec 严格校验、文档和 diff 门禁

@@ -8,7 +8,8 @@
 ## What Changes
 
 - 新增 GitHub Actions 工作流，按 `darwin-universal`、`win32-x64` 和 `linux-x64` 矩阵构建
-  desktop 包；macOS 只发布一个同时包含 arm64/x64 的 universal 包，Linux 面向 Ubuntu LTS。
+  desktop 包；矩阵只由版本 tag 触发，macOS 只发布一个同时包含 arm64/x64 的 universal 包，
+  Linux 面向 Ubuntu LTS。Pull request 和手动运行只执行代码与配置检查，不占用原生打包 runner。
 - 在构建前执行 profile resolve/verify、config dump、catalog 校验和仓库静态门禁；构建
   后执行 package inspect、平台 smoke 和 `release:gate` 所需的证据收集。
 - 扩展 desktop 打包入口，使 CI 能为当前平台生成可下载的安装包/归档，同时保留现有
@@ -28,7 +29,7 @@
 ### New Capabilities
 
 - `github-desktop-release-ci`: 定义 GitHub Actions 的平台矩阵、universal macOS 构建、
-  Ubuntu Linux 构建、产物证据归档、手动/tag 触发和生产 Release 门禁。
+  Ubuntu Linux 构建、产物证据归档、PR 检查、tag 打包和生产 Release 门禁。
 
 ### Modified Capabilities
 
