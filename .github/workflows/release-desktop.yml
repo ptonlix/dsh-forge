@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "20.19.1"
+  NODE_VERSION: "22.14.0"
   PNPM_VERSION: "11.7.0"
   PROFILE: ${{ inputs.profile || 'dsh-forge-official' }}
 

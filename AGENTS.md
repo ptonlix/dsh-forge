@@ -196,7 +196,7 @@ Electron 相关代码必须集中在 `apps/desktop`：
 
 ## TypeScript 与代码风格
 
-根项目使用 Node.js `>=20.0.0`、pnpm `11.7.0`、TypeScript NodeNext 和严格类型检查。
+根项目使用 Node.js `>=22.13.0`、pnpm `11.7.0`、TypeScript NodeNext 和严格类型检查。
 代码应符合根 `tsconfig.json` 和 oxlint 配置，而不是依赖编辑器的宽松默认值。
 
 - 使用 TypeScript；稳定的公共类型优先写成显式 `interface`、判别 union 或 branded type。

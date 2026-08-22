@@ -91,7 +91,8 @@ artifact，不覆盖源文件。
 
 ## Risks / Trade-offs
 
-- [GitHub runner label 或镜像工具链变化] -> workflow 固定 Node 20、pnpm 11.7，并在 job
+- [GitHub runner label 或镜像工具链变化] -> `pnpm 11.7.0` 要求 Node `>=22.13`，workflow
+  固定 Node `22.14.0` 并在 job
   开始打印 runner、Electron、pnpm、profile 和 target；label 变化由验证失败暴露。
 - [macOS/Windows secret 不完整] -> unsigned smoke 仍可上传诊断 artifact；tag Release 在
   `release:gate` 处明确失败，不创建生产 Release。

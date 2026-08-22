@@ -20,7 +20,7 @@ DSH Forge 是围绕 DeepSeek Harness（DSH）构建可审计桌面发行版的�
 
 ### 环境要求
 
-- Node.js `>=20.0.0`。
+- Node.js `>=22.13.0`。
 - pnpm `11.7.0`。
 - 能运行 Electron 的 macOS 或 Windows 环境。
 

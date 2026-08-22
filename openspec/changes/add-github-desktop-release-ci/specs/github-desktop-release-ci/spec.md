@@ -33,11 +33,17 @@ Ubuntu 22.04 及以上 LTS 可运行的 `x64` 包。任务必须拒绝未在
 CI SHALL 在打包前选择一个明确 profile，执行 `profile:resolve`、`profile:verify`、健康的
 config dump、`catalog:verify` 以及 lockfile 冻结安装。发行包必须把该 profile 的 resolved
 manifest、SBOM 输入和 license notice 作为证据随包归档；工作流不得在运行时切换 profile。
+CI SHALL 使用满足 `pnpm 11.7.0` engine 的 Node.js `>=22.13`；当前固定版本为 `22.14.0`。
 
 #### Scenario: profile 或依赖输入漂移
 
 - **WHEN** profile、catalog、lockfile 或工具链校验失败
 - **THEN** 当前平台不生成可发布包，任务输出失败诊断，且不上传伪造的成功 evidence
+
+#### Scenario: pnpm 启动所需 Node runtime
+
+- **WHEN** Actions 安装或调用固定的 `pnpm 11.7.0`
+- **THEN** job 使用 Node.js `22.14.0`，可以加载 `node:sqlite`，且不得在 Node 20 上继续执行
 
 #### Scenario: 手动运行选择 profile
 

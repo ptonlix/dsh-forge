@@ -114,6 +114,9 @@ digest 及文件 SHA-256；缺少或漂移的 evidence 会阻止后续 job。普
 `DSH_FORGE_PRODUCTION_RELEASE=true`、签名/公证证据齐全且 `release:gate` 通过时，受保护的
 release job 才会请求 `contents: write`。
 
+工作流固定使用 Node.js `22.14.0` 和 pnpm `11.7.0`。pnpm 11.7 的 engine 下限为 Node
+`>=22.13`，Node 20 缺少其使用的 `node:sqlite`，不能作为仓库安装或 CI runtime。
+
 当前仍未配置或执行代码签名、公证和 Windows Authenticode。unsigned smoke artifact 可以用于
 诊断和平台验证，但 `release:gate` 会拒绝未签名或缺少更新信任根的生产 Release。Linux 只承诺
 Ubuntu LTS x64；未覆盖 ARM Linux、其他发行版和跨平台交叉编译。

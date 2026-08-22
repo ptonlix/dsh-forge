@@ -14,6 +14,7 @@ interface WorkflowJob {
 
 interface DesktopReleaseWorkflow {
   readonly on: Readonly<Record<string, unknown>>;
+  readonly env: Readonly<Record<string, string>>;
   readonly permissions: Readonly<Record<string, string>>;
   readonly jobs: Readonly<Record<string, WorkflowJob>>;
 }
@@ -43,5 +44,15 @@ describe('Desktop Release workflow', () => {
   it('跨平台命令不使用 PowerShell 的 PROFILE 自动变量', () => {
     expect(source).not.toContain('"$PROFILE"');
     expect(source).toContain('"${{ env.PROFILE }}"');
+  });
+
+  it('CI Node 版本满足 pnpm 11.7 的运行要求', () => {
+    expect(workflow.env.NODE_VERSION).toBe('22.14.0');
+    const packageManifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
+      readonly engines?: { readonly node?: string };
+      readonly packageManager?: string;
+    };
+    expect(packageManifest.packageManager).toBe('pnpm@11.7.0');
+    expect(packageManifest.engines?.node).toBe('>=22.13.0');
   });
 });

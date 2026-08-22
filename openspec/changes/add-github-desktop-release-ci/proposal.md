@@ -21,6 +21,8 @@
   不得进入生产更新发布。
 - 将官方 profile 使用的外部 bundle `dsh-better-sidebar` 的 catalog tier 与编译器契约对齐为
   `L1`，使 CI 的 profile resolve/verify 能在固定输入上运行；不改变 bundle 版本、来源或执行模式。
+- 将仓库工具链 Node 下限调整为 `>=22.13.0`，CI 固定使用 Node `22.14.0`，满足
+  `pnpm 11.7.0` 对 `node:sqlite` 的运行要求；不改变 profile 描述的 Electron/DSH runtime 下限。
 - **不包含**代码签名、公证、Authenticode 证书或自动更新通道的实现；这些仍由现有发布
   契约约束，并需要独立的凭据与变更。
 

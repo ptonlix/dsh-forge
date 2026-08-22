@@ -21,3 +21,7 @@
 
 - [x] 4.1 将 package/summary 限定为 `v*` tag，PR 与 `workflow_dispatch` 只运行 validate；修正 Windows runner 的 profile 参数引用，并让未显式启用的生产 Release 默认跳过
 - [x] 4.2 增加 workflow 静态测试并更新工程文档，验证 PR/tag job 条件、最小权限、OpenSpec 严格校验、文档和 diff 门禁
+
+## 5. CI Node 与 pnpm 兼容性
+
+- [x] 5.1 将仓库工具链 Node 下限对齐到 pnpm 11.7 要求，并将 CI 固定到 Node 22.14；增加静态回归测试并同步开发环境文档
