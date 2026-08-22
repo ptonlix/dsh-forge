@@ -25,6 +25,8 @@
   `pnpm 11.7.0` 对 `node:sqlite` 的运行要求；不改变 profile 描述的 Electron/DSH runtime 下限。
 - **不包含**代码签名、公证、Authenticode 证书或自动更新通道的实现；这些仍由现有发布
   契约约束，并需要独立的凭据与变更。
+- 统一跨平台子进程入口：profile composer、Electron ABI 检查和 electron-builder 不得依赖
+  pnpm 生成的 `.bin` shell/cmd shim；启动失败必须保留错误码、状态、signal 和截断后的输出。
 
 ## Capabilities
 

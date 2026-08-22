@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
+import { resolveElectronBinary, resolvePackageBin, spawnFailureMessage } from '@dsh-forge/profile-toolchain/core/process';
 
 interface WorkflowJob {
   readonly if?: string;
@@ -45,7 +46,6 @@ describe('Desktop Release workflow', () => {
     expect(source).not.toContain('"$PROFILE"');
     expect(source).toContain('"${{ env.PROFILE }}"');
   });
-
   it('CI Node 版本满足 pnpm 11.7 的运行要求', () => {
     expect(workflow.env.NODE_VERSION).toBe('22.14.0');
     const packageManifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
@@ -58,5 +58,28 @@ describe('Desktop Release workflow', () => {
     expect(packageManifest.scripts?.typecheck).toBe(
       'pnpm run build:desktop-services && tsc -p tsconfig.json --noEmit',
     );
+  });
+
+  it('跨平台子进程不依赖 pnpm 的 .bin shim', () => {
+    const root = process.cwd();
+    expect(resolvePackageBin(root, '@deepseek-ai/dsh', 'dsh')).toMatch(/lib[\\/]bin\.js$/);
+    expect(resolvePackageBin(root, 'electron-builder', 'electron-builder')).toMatch(/(?:cli\.js)$/);
+    expect(resolveElectronBinary(root)).not.toMatch(/[\\/]\.bin[\\/]electron(?:\.cmd)?$/);
+  });
+
+  it('子进程诊断保留启动错误和有限输出', () => {
+    const message = spawnFailureMessage(
+      {
+        status: null,
+        signal: null,
+        error: Object.assign(new Error('无法启动子进程'), { code: 'ENOENT' }),
+        stdout: 'stdout',
+        stderr: 'stderr',
+      },
+      'unknown error',
+    );
+    expect(message).toContain('无法启动子进程');
+    expect(message).toContain('code=ENOENT');
+    expect(message).toContain('stderr=stderr');
   });
 });

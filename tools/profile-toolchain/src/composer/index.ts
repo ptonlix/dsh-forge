@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseYaml, readYaml, stringifyYaml } from '../core/yaml.ts';
 import { fail } from '../core/errors.ts';
+import { resolvePackageBin, spawnFailureDetails, spawnFailureMessage } from '../core/process.ts';
 import { type CompiledProfile } from '../compiler/index.ts';
 import { errorMessage } from '../types.ts';
 import type { JsonObject, Overlay } from '../types.ts';
@@ -141,9 +142,11 @@ function copyProfileToHome(
 }
 
 function dshBin(root: string): string {
-  const bin = path.join(root, 'node_modules', '.bin', 'dsh');
-  if (!fs.existsSync(bin)) fail('未找到上游 dsh CLI', 'DSH_RUNTIME_MISSING');
-  return bin;
+  try {
+    return resolvePackageBin(root, '@deepseek-ai/dsh', 'dsh');
+  } catch (error) {
+    fail(`未找到上游 dsh CLI: ${errorMessage(error)}`, 'DSH_RUNTIME_MISSING');
+  }
 }
 
 function verifyEntryPackages(entries: readonly ConfigEntry[], compiled: CompiledProfile): ComposeDiagnostic[] {
@@ -216,16 +219,17 @@ export function composeCompiled(
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-compose-'));
   try {
     const profileDir = copyProfileToHome(compiled, home, homePatch, normalizedOverlay);
-    const result = spawnSync(dshBin(compiled.root), ['--profile', compiled.profile.name, '--dump-config'], {
+    const childEnv: NodeJS.ProcessEnv = { ...process.env, DSH_HOME: home };
+    delete childEnv.NODE_OPTIONS;
+    const result = spawnSync(process.execPath, [dshBin(compiled.root), '--profile', compiled.profile.name, '--dump-config'], {
       cwd: compiled.root,
       encoding: 'utf8',
       timeout: 60_000,
-      env: { ...process.env, DSH_HOME: home },
+      env: childEnv,
     });
     if (result.status !== 0) {
-      fail(`上游 DSH 配置转储失败: ${(result.stderr || result.stdout || 'unknown error').trim()}`, 'DSH_DUMP_FAILED', {
-        status: result.status,
-        signal: result.signal,
+      fail(`上游 DSH 配置转储失败: ${spawnFailureMessage(result, 'unknown error')}`, 'DSH_DUMP_FAILED', {
+        ...spawnFailureDetails(result),
         profileDir,
       });
     }

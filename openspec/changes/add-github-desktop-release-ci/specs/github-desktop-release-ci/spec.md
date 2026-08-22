@@ -131,3 +131,27 @@ secrets。
 - **WHEN** 仓库收到与 `distribution.yml.version` 一致的 `v*` tag
 - **THEN** 工作流在 `validate` 通过后启动三个原生 package 任务和 summary，并将产物限定在
   当前 run；未显式启用生产发布时 release job 保持跳过
+
+### Requirement: 跨平台工具入口必须独立于 pnpm shim
+
+profile resolve、Electron ABI 检查和 electron-builder SHALL 通过固定 package manifest 解析真实
+JS bin 或 Electron runtime，不得直接执行 `node_modules/.bin` 下的 POSIX shell 或 Windows cmd
+shim。用于 ABI 查询的 Electron 子进程 SHALL 清理继承的 `NODE_OPTIONS`，并在失败时记录启动错误、
+退出状态、signal 以及长度受限的 stdout/stderr。
+
+#### Scenario: macOS 和 Linux ABI 查询
+
+- **WHEN** 原生 runner 运行 `package:desktop`
+- **THEN** ABI 查询使用已安装的 Electron 43.4.0 runtime 输出合法 ABI，并继续进入 native rebuild；
+  不因 `.bin/electron` shim 或 tsx loader 造成空/非 JSON 输出而失败
+
+#### Scenario: Windows profile 与 builder 启动
+
+- **WHEN** Windows x64 runner 运行 profile resolve 或 electron-builder
+- **THEN** 子进程由 Node 直接执行真实 JS 入口，不依赖 `.bin/dsh`、`.bin/electron-builder` 的
+  shell/cmd 文件，并且启动失败会显示可操作的 `ENOENT`/`EACCES` 等错误
+
+#### Scenario: 首次构建耗时较长
+
+- **WHEN** builder 首次下载缓存缺失、执行 Universal 组合或执行原生依赖重建
+- **THEN** package job 使用不少于 15 分钟的 builder 超时预算，超时仍以失败结束并保留结构化诊断
