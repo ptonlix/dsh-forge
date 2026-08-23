@@ -109,7 +109,7 @@ describe('Desktop Release workflow', () => {
     expect(source).toContain('desktop-${{ runner.os }}-${{ runner.arch }}-');
     expect(source).not.toContain('electron-builder/Cache');
     expect(source).toContain("if: ${{ matrix.target == 'win32-x64' }}");
-    expect(source).toContain("releases/download/7zip@1.0.0/7zip-win-x64.tar.gz");
+    expect(source).toContain('releases/download/7zip@1.0.0/7zip-win-x64.tar.gz');
     expect(source).toContain('be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3');
     expect(source).toContain("Join-Path $toolRoot 'bin\\7za.exe'");
     expect(source).toContain('Get-FileHash -LiteralPath $archive -Algorithm SHA256');

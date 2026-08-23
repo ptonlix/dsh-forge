@@ -80,7 +80,16 @@ export async function startElectron() {
     deadlineMs: 15_000,
     probe: (url) => probeLoopback(url, 15_000),
     windowFactory,
-    host: { start: (options) => startDshHost({ root, home: dshHome.path, runtimeRoot, launcherFallbackRoot, ...options }) },
+    host: {
+      start: (options) =>
+        startDshHost({
+          root,
+          home: dshHome.path,
+          runtimeRoot,
+          launcherFallbackRoot,
+          ...options,
+        }),
+    },
     pnpm: process.execPath,
     pnpmArgs: [path.join(runtimeRoot, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')],
     pnpmEnv: { ELECTRON_RUN_AS_NODE: '1' },
