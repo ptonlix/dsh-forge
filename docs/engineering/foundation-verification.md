@@ -151,3 +151,9 @@ Actions 显式设置 `DSH_FORGE_PROFILE_OFFLINE=false`，改用
 `--prefer-offline --frozen-lockfile`，缓存缺失时只补下载 lockfile 指定 tarball，不重新解析
 版本。该策略修复了 Windows runner 因 pnpm store 不完整而出现的
 `PNPM_NO_OFFLINE_TARBALL`，也适用于首次运行的 macOS/Linux runner。
+
+Universal staging 不能复用 arm64 profile 的 optional 依赖；打包脚本使用 pnpm 11 的
+`--os=darwin --cpu=arm64 --cpu=x64` 重新物化两套输入，只对互补的 Mach-O `.node` 执行
+`lipo`，因此 `@img/sharp-darwin-arm64/x64` 等架构专属包保持独立。native addon 完成受控
+重建后，electron-builder 设置 `npmRebuild: false` 并传入 `--publish never`，避免重复扫描
+profile 或因 Tag 隐式发布失败；Actions artifact 由独立 release job 处理。

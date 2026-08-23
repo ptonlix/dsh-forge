@@ -25,7 +25,12 @@ function truncate(value: string): string {
   const normalized = value.trim();
   return normalized.length <= MAX_DIAGNOSTIC_CHARS
     ? normalized
-    : `${normalized.slice(0, MAX_DIAGNOSTIC_CHARS)}...<truncated>`;
+    : (() => {
+      const marker = '...<truncated>...';
+      const available = MAX_DIAGNOSTIC_CHARS - marker.length;
+      const headLength = Math.ceil(available / 2);
+      return `${normalized.slice(0, headLength)}${marker}${normalized.slice(-available + headLength)}`;
+    })();
 }
 
 function requireFromRoot(root: string): NodeRequire {

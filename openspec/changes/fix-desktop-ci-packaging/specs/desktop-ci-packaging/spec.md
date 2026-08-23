@@ -16,6 +16,33 @@
 每个目标架构的 native rebuild SHALL 使用不少于 15 分钟的超时；超时或非零退出 SHALL
 返回 `ELECTRON_REBUILD_FAILED`，并保留有限 stdout/stderr、status、signal 和启动错误。
 
+### Requirement: Universal native 依赖必须按架构隔离
+
+macOS Universal SHALL 为 profile staging 安装 lockfile 声明的 arm64 和 x64 optional native
+依赖。合并器 SHALL 只对一份 arm64 Mach-O 和一份 x86_64 Mach-O 执行 lipo；相同架构文件或
+架构专属 package 路径不得重复合并。
+
+#### Scenario: sharp optional package
+
+- **WHEN** profile 同时包含 `@img/sharp-darwin-arm64` 和 `@img/sharp-darwin-x64`
+- **THEN** Universal 产物保留两套 package，并按 Electron `process.arch` 选择对应文件；不因
+  同一 staging 中的相同架构文件触发 lipo 失败。
+
+### Requirement: builder 不得重复重建 native addon
+
+生成的 electron-builder 配置 SHALL 设置 `npmRebuild: false`。受控 native rebuild 失败时必须
+先阻止 builder，builder 不得自行改变 profile 闭包或重写 native evidence。
+
+### Requirement: package job 不得隐式发布
+
+electron-builder SHALL 使用 `--publish never`。Tag package job 只生成并上传 artifact，发布
+动作 SHALL 由独立 Release job 负责。
+
+#### Scenario: Tag 构建
+
+- **WHEN** workflow 从 `v*` Tag 进入平台 package job
+- **THEN** electron-builder 不得尝试创建或更新 GitHub Release；package job 只输出本平台产物。
+
 ### Requirement: profile 物化必须区分锁解析与依赖下载
 
 profile lock 解析 SHALL 保持 offline；物化安装 SHALL 使用 frozen lockfile，并根据

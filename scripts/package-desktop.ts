@@ -1,6 +1,7 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { resolveProfile } from '@dsh-forge/profile-toolchain/compiler';
 import { writeConfigDump } from '@dsh-forge/profile-toolchain/composer';
@@ -74,6 +75,8 @@ function builderConfig({
     productName: distribution.branding.productName,
     directories: { output: outputDir },
     asar: true,
+    // native addon 已由本脚本按 Electron ABI 重建，禁止 builder 再次修改 profile 闭包。
+    npmRebuild: false,
     asarUnpack: ['node_modules/**', '**/*.node', '**/helpers/**'],
     files: [
       'dist/**',
@@ -244,6 +247,64 @@ function electronAbi(root: string, expectedVersion: string): string {
   return value.abi;
 }
 
+function profilePnpmBinary(root: string): string {
+  const binary = path.join(root, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs');
+  if (!fs.existsSync(binary)) fail('未找到固定 pnpm runtime', 'PNPM_RUNTIME_MISSING');
+  return binary;
+}
+
+/** Universal staging 必须同时包含两个 Darwin optional native 包，不能沿用 arm64 物化结果。 */
+function installUniversalProfileDependencies(root: string, profileDir: string): void {
+  const packageFile = path.join(profileDir, 'package.json');
+  const original = fs.readFileSync(packageFile, 'utf8');
+  const nodeModules = path.join(profileDir, 'node_modules');
+  if (fs.existsSync(nodeModules)) fs.rmSync(nodeModules, { recursive: true, force: true });
+  const binary = profilePnpmBinary(root);
+  // pnpm 11 已将 supportedArchitectures 从 package.json 迁移为 CLI 选项；重复
+  // --cpu 会让同一份 profile 同时保留 arm64 与 x64 的 optionalDependencies。
+  const installArgs = [
+    binary,
+    'install',
+    '--prefer-offline',
+    '--frozen-lockfile',
+    '--force',
+    '--os=darwin',
+    '--cpu=arm64',
+    '--cpu=x64',
+  ];
+  let result: SpawnSyncReturns<string>;
+  try {
+    result = spawnSync(process.execPath, installArgs, {
+      cwd: profileDir,
+      encoding: 'utf8',
+      timeout: NATIVE_REBUILD_TIMEOUT_MS,
+      env: {
+        ...process.env,
+        CI: 'true',
+        ELECTRON_RUN_AS_NODE: '1',
+      },
+    });
+  } finally {
+    fs.writeFileSync(packageFile, original, { mode: 0o600 });
+  }
+  if (result.status !== 0)
+    fail(
+      `Universal profile 依赖安装失败: ${spawnFailureMessage(result, 'unknown error')}`,
+      'PNPM_RESOLUTION_FAILED',
+      { ...spawnFailureDetails(result), command: installArgs.slice(1) },
+    );
+}
+
+function machOArchitectures(file: string): readonly string[] {
+  const result = spawnSync('lipo', ['-archs', file], { encoding: 'utf8' });
+  if (result.status !== 0) return [];
+  return (result.stdout || '').trim().split(/\s+/).filter(Boolean);
+}
+
+function fileSha256(file: string): string {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
 /** 仅重建 profile 闭包内已审计的 node-pty，超时或未发现模块均阻断打包。 */
 function rebuildProfileNativeAddons(
   root: string,
@@ -263,6 +324,7 @@ function rebuildProfileNativeAddons(
     if (universal) {
       if (fs.existsSync(moduleDir)) fs.rmSync(moduleDir, { recursive: true, force: true });
       fs.cpSync(profileDir, moduleDir, { recursive: true, dereference: true });
+      installUniversalProfileDependencies(root, moduleDir);
       staging.set(architecture, moduleDir);
     }
     const args = [
@@ -309,15 +371,50 @@ function rebuildProfileNativeAddons(
     };
     const files = new Set<string>();
     for (const directory of staging.values()) for (const file of relativeFiles(directory)) files.add(file);
+    const finalModules = path.join(profileDir, 'node_modules');
+    if (fs.existsSync(finalModules)) fs.rmSync(finalModules, { recursive: true, force: true });
+    fs.mkdirSync(finalModules, { recursive: true });
+    const copyModuleContents = (source: string): void => {
+      for (const entry of fs.readdirSync(source)) {
+        fs.cpSync(path.join(source, entry), path.join(finalModules, entry), { recursive: true, dereference: true });
+      }
+    };
+    copyModuleContents(path.join(staging.get(architectures[0]!)!, 'node_modules'));
+    for (const architecture of architectures.slice(1)) {
+      copyModuleContents(path.join(staging.get(architecture)!, 'node_modules'));
+    }
     for (const relative of files) {
       const inputs = architectures
         .map((architecture) => path.join(staging.get(architecture)!, relative))
         .filter((file) => fs.existsSync(file));
       const output = path.join(profileDir, relative);
       if (inputs.length === 2) {
+        const slices = inputs.map(machOArchitectures);
+        const complementary = slices[0]?.length === 1 && slices[1]?.length === 1
+          && slices[0][0] !== slices[1][0]
+          && new Set(slices.flat()).size === 2;
         fs.mkdirSync(path.dirname(output), { recursive: true });
-        const result = spawnSync('lipo', ['-create', ...inputs, '-output', output], { encoding: 'utf8' });
-        if (result.status !== 0) fail(`native addon universal 合并失败: ${relative}`, 'ELECTRON_REBUILD_FAILED');
+        if (complementary) {
+          const result = spawnSync('lipo', ['-create', ...inputs, '-output', output], { encoding: 'utf8' });
+          if (result.status !== 0)
+            fail(`native addon universal 合并失败: ${relative}`, 'ELECTRON_REBUILD_FAILED', {
+              inputs,
+              slices,
+              stderr: result.stderr || '',
+              stdout: result.stdout || '',
+            });
+        } else if (
+          (slices[0]?.length === 1 && slices[0][0] === slices[1]?.[0])
+          || (slices[0]?.length === 0 && slices[1]?.length === 0 && fileSha256(inputs[0]!) === fileSha256(inputs[1]!))
+        ) {
+          // 架构专属 package（例如 sharp-darwin-arm64/x64）在两个 staging 中只需保留一份。
+          fs.copyFileSync(inputs[0]!, output);
+        } else {
+          fail(`native addon universal 架构切片不兼容: ${relative}`, 'ELECTRON_REBUILD_FAILED', {
+            inputs,
+            slices,
+          });
+        }
       } else if (inputs.length === 1) {
         fs.mkdirSync(path.dirname(output), { recursive: true });
         fs.copyFileSync(inputs[0]!, output);
@@ -327,7 +424,7 @@ function rebuildProfileNativeAddons(
   return { command: commands.join(' && '), output: reports.join('\n'), electronAbi: abi, architectures: architectures.slice() };
 }
 
-/** 调用 electron-builder；固定 60 秒超时并关闭自动代码签名发现。 */
+/** 调用 electron-builder；固定 15 分钟超时并关闭自动代码签名发现。 */
 function runBuilder(
   root: string,
   configFile: string,
@@ -340,7 +437,9 @@ function runBuilder(
   } catch (error) {
     fail(`未安装 electron-builder: ${errorMessage(error)}`, 'ELECTRON_BUILDER_MISSING');
   }
-  const args = ['--config', configFile];
+  // Tag 只触发构建；发布由 workflow 的 release job 统一处理，避免 builder
+  // 根据 git tag 隐式访问 GitHub Release 并在 package job 中失败。
+  const args = ['--config', configFile, '--publish', 'never'];
   const builderFormats = formats.length ? formats : ['dir'];
   if (process.platform === 'darwin') args.push('--mac', ...builderFormats, ...(targetName === 'darwin-universal' ? ['--universal'] : [process.arch === 'arm64' ? '--arm64' : '--x64']));
   else if (process.platform === 'win32') args.push('--win', ...builderFormats, '--x64');

@@ -85,6 +85,16 @@ describe('Desktop Release workflow', () => {
     expect(message).toContain('stderr=stderr');
   });
 
+  it('长诊断同时保留开头和末尾', () => {
+    const message = spawnFailureMessage(
+      { status: 1, signal: null, stdout: `${'head '.repeat(800)}TAIL_MARKER`, stderr: '' },
+      'unknown error',
+    );
+    expect(message).toContain('head head');
+    expect(message).toContain('TAIL_MARKER');
+    expect(message).toContain('<truncated>');
+  });
+
   it('声明 profile 可补下载和 Electron headers 校验源', () => {
     expect(workflow.env.DSH_FORGE_PROFILE_OFFLINE).toBe('false');
     expect(workflow.env.ELECTRON_REBUILD_DIST_URL).toBe('https://www.electronjs.org/headers');
@@ -93,6 +103,12 @@ describe('Desktop Release workflow', () => {
     expect(source).toContain('desktop-${{ runner.os }}-${{ runner.arch }}-');
     expect(packagingSource).toContain('NATIVE_REBUILD_TIMEOUT_MS = 15 * 60_000');
     expect(packagingSource).toContain('DEFAULT_ELECTRON_REBUILD_DIST_URL =');
+    expect(packagingSource).toContain('npmRebuild: false');
+    expect(packagingSource).toContain("'--publish', 'never'");
+    expect(packagingSource).toContain("'--os=darwin'");
+    expect(packagingSource).toContain("'--cpu=arm64'");
+    expect(packagingSource).toContain("'--cpu=x64'");
+    expect(packagingSource).toContain("spawnSync('lipo', ['-archs', file]");
     expect(packagingSource).not.toContain("ELECTRON_REBUILD_DIST_URL: process.env.ELECTRON_REBUILD_DIST_URL || 'https://npmmirror.com/mirrors/electron/'");
     expect(compilerSource).toContain("offline ? '--offline' : '--prefer-offline'");
     expect(compilerSource).toContain('DSH_FORGE_PROFILE_OFFLINE');
