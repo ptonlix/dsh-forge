@@ -24,6 +24,8 @@ env:
   NODE_VERSION: "22.14.0"
   PNPM_VERSION: "11.7.0"
   PROFILE: ${{ inputs.profile || 'dsh-forge-official' }}
+  DSH_FORGE_PROFILE_OFFLINE: "false"
+  ELECTRON_REBUILD_DIST_URL: "https://www.electronjs.org/headers"
 
 jobs:
   validate:
@@ -69,6 +71,7 @@ jobs:
             runner: ubuntu-22.04
             formats: AppImage,deb
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -78,6 +81,21 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - name: 缓存 Electron headers 与构建器下载
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.electron-gyp
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: desktop-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            desktop-${{ runner.os }}-${{ runner.arch }}-
+            desktop-${{ runner.os }}-
       - name: 打印构建身份
         run: node -p "JSON.stringify({platform:process.platform,arch:process.arch,target:'${{ matrix.target }}',profile:process.env.PROFILE,node:process.version})"
       - run: pnpm install --frozen-lockfile

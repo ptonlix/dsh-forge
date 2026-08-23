@@ -625,10 +625,14 @@ function withLockedExternalEvidence(
 }
 
 function materializeProfile(root: string, profileDir: string): PnpmResult {
+  const offlineSetting = process.env.DSH_FORGE_PROFILE_OFFLINE;
+  const offline = offlineSetting === undefined
+    ? true
+    : !['0', 'false', 'no'].includes(offlineSetting.toLowerCase());
   return runPnpm(
     root,
     profileDir,
-    ['install', '--offline', '--frozen-lockfile'],
+    ['install', offline ? '--offline' : '--prefer-offline', '--frozen-lockfile'],
     { ignoreScripts: false },
   );
 }

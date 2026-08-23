@@ -45,6 +45,9 @@ interface NativeRebuildResult {
 type DesktopTargetName = 'darwin-universal' | 'win32-x64' | 'linux-x64';
 type PackageFormat = 'dir' | 'dmg' | 'zip' | 'nsis' | 'AppImage' | 'deb';
 
+const DEFAULT_ELECTRON_REBUILD_DIST_URL = 'https://www.electronjs.org/headers';
+const NATIVE_REBUILD_TIMEOUT_MS = 15 * 60_000;
+
 interface PackageOptions {
   readonly profileName?: string;
   readonly targetName?: DesktopTargetName;
@@ -270,20 +273,23 @@ function rebuildProfileNativeAddons(
       '--force', '--arch', architecture,
       '--types', 'prod,optional',
     ];
+    const rebuildDistUrl = process.env.ELECTRON_REBUILD_DIST_URL || DEFAULT_ELECTRON_REBUILD_DIST_URL;
     const result = spawnSync(process.execPath, args, {
       cwd: moduleDir,
       encoding: 'utf8',
-      timeout: 60_000,
+      timeout: NATIVE_REBUILD_TIMEOUT_MS,
       env: {
         ...process.env,
-        ELECTRON_REBUILD_DIST_URL: process.env.ELECTRON_REBUILD_DIST_URL || 'https://npmmirror.com/mirrors/electron/',
+        ELECTRON_REBUILD_DIST_URL: rebuildDistUrl,
       },
     });
     const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
     if (result.status !== 0 || result.signal || !output.includes('node-pty'))
-      fail(`Electron native addon 重建失败 (${architecture}): ${output || result.signal || 'unknown error'}`, 'ELECTRON_REBUILD_FAILED', {
-        args: args.slice(1), status: result.status, signal: result.signal,
-      });
+      fail(
+        `Electron native addon 重建失败 (${architecture}): ${spawnFailureMessage(result, output || 'unknown error')}`,
+        'ELECTRON_REBUILD_FAILED',
+        { ...spawnFailureDetails(result), args: args.slice(1), headersUrl: rebuildDistUrl },
+      );
     reports.push(`[${architecture}] ${output}`);
     commands.push(`${process.execPath} ${args.join(' ')}`);
   }

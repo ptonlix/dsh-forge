@@ -22,6 +22,8 @@ interface DesktopReleaseWorkflow {
 
 const workflowFile = join(process.cwd(), '.github', 'workflows', 'release-desktop.yml');
 const source = readFileSync(workflowFile, 'utf8');
+const packagingSource = readFileSync(join(process.cwd(), 'scripts', 'package-desktop.ts'), 'utf8');
+const compilerSource = readFileSync(join(process.cwd(), 'tools', 'profile-toolchain', 'src', 'compiler', 'index.ts'), 'utf8');
 const workflow = parse(source) as DesktopReleaseWorkflow;
 
 describe('Desktop Release workflow', () => {
@@ -81,5 +83,18 @@ describe('Desktop Release workflow', () => {
     expect(message).toContain('无法启动子进程');
     expect(message).toContain('code=ENOENT');
     expect(message).toContain('stderr=stderr');
+  });
+
+  it('声明 profile 可补下载和 Electron headers 校验源', () => {
+    expect(workflow.env.DSH_FORGE_PROFILE_OFFLINE).toBe('false');
+    expect(workflow.env.ELECTRON_REBUILD_DIST_URL).toBe('https://www.electronjs.org/headers');
+    expect(workflow.jobs.package?.if).toContain("startsWith(github.ref, 'refs/tags/v')");
+    expect(source).toContain('timeout-minutes: 90');
+    expect(source).toContain('desktop-${{ runner.os }}-${{ runner.arch }}-');
+    expect(packagingSource).toContain('NATIVE_REBUILD_TIMEOUT_MS = 15 * 60_000');
+    expect(packagingSource).toContain('DEFAULT_ELECTRON_REBUILD_DIST_URL =');
+    expect(packagingSource).not.toContain("ELECTRON_REBUILD_DIST_URL: process.env.ELECTRON_REBUILD_DIST_URL || 'https://npmmirror.com/mirrors/electron/'");
+    expect(compilerSource).toContain("offline ? '--offline' : '--prefer-offline'");
+    expect(compilerSource).toContain('DSH_FORGE_PROFILE_OFFLINE');
   });
 });

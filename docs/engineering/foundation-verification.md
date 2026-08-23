@@ -133,3 +133,21 @@ Universal 合并允许较长的 builder 超时。
 native rebuild。完整 Universal 构建未在本机完成，因为环境缺少 Xcode Command Line Tools；
 GitHub `macos-14` runner 仍需执行 native rebuild 和真实安装包 smoke。Windows 的真实 runner
 验证同样仍需通过 CI 完成。
+
+### 三平台打包稳定性修复（2026-08-23）
+
+此前 native rebuild 失败不是 `node-pty` ABI 本身不兼容，而是把 Electron runtime 镜像误用作
+node-gyp headers 源。`npmmirror.com/mirrors/electron/` 的版本目录没有提供 node-gyp 需要的
+匹配 headers 校验项，日志因此出现 `local checksum ... not match remote undefined`。当前脚本
+将两类下载源分开：`ELECTRON_MIRROR` 仍可用于 Electron runtime，`ELECTRON_REBUILD_DIST_URL`
+默认使用 `https://www.electronjs.org/headers`，替代地址必须提供同版本 headers 和
+`SHASUMS256.txt`。
+
+首次下载、`node-pty` 编译以及 macOS Universal 的两个架构重建共使用每架构 15 分钟预算；
+超时仍失败，并记录有限 stdout/stderr、退出状态、signal、启动错误和 headers 地址。
+
+profile lockfile 投影继续离线执行。profile 物化默认保持 `--offline --frozen-lockfile`；GitHub
+Actions 显式设置 `DSH_FORGE_PROFILE_OFFLINE=false`，改用
+`--prefer-offline --frozen-lockfile`，缓存缺失时只补下载 lockfile 指定 tarball，不重新解析
+版本。该策略修复了 Windows runner 因 pnpm store 不完整而出现的
+`PNPM_NO_OFFLINE_TARBALL`，也适用于首次运行的 macOS/Linux runner。
