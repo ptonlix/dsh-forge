@@ -1,4 +1,3 @@
-import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
@@ -21,10 +20,11 @@ import type { Distribution, RuntimePlatform } from '@dsh-forge/profile-toolchain
 /** Electron 目录产物构建脚本；构建前必须已有已验证 profile 和 config dump。 */
 
 interface BuilderConfigInput {
-  readonly root: string;
   readonly outputDir: string;
-  /** 为 electron-builder 准备的解引用 profile 闭包。 */
+  /** 为 electron-builder 准备的 profile 配置目录，不包含 node_modules。 */
   readonly packagedProfileDir: string;
+  /** 独立的 Electron 应用 staging，包含唯一一棵生产依赖闭包。 */
+  readonly appStagingDir: string;
   readonly resolved: CompiledProfile['resolved'];
   readonly distribution: Distribution;
   readonly targetName?: DesktopTargetName;
@@ -48,6 +48,7 @@ type PackageFormat = 'dir' | 'dmg' | 'zip' | 'nsis' | 'AppImage' | 'deb';
 
 const DEFAULT_ELECTRON_REBUILD_DIST_URL = 'https://www.electronjs.org/headers';
 const NATIVE_REBUILD_TIMEOUT_MS = 15 * 60_000;
+const ELECTRON_BUILDER_TIMEOUT_MS = 45 * 60_000;
 
 interface PackageOptions {
   readonly profileName?: string;
@@ -61,9 +62,9 @@ function rootDirectory(): string {
 
 /** 生成 electron-builder 配置，明确 runtime、profile、catalog 和审计证据的位置。 */
 function builderConfig({
-  root,
   outputDir,
   packagedProfileDir,
+  appStagingDir,
   resolved,
   distribution,
   targetName,
@@ -73,15 +74,17 @@ function builderConfig({
   const config: Record<string, unknown> = {
     appId: distribution.applicationId,
     productName: distribution.branding.productName,
-    directories: { output: outputDir },
+    // 根 package 名称带 scope，不能让 builder 推导出非法的 Linux/Windows 文件名。
+    executableName: distribution.id,
+    directories: { app: appStagingDir, output: outputDir },
     asar: true,
     // native addon 已由本脚本按 Electron ABI 重建，禁止 builder 再次修改 profile 闭包。
     npmRebuild: false,
-    asarUnpack: ['node_modules/**', '**/*.node', '**/helpers/**'],
+    // 只有 native addon 与必须的 helper 需要离开 asar；JS 依赖保持在单一 app.asar 中。
+    asarUnpack: ['**/*.node', '**/helpers/**'],
     files: [
       'dist/**',
       'packages/**',
-      'tools/**',
       'catalog/**',
       'package.json',
       'distribution.yml',
@@ -90,23 +93,36 @@ function builderConfig({
       '!node_modules/**/.pnpm-store/**',
     ],
     extraResources: [
-      // workspace 依赖在 pnpm 安装目录中是相对 symlink；保留 packages 拓扑后，
-      // 打包 runtime 内的 @dsh-forge/* 链接仍能解析到随包携带的真实目录。
-      { from: path.join(root, 'packages'), to: 'dsh-forge/runtime/packages' },
-      { from: path.join(root, 'tools'), to: 'dsh-forge/runtime/tools' },
-      { from: path.join(root, 'node_modules'), to: 'dsh-forge/runtime/node_modules' },
-      // profile-local node_modules 可能保留 pnpm 相对链接。electron-builder
-      // 不能把链接目标当作隐式资源，因此只接受本脚本物化的解引用闭包。
-      // extraResources 的默认筛选会按主应用依赖裁剪 node_modules；profile 是
-      // 独立闭包，必须显式保留其所有文件，不能让 builder 再作生产依赖推断。
+      // profile 配置在 builder 阶段进入资源；node_modules 在最终 app 生成后只复制一次。
       { from: packagedProfileDir, to: 'dsh-forge/profile', filter: ['**/*'] },
       { from: path.join(artifactDir, 'resolved-manifest.json'), to: 'dsh-forge/resolved-manifest.json' },
       { from: path.join(artifactDir, 'sbom.input.json'), to: 'dsh-forge/sbom.input.json' },
       { from: path.join(artifactDir, 'THIRD-PARTY-NOTICES.txt'), to: 'dsh-forge/THIRD-PARTY-NOTICES.txt' },
     ],
-    mac: { target: targetName === 'darwin-universal' ? formats : ['dir'] },
+    mac: {
+      target: targetName === 'darwin-universal' ? formats : ['dir'],
+      ...(targetName === 'darwin-universal'
+        ? {
+          mergeASARs: false,
+          // profile 内的架构专属 native 包必须保持独立路径，不能尝试 lipo。
+          x64ArchFiles: [
+            '**/node_modules/node-pty/prebuilds/darwin-x64/**',
+            '**/node_modules/@img/sharp-darwin-x64/**',
+            '**/node_modules/@img/sharp-libvips-darwin-x64/**',
+            '**/node_modules/@koromix/koffi-darwin-x64/**',
+            '**/node_modules/@vscode/ripgrep-darwin-x64/**',
+            '**/node_modules/node-addon-require-builtin-darwin-x64/**',
+          ],
+        }
+        : {}),
+    },
     win: { target: targetName === 'win32-x64' ? formats : ['dir'] },
-    linux: { target: targetName === 'linux-x64' ? formats : ['dir'] },
+    linux: {
+      target: targetName === 'linux-x64' ? formats : ['dir'],
+      category: 'Utility',
+      desktopName: distribution.id,
+      executableName: distribution.id,
+    },
     artifactName: `${distribution.id}-${resolved.profile.name}-${distribution.version}-\${os}-\${arch}.\${ext}`,
   };
   if (process.env.DSH_FORGE_ELECTRON_ZIP) {
@@ -115,6 +131,127 @@ function builderConfig({
     config.electronDist = electronZip;
   }
   return config;
+}
+
+const APP_RUNTIME_ROOTS = Object.freeze([
+  '@dsh-forge/profile-toolchain',
+  '@dsh-forge/desktop-services-local',
+  '@dsh-forge/desktop-services',
+  '@dsh-forge/desktop-layer',
+  '@deepseek-ai/cordis',
+  'semver',
+  'yaml',
+  '@electron/asar',
+  'pnpm',
+] as const);
+
+/** 编译器在开发/构建阶段需要 DSH，但打包应用从 profile 闭包加载 DSH。
+ * 将这些包排除在 Electron 主进程闭包外，避免生成第二份 DSH runtime。 */
+const PROFILE_ONLY_RUNTIME_PREFIXES = Object.freeze(['@deepseek-ai/dsh'] as const);
+
+function isProfileOnlyRuntimePackage(name: string): boolean {
+  return PROFILE_ONLY_RUNTIME_PREFIXES.some((prefix) => name === prefix || name.startsWith(`${prefix}-`));
+}
+
+function resolveInstalledPackageDirectory(root: string, packageName: string): string | null {
+  const anchor = path.join(root, 'package.json');
+  const requireFromRoot = createRequire(anchor);
+  try {
+    const entry = requireFromRoot.resolve(packageName);
+    let directory = path.dirname(entry);
+    for (let depth = 0; depth < 8; depth += 1) {
+      if (fs.existsSync(path.join(directory, 'package.json'))) {
+        const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')) as { name?: unknown };
+        if (manifest.name === packageName) return fs.realpathSync(directory);
+      }
+      const parent = path.dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+  } catch {
+    // 某些 workspace exports 不开放 package.json；下面的目录扫描保留兼容性。
+  }
+  for (const searchPath of requireFromRoot.resolve.paths(packageName) || []) {
+    const candidate = path.join(searchPath, ...packageName.split('/'));
+    if (fs.existsSync(path.join(candidate, 'package.json'))) return fs.realpathSync(candidate);
+  }
+  return null;
+}
+
+function packageDependencyNames(manifest: Record<string, unknown>): readonly string[] {
+  const sections = ['dependencies', 'optionalDependencies', 'peerDependencies'] as const;
+  return [...new Set(sections.flatMap((section) => {
+    const value = manifest[section];
+    return value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value) : [];
+  }))];
+}
+
+/**
+ * 生成只包含 Electron 主进程真实入口的物理 production closure。
+ * 每个包只复制一次，去掉 pnpm workspace 链接和 profile 专属 DSH 依赖。
+ */
+function createDesktopAppStaging(root: string, compiled: CompiledProfile): string {
+  const staging = path.join(compiled.outputDir, 'desktop-deploy');
+  if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
+  fs.mkdirSync(path.join(staging, 'node_modules'), { recursive: true, mode: 0o700 });
+  for (const directory of ['dist', 'packages', 'catalog']) {
+    const source = path.join(root, directory);
+    if (!fs.existsSync(source)) fail(`应用 staging 缺少 ${directory}`, 'PACKAGE_APP_STAGING_MISSING');
+    fs.cpSync(source, path.join(staging, directory), { recursive: true, dereference: true });
+  }
+  for (const file of ['distribution.yml']) fs.copyFileSync(path.join(root, file), path.join(staging, file));
+
+  const packageNames = new Set<string>();
+  const queue: string[] = [...APP_RUNTIME_ROOTS];
+  while (queue.length) {
+    const name = queue.shift()!;
+    if (packageNames.has(name) || isProfileOnlyRuntimePackage(name)) continue;
+    const directory = resolveInstalledPackageDirectory(root, name);
+    if (!directory) {
+      // optional peer 在当前平台缺失时由实际 package resolver 处理；必需入口必须存在。
+      if ((APP_RUNTIME_ROOTS as readonly string[]).includes(name))
+        fail(`应用 production closure 缺少 ${name}`, 'PACKAGE_APP_CLOSURE_MISSING');
+      continue;
+    }
+    packageNames.add(name);
+    const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')) as Record<string, unknown>;
+    for (const dependency of packageDependencyNames(manifest)) queue.push(dependency);
+  }
+
+  for (const name of [...packageNames].sort()) {
+    const source = resolveInstalledPackageDirectory(root, name);
+    if (!source) fail(`应用 production closure 无法读取 ${name}`, 'PACKAGE_APP_CLOSURE_MISSING');
+    const destination = path.join(staging, 'node_modules', ...name.split('/'));
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.cpSync(source, destination, {
+      recursive: true,
+      dereference: true,
+      filter: (candidate) => path.basename(candidate) !== 'node_modules' && path.basename(candidate) !== '.bin',
+    });
+  }
+
+  const rootPackage = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')) as Record<string, unknown>;
+  const stagedPackage: Record<string, unknown> = {
+    name: rootPackage.name,
+    version: rootPackage.version,
+    private: true,
+    type: rootPackage.type,
+    main: rootPackage.main,
+    description: rootPackage.description,
+    dependencies: Object.fromEntries(
+      [...packageNames]
+        .filter((name) => (APP_RUNTIME_ROOTS as readonly string[]).includes(name))
+        .map((name) => {
+          const manifest = JSON.parse(fs.readFileSync(path.join(staging, 'node_modules', ...name.split('/'), 'package.json'), 'utf8')) as { version?: string };
+          return [name, manifest.version || '*'];
+        }),
+    ),
+  };
+  fs.writeFileSync(path.join(staging, 'package.json'), `${JSON.stringify(stagedPackage, null, 2)}\n`, { mode: 0o600 });
+  if (fs.existsSync(path.join(staging, 'node_modules', '@deepseek-ai', 'dsh')))
+    fail('应用 staging 不得包含 profile 专属 DSH runtime', 'PACKAGE_APP_CLOSURE_DUPLICATE_RUNTIME');
+  assertNoSymbolicLinks(staging);
+  return staging;
 }
 
 function packageDirectoryFromAnchor(anchor: string, packageName: string): string | null {
@@ -137,31 +274,22 @@ function assertNoSymbolicLinks(directory: string): void {
 }
 
 /**
- * electron-builder 的 extraResources 不保证 pnpm 链接目标跟随到同一资源根。
- * 在进入 builder 前把 profile 的实际闭包解引用为独立目录，并逐项核对编译器
- * 已记录的依赖都能从 profile package.json 的模块锚点解析。
+ * 只把 profile 的配置文件交给 electron-builder。
+ * node_modules 在最终应用生成后由 copyPackagedProfileClosure 复制一次，避免
+ * builder 先复制完整闭包、Universal 阶段再复制一遍。
  */
 function materializePackagedProfile(compiled: CompiledProfile): string {
   const source = compiled.profileDir;
-  const sourceModules = path.join(source, 'node_modules');
-  if (!fs.existsSync(sourceModules) || !fs.statSync(sourceModules).isDirectory())
-    fail('物化 profile 缺少 node_modules 闭包', 'PACKAGE_PROFILE_CLOSURE_MISSING');
   const destination = path.join(compiled.outputDir, 'packaged-profile');
   if (fs.existsSync(destination)) fs.rmSync(destination, { recursive: true, force: true });
   fs.cpSync(source, destination, {
     recursive: true,
-    dereference: true,
-    // pnpm 的 .bin 仅供 package manager/CLI 调用，不能参与 Node 的模块解析；
-    // 保留它会把指向 package bin 的 shim 链接带入 extraResources。
-    filter: (candidate) => path.basename(candidate) !== '.bin',
+    dereference: false,
+    verbatimSymlinks: true,
+    filter: (candidate) => path.basename(candidate) !== 'node_modules',
   });
   const anchor = path.join(destination, 'package.json');
   if (!fs.existsSync(anchor)) fail('打包 profile 缺少 package.json 模块锚点', 'PACKAGE_PROFILE_ANCHOR_MISSING');
-  assertNoSymbolicLinks(destination);
-  for (const dependency of compiled.dependencyClosure) {
-    if (!packageDirectoryFromAnchor(anchor, dependency.name))
-      fail(`打包 profile 缺少依赖闭包: ${dependency.name}`, 'PACKAGE_PROFILE_CLOSURE_MISSING');
-  }
   return destination;
 }
 
@@ -295,14 +423,81 @@ function installUniversalProfileDependencies(root: string, profileDir: string): 
     );
 }
 
-function machOArchitectures(file: string): readonly string[] {
-  const result = spawnSync('lipo', ['-archs', file], { encoding: 'utf8' });
-  if (result.status !== 0) return [];
-  return (result.stdout || '').trim().split(/\s+/).filter(Boolean);
+function nodePtyDirectories(profileDir: string): string[] {
+  const result: string[] = [];
+  const visited = new Set<string>();
+  const walk = (directory: string): void => {
+    let real: string;
+    try {
+      real = fs.realpathSync(directory);
+    } catch {
+      return;
+    }
+    if (visited.has(real)) return;
+    visited.add(real);
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(real, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const candidate = path.join(real, entry.name);
+      if (entry.name === 'node-pty' && fs.existsSync(path.join(candidate, 'package.json'))) result.push(candidate);
+      if (entry.isDirectory() || entry.isSymbolicLink()) walk(candidate);
+    }
+  };
+  walk(path.join(profileDir, 'node_modules'));
+  return [...new Set(result.map((directory) => fs.realpathSync(directory)))].sort();
 }
 
-function fileSha256(file: string): string {
-  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+function copyNativeFile(source: string, destination: string): boolean {
+  if (!fs.existsSync(source) || !fs.statSync(source).isFile()) return false;
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(source, destination);
+  fs.chmodSync(destination, fs.statSync(source).mode & 0o777);
+  return true;
+}
+
+/**
+ * electron-rebuild 会把 node-pty 写入 build/Release。Universal 构建只暂存这些
+ * 少量 native 文件，再按 process.arch 放回 prebuilds，避免复制完整 profile 两次，
+ * 并删除 host-specific build/Release，防止它覆盖另一架构。
+ */
+function rebuildUniversalNodePty(
+  profileDir: string,
+  architecture: string,
+  temporaryRoot: string,
+): number {
+  const capturedRoot = path.join(temporaryRoot, architecture);
+  let captured = 0;
+  for (const [index, directory] of nodePtyDirectories(profileDir).entries()) {
+    const release = path.join(directory, 'build', 'Release');
+    for (const name of ['pty.node', 'spawn-helper']) {
+      if (copyNativeFile(path.join(release, name), path.join(capturedRoot, String(index), name))) captured += 1;
+    }
+    if (fs.existsSync(release)) fs.rmSync(release, { recursive: true, force: true });
+  }
+  return captured;
+}
+
+function installUniversalNodePtyPrebuilds(
+  profileDir: string,
+  temporaryRoot: string,
+  architectures: readonly string[],
+): void {
+  const directories = nodePtyDirectories(profileDir);
+  for (const [index, directory] of directories.entries()) {
+    for (const architecture of architectures) {
+      const sourceRoot = path.join(temporaryRoot, architecture, String(index));
+      const targetRoot = path.join(directory, 'prebuilds', `darwin-${architecture}`);
+      const copied = ['pty.node', 'spawn-helper'].filter((name) => copyNativeFile(path.join(sourceRoot, name), path.join(targetRoot, name)));
+      if (copied.length !== 2)
+        fail(`node-pty ${architecture} native 输出不完整: ${directory}`, 'ELECTRON_REBUILD_FAILED');
+    }
+    const release = path.join(directory, 'build', 'Release');
+    if (fs.existsSync(release)) fs.rmSync(release, { recursive: true, force: true });
+  }
 }
 
 /** 仅重建 profile 闭包内已审计的 node-pty，超时或未发现模块均阻断打包。 */
@@ -318,15 +513,10 @@ function rebuildProfileNativeAddons(
   const universal = architectures.length > 1;
   const reports: string[] = [];
   const commands: string[] = [];
-  const staging = new Map<string, string>();
+  const universalNativeRoot = universal ? fs.mkdtempSync(path.join(path.dirname(profileDir), 'native-node-pty-')) : null;
+  if (universal) installUniversalProfileDependencies(root, profileDir);
   for (const architecture of architectures) {
-    const moduleDir = universal ? path.join(path.dirname(profileDir), `native-${architecture}`) : profileDir;
-    if (universal) {
-      if (fs.existsSync(moduleDir)) fs.rmSync(moduleDir, { recursive: true, force: true });
-      fs.cpSync(profileDir, moduleDir, { recursive: true, dereference: true });
-      installUniversalProfileDependencies(root, moduleDir);
-      staging.set(architecture, moduleDir);
-    }
+    const moduleDir = profileDir;
     const args = [
       binary,
       '--version', electronVersion,
@@ -354,77 +544,19 @@ function rebuildProfileNativeAddons(
       );
     reports.push(`[${architecture}] ${output}`);
     commands.push(`${process.execPath} ${args.join(' ')}`);
+    if (universal) {
+      const captured = rebuildUniversalNodePty(profileDir, architecture, universalNativeRoot!);
+      if (captured === 0) fail(`node-pty ${architecture} 未生成 native 输出`, 'ELECTRON_REBUILD_FAILED');
+    }
   }
   if (universal && process.platform === 'darwin') {
-    const relativeFiles = (directory: string): string[] => {
-      const result: string[] = [];
-      const walk = (current: string, relative = ''): void => {
-        for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-          const candidate = path.join(current, entry.name);
-          const next = path.join(relative, entry.name);
-          if (entry.isDirectory()) walk(candidate, next);
-          else if (entry.isFile() && entry.name.endsWith('.node')) result.push(next);
-        }
-      };
-      walk(directory);
-      return result;
-    };
-    const files = new Set<string>();
-    for (const directory of staging.values()) for (const file of relativeFiles(directory)) files.add(file);
-    const finalModules = path.join(profileDir, 'node_modules');
-    if (fs.existsSync(finalModules)) fs.rmSync(finalModules, { recursive: true, force: true });
-    fs.mkdirSync(finalModules, { recursive: true });
-    const copyModuleContents = (source: string): void => {
-      for (const entry of fs.readdirSync(source)) {
-        fs.cpSync(path.join(source, entry), path.join(finalModules, entry), { recursive: true, dereference: true });
-      }
-    };
-    copyModuleContents(path.join(staging.get(architectures[0]!)!, 'node_modules'));
-    for (const architecture of architectures.slice(1)) {
-      copyModuleContents(path.join(staging.get(architecture)!, 'node_modules'));
-    }
-    for (const relative of files) {
-      const inputs = architectures
-        .map((architecture) => path.join(staging.get(architecture)!, relative))
-        .filter((file) => fs.existsSync(file));
-      const output = path.join(profileDir, relative);
-      if (inputs.length === 2) {
-        const slices = inputs.map(machOArchitectures);
-        const complementary = slices[0]?.length === 1 && slices[1]?.length === 1
-          && slices[0][0] !== slices[1][0]
-          && new Set(slices.flat()).size === 2;
-        fs.mkdirSync(path.dirname(output), { recursive: true });
-        if (complementary) {
-          const result = spawnSync('lipo', ['-create', ...inputs, '-output', output], { encoding: 'utf8' });
-          if (result.status !== 0)
-            fail(`native addon universal 合并失败: ${relative}`, 'ELECTRON_REBUILD_FAILED', {
-              inputs,
-              slices,
-              stderr: result.stderr || '',
-              stdout: result.stdout || '',
-            });
-        } else if (
-          (slices[0]?.length === 1 && slices[0][0] === slices[1]?.[0])
-          || (slices[0]?.length === 0 && slices[1]?.length === 0 && fileSha256(inputs[0]!) === fileSha256(inputs[1]!))
-        ) {
-          // 架构专属 package（例如 sharp-darwin-arm64/x64）在两个 staging 中只需保留一份。
-          fs.copyFileSync(inputs[0]!, output);
-        } else {
-          fail(`native addon universal 架构切片不兼容: ${relative}`, 'ELECTRON_REBUILD_FAILED', {
-            inputs,
-            slices,
-          });
-        }
-      } else if (inputs.length === 1) {
-        fs.mkdirSync(path.dirname(output), { recursive: true });
-        fs.copyFileSync(inputs[0]!, output);
-      }
-    }
+    installUniversalNodePtyPrebuilds(profileDir, universalNativeRoot!, architectures);
+    fs.rmSync(universalNativeRoot!, { recursive: true, force: true });
   }
   return { command: commands.join(' && '), output: reports.join('\n'), electronAbi: abi, architectures: architectures.slice() };
 }
 
-/** 调用 electron-builder；固定 15 分钟超时并关闭自动代码签名发现。 */
+/** 调用 electron-builder；Universal 产物允许 45 分钟复制、合并和压缩预算。 */
 function runBuilder(
   root: string,
   configFile: string,
@@ -455,7 +587,7 @@ function runBuilder(
   const result = spawnSync(process.execPath, [builderCli, ...args], {
     cwd: root,
     encoding: 'utf8',
-    timeout: 15 * 60_000,
+    timeout: ELECTRON_BUILDER_TIMEOUT_MS,
     env: builderEnv,
   });
   if (result.status !== 0)
@@ -468,8 +600,12 @@ function runBuilder(
 }
 
 /** 在构建输出中定位平台应用目录，找不到时阻止生成 runtime manifest。 */
-function findApplication(outputDir: string, productName: string): string {
-  const expected = process.platform === 'darwin' ? `${productName}.app` : process.platform === 'win32' ? `${productName}.exe` : null;
+function findApplication(outputDir: string, productName: string, executableName: string): string {
+  const expected = process.platform === 'darwin'
+    ? `${productName}.app`
+    : process.platform === 'win32'
+      ? `${executableName}.exe`
+      : null;
   const queue: string[] = [outputDir];
   while (queue.length) {
     const directory = queue.shift()!;
@@ -518,9 +654,13 @@ function assertUniversalApplication(application: string): void {
     fail(`macOS universal 应用缺少 arm64/x64 切片: ${architectures.join(',')}`, 'PACKAGE_UNIVERSAL_ARCHITECTURE');
 }
 
-/** 将 builder 无法保留的 profile node_modules 闭包复制到最终应用资源目录。 */
-function copyPackagedProfileClosure(packagedProfileDir: string, application: string): string {
-  const source = path.join(packagedProfileDir, 'node_modules');
+/** 在最终应用生成后只复制一次完整 profile node_modules 闭包。 */
+function copyPackagedProfileClosure(
+  compiled: CompiledProfile,
+  appStagingDir: string,
+  application: string,
+): string {
+  const source = path.join(compiled.profileDir, 'node_modules');
   if (!fs.existsSync(source) || !fs.statSync(source).isDirectory())
     fail('打包 profile staging 缺少 node_modules 闭包', 'PACKAGE_PROFILE_CLOSURE_MISSING');
   const profile = process.platform === 'darwin'
@@ -531,11 +671,36 @@ function copyPackagedProfileClosure(packagedProfileDir: string, application: str
   if (!fs.existsSync(path.join(profile, 'package.json')))
     fail(`最终应用缺少 profile 资源目录: ${profile}`, 'PACKAGED_PROFILE_MISSING');
   const destination = path.join(profile, 'node_modules');
-  // electron-builder 对 extraResources 的 node_modules 使用主应用依赖裁剪，
-  // 无法表达独立 profile 闭包；该目录是本轮 builder 刚生成的确定目标。
+  // 该目录只由本轮 builder 生成，profile 闭包不参与 builder 的依赖裁剪。
   if (fs.existsSync(destination)) fs.rmSync(destination, { recursive: true, force: true });
-  fs.cpSync(source, destination, { recursive: true, dereference: true });
+  fs.cpSync(source, destination, {
+    recursive: true,
+    dereference: true,
+    filter: (candidate) => path.basename(candidate) !== '.bin',
+  });
+  // fallback 包需要在 resources 外部拥有真实目录，不能从 app.asar 建立操作系统
+  // symlink；这里只复制 launcher 与其小型 service/toolchain 依赖，不复制 DSH runtime。
+  for (const packageName of [
+    '@dsh-forge/desktop-layer',
+    '@dsh-forge/desktop-services-local',
+    '@dsh-forge/desktop-services',
+    '@dsh-forge/profile-toolchain',
+    'semver',
+    'yaml',
+  ]) {
+    const stagedPackage = path.join(appStagingDir, 'node_modules', ...packageName.split('/'));
+    const profilePackage = path.join(destination, ...packageName.split('/'));
+    if (!fs.existsSync(stagedPackage)) fail(`应用 staging 缺少 fallback 包: ${packageName}`, 'PACKAGE_APP_CLOSURE_MISSING');
+    if (fs.existsSync(profilePackage)) fs.rmSync(profilePackage, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(profilePackage), { recursive: true });
+    fs.cpSync(stagedPackage, profilePackage, { recursive: true, dereference: true });
+  }
   assertNoSymbolicLinks(destination);
+  const anchor = path.join(profile, 'package.json');
+  for (const dependency of compiled.dependencyClosure) {
+    if (!packageDirectoryFromAnchor(anchor, dependency.name))
+      fail(`最终应用缺少 profile 依赖闭包: ${dependency.name}`, 'PACKAGE_PROFILE_CLOSURE_MISSING');
+  }
   return destination;
 }
 
@@ -568,19 +733,32 @@ function main(): void {
     target.architectures,
   );
   const packagedProfileDir = materializePackagedProfile(compiled);
+  const appStagingDir = createDesktopAppStaging(root, compiled);
   const outputDir = path.join(compiled.outputDir, 'desktop-dist');
   fs.mkdirSync(outputDir, { recursive: true, mode: 0o700 });
   const configFile = path.join(compiled.outputDir, 'electron-builder.generated.json');
   fs.writeFileSync(
     configFile,
-    `${JSON.stringify(builderConfig({ root, outputDir, packagedProfileDir, resolved: compiled.resolved, distribution, targetName, formats: options.formats }), null, 2)}\n`,
+    `${JSON.stringify(
+      builderConfig({
+        outputDir,
+        packagedProfileDir,
+        appStagingDir,
+        resolved: compiled.resolved,
+        distribution,
+        targetName,
+        formats: options.formats,
+      }),
+      null,
+      2,
+    )}\n`,
     { mode: 0o600 },
   );
   const build = runBuilder(root, configFile, targetName, options.formats);
   assertRequestedFormats(outputDir, options.formats);
-  const application = findApplication(outputDir, distribution.branding.productName);
+  const application = findApplication(outputDir, distribution.branding.productName, distribution.id);
   if (targetName === 'darwin-universal') assertUniversalApplication(application);
-  const profileClosure = copyPackagedProfileClosure(packagedProfileDir, application);
+  const profileClosure = copyPackagedProfileClosure(compiled, appStagingDir, application);
   const runtime = createRuntimeManifest({
     resolved: compiled.resolved,
     packageRoot: application,

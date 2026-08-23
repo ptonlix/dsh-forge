@@ -99,11 +99,8 @@ jobs:
       - name: 打印构建身份
         run: node -p "JSON.stringify({platform:process.platform,arch:process.arch,target:'${{ matrix.target }}',profile:process.env.PROFILE,node:process.version})"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - run: pnpm run profile:resolve -- "${{ env.PROFILE }}"
-      - run: pnpm run profile:verify -- "${{ env.PROFILE }}"
-      - run: pnpm run dump-config -- "${{ env.PROFILE }}"
-      - run: pnpm run catalog:verify
+      # package:desktop 会在同一进程中完成一次 workspace build、profile resolve
+      # 和 config dump；这里不重复执行这些步骤。
       - run: pnpm run package:desktop -- "${{ env.PROFILE }}" --target "${{ matrix.target }}" --formats "${{ matrix.formats }}"
       - run: pnpm run package:inspect -- "${{ env.PROFILE }}"
       - run: pnpm run package:smoke -- "${{ env.PROFILE }}" --target "${{ matrix.target }}"

@@ -223,11 +223,9 @@ function linkFallbackPackage(
  * 不得把 DSH runtime 或任意工作区包混入 profile 的持久闭包。
  */
 function ensureDesktopLayerFallback(profileDir: string, runtimeRoot: string | undefined): void {
-  // 打包 runtime 只携带 node_modules 与受控 workspace 包，不携带仓库根
-  // package.json；DSH 安装包是两种布局中都存在的可信解析锚点。
-  const runtimeAnchor = runtimeRoot
-    ? path.join(runtimeRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
-    : path.join(process.cwd(), 'package.json');
+  // 应用 staging 只携带主进程 production closure；DSH runtime 始终从 profile
+  // 解析，因此 fallback 的可信锚点是应用自身 package.json。
+  const runtimeAnchor = runtimeRoot ? path.join(runtimeRoot, 'package.json') : path.join(process.cwd(), 'package.json');
   if (!fs.existsSync(runtimeAnchor)) fail(`缺少桌面 runtime 锚点: ${runtimeAnchor}`, 'DESKTOP_RUNTIME_MISSING');
   const fallback = path.join(profileDir, 'node_modules');
   for (const packageName of ['@dsh-forge/desktop-layer', '@dsh-forge/desktop-services-local']) {

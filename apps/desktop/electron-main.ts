@@ -39,7 +39,9 @@ export async function startElectron() {
   reportDevelopmentPhase(`Electron 已就绪，加载应用根目录: ${root}`);
   const catalog = loadStaticCatalog(path.join(root, 'catalog', 'catalog.yml'));
   assertNoStartupInstall(catalog);
-  const runtimeRoot = app.isPackaged ? packagedResourcePath('dsh-forge', 'runtime') : root;
+  // 应用主进程只使用 app.asar 内的一棵 production closure；DSH runtime
+  // 始终从随包 profile 解析，不再复制 dsh-forge/runtime。
+  const runtimeRoot = root;
   const template = app.isPackaged ? packagedResourcePath('dsh-forge', 'profile') : null;
   const distribution = parseDistribution(path.join(root, 'distribution.yml'));
   const requestedProfile = profileFromArguments(process.argv);

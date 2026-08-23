@@ -18,6 +18,7 @@ import {
 import { readYaml, stringifyYaml } from '../core/yaml.ts';
 import { digest, stable } from '../core/digest.ts';
 import { fail } from '../core/errors.ts';
+import { spawnFailureDetails, spawnFailureMessage } from '../core/process.ts';
 import { loadStaticCatalog } from '../trust/catalog.ts';
 
 /**
@@ -30,6 +31,7 @@ import { loadStaticCatalog } from '../trust/catalog.ts';
 
 export const TOOL_VERSIONS = Object.freeze({ compiler: '0.2.0', pnpm: '11.7.0', node: process.versions.node });
 const LIFECYCLE_SCRIPTS = new Set(['preinstall', 'install', 'postinstall']);
+const PROFILE_PNPM_TIMEOUT_MS = 15 * 60_000;
 
 export interface Bundle extends BundleManifest {
   readonly source: PackageSource;
@@ -548,17 +550,17 @@ function runPnpm(root: string, cwd: string, args: readonly string[], { ignoreScr
   const result = spawnSync(process.execPath, [pnpmCommand(root), ...args], {
     cwd,
     encoding: 'utf8',
-    timeout: 60_000,
+    timeout: PROFILE_PNPM_TIMEOUT_MS,
     // 桌面主进程中的 process.execPath 是 Electron，而非 node。让 Electron
     // 显式进入 Node 模式，避免 profile 编译再拉起无窗口的 Electron GUI 并卡住启动。
     env: { ...process.env, CI: 'true', npm_config_ignore_scripts: ignoreScripts ? 'true' : 'false', ELECTRON_RUN_AS_NODE: '1' },
   });
   if (result.status !== 0) {
-    fail(`pnpm 解析失败: ${(result.stderr || result.stdout || 'unknown error').trim()}`, 'PNPM_RESOLUTION_FAILED', {
-      command: args,
-      status: result.status,
-      signal: result.signal,
-    });
+    fail(
+      `pnpm 解析失败: ${spawnFailureMessage(result, 'unknown error')}`,
+      'PNPM_RESOLUTION_FAILED',
+      { ...spawnFailureDetails(result), command: args },
+    );
   }
   return { command: `node ${path.relative(root, pnpmCommand(root))} ${args.join(' ')}`, stdout: result.stdout.trim() };
 }

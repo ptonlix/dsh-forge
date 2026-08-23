@@ -45,6 +45,9 @@ interface RuntimePaths {
   readonly asar: string | null;
   readonly unpacked: string;
   readonly profile: string;
+  /** 新布局中 DSH runtime 直接位于 profile 闭包。 */
+  readonly profileRuntime: string;
+  /** 旧布局路径，仅保留用于检查历史 manifest。 */
   readonly runtime: string;
 }
 
@@ -112,6 +115,7 @@ export function runtimePaths(packageRoot: string | null | undefined, platform = 
       asar: path.join(resources, 'app.asar'),
       unpacked: path.join(resources, 'app.asar.unpacked'),
       profile: path.join(resources, 'dsh-forge', 'profile'),
+      profileRuntime: path.join(resources, 'dsh-forge', 'profile', 'node_modules'),
       runtime: path.join(resources, 'dsh-forge', 'runtime', 'node_modules'),
     };
   }
@@ -124,6 +128,7 @@ export function runtimePaths(packageRoot: string | null | undefined, platform = 
       asar: path.join(resources, 'app.asar'),
       unpacked: path.join(resources, 'app.asar.unpacked'),
       profile: path.join(resources, 'dsh-forge', 'profile'),
+      profileRuntime: path.join(resources, 'dsh-forge', 'profile', 'node_modules'),
       runtime: path.join(resources, 'dsh-forge', 'runtime', 'node_modules'),
     };
   }
@@ -135,6 +140,7 @@ export function runtimePaths(packageRoot: string | null | undefined, platform = 
       asar: path.join(resources, 'app.asar'),
       unpacked: path.join(resources, 'app.asar.unpacked'),
       profile: path.join(resources, 'dsh-forge', 'profile'),
+      profileRuntime: path.join(resources, 'dsh-forge', 'profile', 'node_modules'),
       runtime: path.join(resources, 'dsh-forge', 'runtime', 'node_modules'),
     };
   }
@@ -144,6 +150,7 @@ export function runtimePaths(packageRoot: string | null | undefined, platform = 
     asar: null,
     unpacked: path.join(packageRoot, 'app.asar.unpacked'),
     profile: path.join(packageRoot, 'profile'),
+    profileRuntime: path.join(packageRoot, 'profile', 'node_modules'),
     runtime: path.join(packageRoot, 'runtime', 'node_modules'),
   };
 }
@@ -203,6 +210,10 @@ function nativeRootDirectory(paths: RuntimePaths, root: NativeFileRoot): string 
   return paths.runtime;
 }
 
+function packagedRuntimeDirectory(paths: RuntimePaths): string {
+  return fs.existsSync(paths.profileRuntime) ? paths.profileRuntime : paths.runtime;
+}
+
 function nativeFileLocation(paths: RuntimePaths, native: NativeFile): string | null {
   if (!NATIVE_FILE_ROOTS.includes(native.root) || !isSafeRelativePath(native.path)) return null;
   const root = nativeRootDirectory(paths, native.root);
@@ -215,7 +226,9 @@ function collectPackagedNativeFiles(paths: RuntimePaths): NativeFile[] {
   return [
     ...collectNativeFiles(paths.unpacked, 'app.asar.unpacked'),
     ...collectNativeFiles(paths.profile, 'dsh-forge/profile'),
-    ...collectNativeFiles(paths.runtime, 'dsh-forge/runtime'),
+    ...(fs.existsSync(paths.runtime) && paths.runtime !== packagedRuntimeDirectory(paths)
+      ? collectNativeFiles(paths.runtime, 'dsh-forge/runtime')
+      : []),
   ].sort((left, right) => nativeFileKey(left).localeCompare(nativeFileKey(right)));
 }
 
@@ -335,8 +348,9 @@ function inspectAsar(paths: RuntimePaths, failures: InspectionFailure[]): void {
 }
 
 function resolveRuntimePackage(paths: RuntimePaths | null, packageName: string): string | null {
-  if (!paths?.runtime) return null;
-  const anchor = path.join(paths.runtime, '@deepseek-ai', 'dsh', 'package.json');
+  const runtime = paths ? packagedRuntimeDirectory(paths) : null;
+  if (!runtime) return null;
+  const anchor = path.join(runtime, '@deepseek-ai', 'dsh', 'package.json');
   if (!fs.existsSync(anchor)) return null;
   try {
     const runtimeRequire = createRequire(fs.realpathSync(anchor));
@@ -347,8 +361,9 @@ function resolveRuntimePackage(paths: RuntimePaths | null, packageName: string):
 }
 
 function packageEntryExists(paths: RuntimePaths | null, packageName: string): boolean {
-  if (!paths?.runtime) return false;
-  const anchor = path.join(paths.runtime, '@deepseek-ai', 'dsh', 'package.json');
+  const runtime = paths ? packagedRuntimeDirectory(paths) : null;
+  if (!runtime) return false;
+  const anchor = path.join(runtime, '@deepseek-ai', 'dsh', 'package.json');
   if (!fs.existsSync(anchor)) return false;
   // `@deepseek-ai/dsh` 是运行时配置包，故意只提供 package.json 和 lib 目录，不声明根入口。
   if (packageName === '@deepseek-ai/dsh') return true;
@@ -572,14 +587,20 @@ export function inspectPackage(
       const normalizedPath = native.path.replaceAll('\\', '/');
       const platformMatch = normalizedPath.match(/(?:^|[./_-])(darwin|win32|linux)(?:-|[./])/);
       const architectureMatch = normalizedPath.match(/(?:^|[/_-])(arm64|x64|ia32)(?:-|[/]|\.|$)/);
-      if (platformMatch && platformMatch[1] !== process.platform) continue;
-      if (architectureMatch && architectureMatch[1] !== process.arch) continue;
       for (const target of manifest.targets || []) {
-        if (target.os === process.platform && native.path.endsWith('.node'))
-          for (const architecture of target.architectures || []) {
-            if (!nativeArchitecture(file, architecture))
-              failures.push({ code: 'NATIVE_ARCHITECTURE_MISMATCH', path: key, architecture });
-          }
+        if (target.os !== process.platform || !native.path.endsWith('.node')) continue;
+        if (platformMatch && platformMatch[1] !== target.os) continue;
+        const declaredArchitectures = target.architectures || [];
+        const explicitArchitecture = architectureMatch?.[1] as RuntimeTarget['architectures'][number] | undefined;
+        const architectures = explicitArchitecture
+          ? declaredArchitectures.includes(explicitArchitecture)
+            ? [explicitArchitecture]
+            : []
+          : declaredArchitectures;
+        for (const architecture of architectures) {
+          if (!nativeArchitecture(file, architecture))
+            failures.push({ code: 'NATIVE_ARCHITECTURE_MISMATCH', path: key, architecture });
+        }
       }
     }
   }

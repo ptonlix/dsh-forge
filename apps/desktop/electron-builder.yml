@@ -1,13 +1,17 @@
 asar: true
+npmRebuild: false
 asarUnpack:
   - '**/*.node'
   - '**/helpers/**'
 files:
   - dist/**
   - packages/**
+  - catalog/**
+  - distribution.yml
   - package.json
   - node_modules/**
 mac:
   target: [dir]
+  mergeASARs: false
 win:
   target: [dir]

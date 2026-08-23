@@ -80,9 +80,11 @@ compiler、composer、acceptance 和 profile selection 测试在该事实冲突�
 ## 官方 profile 发行验证（2026-08-21）
 
 在本机 macOS arm64 对 `dsh-forge-official` 执行了 `profile:resolve`、`profile:verify`、config
-dump、catalog 验证、`package:desktop`、`package:inspect` 和 `package:smoke`。产物中的
-`Contents/Resources/dsh-forge/profile/node_modules` 是从物化 profile 解引用复制的完整闭包；Windows
-产物对应路径为可执行文件同级的 `resources/dsh-forge/profile/node_modules`。package inspect
+dump、catalog 验证、`package:desktop`、`package:inspect` 和 `package:smoke`。当前方案先生成
+独立 `desktop-deploy` staging，只复制 Electron 主进程所需的 production closure；profile 配置在
+builder 阶段进入资源，`node_modules` 仅在最终应用生成后复制一次。产物中的
+`Contents/Resources/dsh-forge/profile/node_modules` 是 profile 的完整闭包；Windows 产物对应路径为
+可执行文件同级的 `resources/dsh-forge/profile/node_modules`。package inspect
 在打包 Electron runtime 中通过 Cordis Loader 导入每个 profile entry，覆盖
 `dsh-better-sidebar` 对 `@deepseek-ai/dsh-llm` 等 peer 的动态解析链。
 
@@ -153,7 +155,18 @@ Actions 显式设置 `DSH_FORGE_PROFILE_OFFLINE=false`，改用
 `PNPM_NO_OFFLINE_TARBALL`，也适用于首次运行的 macOS/Linux runner。
 
 Universal staging 不能复用 arm64 profile 的 optional 依赖；打包脚本使用 pnpm 11 的
-`--os=darwin --cpu=arm64 --cpu=x64` 重新物化两套输入，只对互补的 Mach-O `.node` 执行
-`lipo`，因此 `@img/sharp-darwin-arm64/x64` 等架构专属包保持独立。native addon 完成受控
+`--os=darwin --cpu=arm64 --cpu=x64` 在同一份 profile 中物化两套 optional 依赖。Universal
+native staging 只暂存 node-pty 的 `pty.node`/`spawn-helper` 并写入对应 `prebuilds`，删除
+`build/Release` 的 host-specific 输出；`@img/sharp-darwin-arm64/x64` 等架构专属包保持独立，
+不再对完整 profile 或架构专属文件执行 `lipo`。native addon 完成受控
 重建后，electron-builder 设置 `npmRebuild: false` 并传入 `--publish never`，避免重复扫描
 profile 或因 Tag 隐式发布失败；Actions artifact 由独立 release job 处理。
+
+跨平台 builder 不再从根 package 的 `@dsh-forge/core` 名称推导可执行文件名，而是固定使用
+`distribution.id`，Linux 的 `desktopName` 也使用该值。profile verify 的临时 pnpm 安装预算
+同步提高到 15 分钟，并保留安装进程的超时、signal 和头尾诊断，避免首次 CI 下载在 60 秒时被
+误判为解析失败。
+
+electron-builder 另使用 45 分钟预算。macOS Universal 会先生成架构临时应用，再合并应用资源并
+压缩 DMG/zip；profile 闭包只在最终应用生成后复制一次。15 分钟预算可能在第二阶段触发
+`ETIMEDOUT`（status 143），这不代表 native addon 编译失败。
