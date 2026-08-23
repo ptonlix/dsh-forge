@@ -668,10 +668,13 @@ function runBuilder(
   return { command: `${process.execPath} ${builderCli} ${args.join(' ')}`, output: (result.stdout || result.stderr || '').trim() };
 }
 
-/** 在构建输出中定位平台应用目录，找不到时阻止生成 runtime manifest。 */
-function findApplication(outputDir: string, productName: string, executableName: string): string {
+/**
+ * 在构建输出中定位平台应用。electron-builder 的 macOS productFilename 会优先使用
+ * executableName，因此不能按展示用 productName 查找 `.app` bundle。
+ */
+function findApplication(outputDir: string, executableName: string): string {
   const expected = process.platform === 'darwin'
-    ? `${productName}.app`
+    ? `${executableName}.app`
     : process.platform === 'win32'
       ? `${executableName}.exe`
       : null;
@@ -820,7 +823,7 @@ function main(): void {
   });
   // 先得到短路径的已解包应用，再注入完整 profile 闭包；此阶段不生成可分发安装包。
   const unpackedBuild = runBuilder(root, unpackedConfigFile, targetName, ['dir']);
-  const application = findApplication(unpackedOutputDir, distribution.branding.productName, distribution.id);
+  const application = findApplication(unpackedOutputDir, distribution.id);
   if (targetName === 'darwin-universal') assertUniversalApplication(application);
   const profileClosure = copyPackagedProfileClosure(compiled, appStagingDir, application);
   const runtime = createRuntimeManifest({

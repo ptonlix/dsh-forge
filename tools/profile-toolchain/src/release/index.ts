@@ -374,40 +374,35 @@ function packageEntryExists(paths: RuntimePaths | null, packageName: string): bo
   }
 }
 
-function packagedElectronExecutable(paths: RuntimePaths): string | null {
-  if (process.platform === 'darwin') {
-    const directory = path.join(paths.application, 'Contents', 'MacOS');
-    if (!fs.existsSync(directory)) return null;
-    const executables = fs
-      .readdirSync(directory)
-      .map((name) => path.join(directory, name))
-      .filter((candidate) => (fs.statSync(candidate).mode & 0o111) !== 0);
-    return executables.length === 1 ? executables[0]! : null;
+function runtimeDistributionId(manifest: RuntimeManifest): string | null {
+  const distribution = manifest.distribution;
+  if (!distribution || typeof distribution !== 'object' || Array.isArray(distribution)) return null;
+  const id = (distribution as Record<string, unknown>).id;
+  return typeof id === 'string' && id ? id : null;
+}
+
+/**
+ * distribution.id 同时是 electron-builder 的 executableName。Linux 共享库可能带执行位，
+ * 不能从目录中猜测唯一可执行文件，否则动态导入检查会误判 runner 缺失。
+ */
+function packagedElectronExecutable(paths: RuntimePaths, executableName: string | null): string | null {
+  if (!executableName) return null;
+  const executable = process.platform === 'darwin'
+    ? path.join(paths.application, 'Contents', 'MacOS', executableName)
+    : process.platform === 'win32'
+      ? path.join(paths.application, `${executableName}.exe`)
+      : process.platform === 'linux'
+        ? path.join(paths.application, executableName)
+        : null;
+  if (!executable) return null;
+  try {
+    const stat = fs.statSync(executable);
+    return stat.isFile() && (process.platform === 'win32' || (stat.mode & 0o111) !== 0)
+      ? executable
+      : null;
+  } catch {
+    return null;
   }
-  if (process.platform === 'win32') {
-    const candidates = fs
-      .readdirSync(paths.application)
-      .filter((name) => name.endsWith('.exe'))
-      .map((name) => path.join(paths.application, name));
-    return candidates.length === 1 ? candidates[0]! : null;
-  }
-  if (process.platform === 'linux') {
-    if (!fs.existsSync(paths.application)) return null;
-    const candidates = fs
-      .readdirSync(paths.application)
-      .map((name) => path.join(paths.application, name))
-      .filter((candidate) => {
-        const name = path.basename(candidate);
-        if (name === 'chrome-sandbox' || name === 'chrome_crashpad_handler') return false;
-        try {
-          return fs.statSync(candidate).isFile() && (fs.statSync(candidate).mode & 0o111) !== 0;
-        } catch {
-          return false;
-        }
-      });
-    return candidates.length === 1 ? candidates[0]! : null;
-  }
-  return null;
 }
 
 /**
@@ -415,8 +410,12 @@ function packagedElectronExecutable(paths: RuntimePaths): string | null {
  * profile patch 中的全部 bare entry。静态 require.resolve 无法覆盖 ESM 子依赖，
  * 例如 dsh-better-sidebar 进一步导入 @deepseek-ai/dsh-llm 的真实链路。
  */
-function inspectProfileDynamicImports(paths: RuntimePaths, failures: InspectionFailure[]): void {
-  const executable = packagedElectronExecutable(paths);
+function inspectProfileDynamicImports(
+  paths: RuntimePaths,
+  manifest: RuntimeManifest,
+  failures: InspectionFailure[],
+): void {
+  const executable = packagedElectronExecutable(paths, runtimeDistributionId(manifest));
   if (!executable) {
     failures.push({ code: 'PROFILE_CORDIS_IMPORT_RUNNER_MISSING' });
     return;
@@ -535,7 +534,7 @@ export function inspectPackage(
       }
       if (!shippedStandardPresetExists(paths))
         failures.push({ code: 'RUNTIME_PRESET_ASSET_MISSING', path: SHIPPED_STANDARD_PRESET });
-      inspectProfileDynamicImports(paths, failures);
+      inspectProfileDynamicImports(paths, manifest, failures);
       const macBin = path.join(paths.application, 'Contents', 'MacOS');
       if (
         process.platform === 'darwin' &&

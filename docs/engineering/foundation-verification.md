@@ -199,6 +199,14 @@ runtime manifest 和 package evidence，最后以 electron-builder `--prepackage
 分发格式。该目录对 Windows 的 ConPTY `OpenConsole.exe` 等深层 helper 保持在安全路径预算内，
 并在当前 runner 中保留至 `package:inspect`、`package:smoke` 完成。
 
+electron-builder 设置 `executableName` 后会以该值生成 macOS `.app` 文件名。脚本因此按
+`distribution.id` 定位 `dsh-forge-official.app`，而不按界面展示名称 `DSH Forge.app` 查找，
+避免 Universal `dir` 阶段成功后被错误报告为缺少应用。
+
+同一发行版 id 也用于 Linux 的 package inspect 与 smoke 主程序定位。Electron 的 `libEGL.so`
+等共享库可能带执行位，因此不得通过“目录中唯一可执行文件”推断 runner；检查只启动
+`linux-unpacked/dsh-forge-official`，缺少该文件才报告 runner 缺失。
+
 `.desktop-work/` 不进入 Git 或 Actions release artifact；它只承载本平台构建阶段的可执行
 验证。跨 job 汇总继续传递最终安装包、runtime manifest、package evidence 与平台 smoke
 evidence，不能将 `packageRoot` 视为另一台 runner 上可访问的路径。

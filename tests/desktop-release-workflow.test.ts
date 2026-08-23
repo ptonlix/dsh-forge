@@ -23,7 +23,9 @@ interface DesktopReleaseWorkflow {
 const workflowFile = join(process.cwd(), '.github', 'workflows', 'release-desktop.yml');
 const source = readFileSync(workflowFile, 'utf8');
 const packagingSource = readFileSync(join(process.cwd(), 'scripts', 'package-desktop.ts'), 'utf8');
+const smokeSource = readFileSync(join(process.cwd(), 'scripts', 'smoke-package.ts'), 'utf8');
 const compilerSource = readFileSync(join(process.cwd(), 'tools', 'profile-toolchain', 'src', 'compiler', 'index.ts'), 'utf8');
+const releaseSource = readFileSync(join(process.cwd(), 'tools', 'profile-toolchain', 'src', 'release', 'index.ts'), 'utf8');
 const workflow = parse(source) as DesktopReleaseWorkflow;
 
 describe('Desktop Release workflow', () => {
@@ -150,5 +152,19 @@ describe('Desktop Release workflow', () => {
     expect(mainSource.indexOf(unpacked)).toBeGreaterThanOrEqual(0);
     expect(mainSource.indexOf(closure)).toBeGreaterThan(mainSource.indexOf(unpacked));
     expect(mainSource.indexOf(distributable)).toBeGreaterThan(mainSource.indexOf(closure));
+  });
+
+  it('macOS 应用按 electron-builder 的 executableName 定位', () => {
+    expect(packagingSource).toContain('? `${executableName}.app`');
+    expect(packagingSource).toContain('findApplication(unpackedOutputDir, distribution.id)');
+  });
+
+  it('Linux 动态导入与 smoke 按发行版 id 启动主程序', () => {
+    expect(releaseSource).toContain('function runtimeDistributionId(manifest: RuntimeManifest)');
+    expect(releaseSource).toContain("? path.join(paths.application, 'Contents', 'MacOS', executableName)");
+    expect(releaseSource).toContain('? path.join(paths.application, executableName)');
+    expect(releaseSource).not.toContain("name === 'chrome-sandbox'");
+    expect(smokeSource).toContain('function applicationExecutable(application: string, executableName: string)');
+    expect(smokeSource).toContain("applicationExecutable(runtime.packageRoot || '', distribution.id)");
   });
 });

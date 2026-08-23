@@ -10,32 +10,22 @@ import type { RuntimeManifest } from '@dsh-forge/profile-toolchain/types';
 
 /** 对已构建 Electron 目录产物执行结构检查和真实 smoke 启动。 */
 
-function applicationExecutable(application: string): string {
+/** distribution.id 与 electron-builder executableName 保持一致，不能按 Unix 执行位猜测入口。 */
+function applicationExecutable(application: string, executableName: string): string {
   if (process.platform === 'darwin') {
-    const directory = path.join(application, 'Contents', 'MacOS');
-    const names = fs
-      .readdirSync(directory)
-      .filter((name) => (fs.statSync(path.join(directory, name)).mode & 0o111) !== 0);
-    if (names.length !== 1) throw new Error('macOS 安装包缺少唯一可执行入口');
-    return path.join(directory, names[0]!);
+    const executable = path.join(application, 'Contents', 'MacOS', executableName);
+    if (!fs.existsSync(executable)) throw new Error(`macOS 安装包缺少可执行入口: ${executableName}`);
+    return executable;
   }
   if (process.platform === 'win32') {
-    const names = fs.readdirSync(application).filter((name) => name.toLowerCase().endsWith('.exe'));
-    if (names.length !== 1) throw new Error('Windows 安装包缺少唯一可执行入口');
-    return path.join(application, names[0]!);
+    const executable = path.join(application, `${executableName}.exe`);
+    if (!fs.existsSync(executable)) throw new Error(`Windows 安装包缺少可执行入口: ${executableName}.exe`);
+    return executable;
   }
   if (process.platform === 'linux') {
-    const names = fs.readdirSync(application).filter((name) => {
-      if (name === 'chrome-sandbox' || name === 'chrome_crashpad_handler') return false;
-      const candidate = path.join(application, name);
-      try {
-        return fs.statSync(candidate).isFile() && (fs.statSync(candidate).mode & 0o111) !== 0;
-      } catch {
-        return false;
-      }
-    });
-    if (names.length !== 1) throw new Error('Linux 安装包缺少唯一可执行入口');
-    return path.join(application, names[0]!);
+    const executable = path.join(application, executableName);
+    if (!fs.existsSync(executable)) throw new Error(`Linux 安装包缺少可执行入口: ${executableName}`);
+    return executable;
   }
   throw new Error(`当前 smoke 平台尚未实现: ${process.platform}`);
 }
@@ -85,7 +75,7 @@ function main(): void {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-package-smoke-'));
   try {
     const electronReport = path.join(userData, 'electron-runtime.json');
-    const executable = applicationExecutable(runtime.packageRoot || '');
+    const executable = applicationExecutable(runtime.packageRoot || '', distribution.id);
     const result = spawnSync(executable, ['--dsh-forge-smoke'], {
       encoding: 'utf8',
       timeout: 30_000,

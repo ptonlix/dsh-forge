@@ -142,3 +142,22 @@ electron-builder 的 `--prepackaged` 从该已解包应用封装分发格式；�
 - **THEN** 已解包应用及其 profile 闭包位于 `.desktop-work/win32-x64` 的短路径
 - **AND** `package:inspect` 不因该 helper 返回 `NATIVE_FILE_MISSING`
 - **AND** NSIS 与 ZIP 均从该已注入闭包的应用封装。
+
+#### Scenario: macOS Universal 已解包应用定位
+
+- **WHEN** `darwin-universal` 设置安全的 `executableName` 为发行版 id
+- **THEN** 脚本以该 id 对应的 `<executableName>.app` 定位第一阶段产物
+- **AND** 不得将展示名称 `productName` 误认为 `.app` 文件名。
+
+### Requirement: 平台检查必须按发行版 id 定位主程序
+
+package inspect 与 smoke SHALL 使用 runtime manifest 或当前 distribution 的 `id` 作为
+electron-builder `executableName`，按平台精确定位主程序。Linux SHALL 不得通过文件执行位
+推断主程序，因为 Electron 共享库和 helper 可以带执行位。找不到该精确入口时，动态 Cordis
+导入检查与 smoke SHALL 失败。
+
+#### Scenario: Linux 共享库带执行位
+
+- **WHEN** Linux 已解包应用同时包含主程序、`libEGL.so` 等带执行位的共享库和 Chromium helper
+- **THEN** package inspect 仅使用 `<distribution.id>` 作为 Electron runner
+- **AND** 不得返回 `PROFILE_CORDIS_IMPORT_RUNNER_MISSING`。

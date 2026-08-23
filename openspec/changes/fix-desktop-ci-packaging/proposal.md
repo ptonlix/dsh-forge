@@ -33,6 +33,8 @@ SHASUMS 的通用 Electron 镜像，node-gyp 因远端校验值为空拒绝 Elec
 - 将 desktop 构建拆分为已解包应用和分发格式两个阶段：先在仓库短路径工作目录生成 `dir`
   产物并注入 profile 闭包，再以 `--prepackaged` 生成最终安装包，避免 Windows profile
   helper 超长路径，也确保 NSIS、ZIP、DMG、AppImage 和 DEB 都包含完整运行时。
+- 让 package inspect 与 smoke 使用 runtime manifest 中的发行版 id 精确定位主程序，避免
+  Linux Electron 共享库的执行位导致动态 Cordis 导入 runner 被误判缺失。
 - profile lock 继续离线生成，profile 物化安装默认优先使用本地 store；CI 可显式关闭严格
   离线，在 lockfile 冻结和 integrity 校验下补下载缺失 tarball。
 - CI 声明 profile 安装策略、headers 地址和 pnpm store 缓存，避免不同 runner 隐式继承本机

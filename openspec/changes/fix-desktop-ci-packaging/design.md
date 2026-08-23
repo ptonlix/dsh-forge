@@ -66,6 +66,12 @@ maintainer，FPM 会在应用目录已生成后拒绝生成 Debian 控制文件�
     当前 job 的 inspect/smoke 结束，由下次同目标构建覆盖、由 CI runner 在 job 结束时清理。
     因此分发格式不会在 profile 闭包尚未存在时被提前生成，Windows 的 `OpenConsole.exe`
     也始终位于短路径的已解包应用中。
+15. `executableName` 同时决定 macOS 的 `productFilename`，因此已解包 `.app` 定位统一使用
+    `distribution.id`，不能使用展示名称 `branding.productName`。这使第一阶段的
+    `dsh-forge-official.app` 能被稳定作为 `--prepackaged` 输入。
+16. package inspect 与 smoke 从 runtime manifest 或 distribution 配置读取 `distribution.id`，
+    并按平台计算唯一主程序路径。Linux `.so` 文件可能设置执行位，不能以“目录中唯一可执行
+    文件”作为 runner 判据；动态 Cordis 导入仍必须在真实 Electron runtime 中执行。
 
 ## Risks
 

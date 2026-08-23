@@ -25,3 +25,5 @@
 - [x] 3.6 在 Windows 短临时路径重建 node-pty，并仅回写 build 输出
 - [x] 3.7 为 Linux deb 注入 homepage、maintainer 与 vendor 元数据
 - [x] 3.8 将 builder 改为短路径 `dir` 预构建与 `--prepackaged` 分发封装两阶段，确保闭包、inspect、smoke 和安装包使用同一应用
+- [x] 3.9 按 electron-builder `executableName` 定位 macOS 已解包 `.app`，避免展示名称造成的假阴性
+- [x] 3.10 让 Linux inspect 与 smoke 按发行版 id 定位主程序，排除共享库执行位造成的 runner 假阴性
