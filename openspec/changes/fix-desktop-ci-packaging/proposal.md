@@ -39,6 +39,12 @@ SHASUMS 的通用 Electron 镜像，node-gyp 因远端校验值为空拒绝 Elec
   离线，在 lockfile 冻结和 integrity 校验下补下载缺失 tarball。
 - CI 声明 profile 安装策略、headers 地址和 pnpm store 缓存，避免不同 runner 隐式继承本机
   配置。
+- Windows package job 在调用 electron-builder 前验证 `windows-2022` 预装的 7-Zip，并通过
+  `ELECTRON_BUILDER_7ZIP_PATH` 提供确定的可执行文件；不持久化 electron-builder 工具缓存。
+- Linux package smoke 在隔离 Xvfb display 中启动完整 Electron 应用，保留 BrowserWindow、Ozone
+  和 renderer 健康握手验证，不将无显示服务器的 runner 当成应用启动失败。
+- macOS Universal native inspect 将 runtime manifest 的 `x64` 映射为 Mach-O `lipo` 输出的
+  `x86_64`，使架构专属预构建按其声明切片验证。
 
 ## Non-goals
 

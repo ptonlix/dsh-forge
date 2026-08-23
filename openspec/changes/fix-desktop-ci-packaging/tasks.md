@@ -27,3 +27,6 @@
 - [x] 3.8 将 builder 改为短路径 `dir` 预构建与 `--prepackaged` 分发封装两阶段，确保闭包、inspect、smoke 和安装包使用同一应用
 - [x] 3.9 按 electron-builder `executableName` 定位 macOS 已解包 `.app`，避免展示名称造成的假阴性
 - [x] 3.10 让 Linux inspect 与 smoke 按发行版 id 定位主程序，排除共享库执行位造成的 runner 假阴性
+- [x] 3.11 为 Windows Builder 配置经预检的系统 7-Zip，移除 Builder 工具缓存并增加 workflow 回归测试
+- [x] 3.12 在 Linux package smoke 中提供隔离 Xvfb display，并增加 workflow 回归测试
+- [x] 3.13 将 macOS inspect 的 x64 映射为 Mach-O x86_64，并覆盖 Universal node-pty 预构建

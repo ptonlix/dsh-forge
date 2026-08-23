@@ -72,6 +72,19 @@ maintainer，FPM 会在应用目录已生成后拒绝生成 Debian 控制文件�
 16. package inspect 与 smoke 从 runtime manifest 或 distribution 配置读取 `distribution.id`，
     并按平台计算唯一主程序路径。Linux `.so` 文件可能设置执行位，不能以“目录中唯一可执行
     文件”作为 runner 判据；动态 Cordis 导入仍必须在真实 Electron runtime 中执行。
+17. Windows Builder 的 ZIP 阶段两次在新下载 `7zip-win-x64.tar.gz` 后仍以 `ENOENT` 找不到
+    electron-builder 缓存中的 `7za.exe`。`windows-2022` 镜像已预装 7-Zip，package job 因此先
+    验证 `%ProgramFiles%\7-Zip\7z.exe` 能执行，再写入 `ELECTRON_BUILDER_7ZIP_PATH`。Builder
+    直接使用该受控路径，不再解压临时 7-Zip；工作流也不缓存 electron-builder 的工具目录，避免
+    把不完整工具状态带入后续 job。
+18. Linux package smoke 会执行 `app.whenReady()`、创建受 sandbox 和 context isolation 约束的
+    `BrowserWindow`，因此不能在无 `DISPLAY` 的 Ubuntu runner 直接启动。Linux workflow step 使用
+    `xvfb-run --auto-servernum` 创建只供该命令使用的 Xvfb display，并关闭 TCP 监听；不以
+    `--headless`、`--no-sandbox` 或跳过窗口替代真实 renderer 健康握手。
+19. runtime manifest 的目标架构使用跨平台名称 `x64`，但 macOS `lipo -archs` 返回 Mach-O 名称
+    `x86_64`。inspect 在 Darwin 上比较 native 文件切片时将前者映射为后者；路径已编码
+    `darwin-x64` 的 node-pty 预构建只验证 x86_64 切片，仍保留摘要、路径、平台和 arm64 预构建
+    的独立校验。
 
 ## Risks
 
@@ -79,3 +92,7 @@ maintainer，FPM 会在应用目录已生成后拒绝生成 Debian 控制文件�
 - CI 允许补下载会增加首次运行时间，但避免把不完整缓存误判为依赖或代码错误。
 - 已解包工作目录只在构建 runner 生命周期内有效；跨 job 的 release 汇总继续以各平台
   inspect/smoke 证据与最终分发包为输入，不能将本机 `packageRoot` 当作可迁移路径。
+- `windows-2022` 若移除预装 7-Zip，预检会在打包前以明确路径失败；升级 runner 时必须先确认
+  对应镜像继续提供可执行的 7-Zip，不能回退到 Builder 的临时下载作为静默后备。
+- `ubuntu-22.04` 若不再提供 `xvfb-run`，Linux smoke 会在启动前以明确缺失命令失败；升级 runner
+  时必须恢复等价的隔离显示服务，而不能把 BrowserWindow smoke 改为无窗口检查。

@@ -218,3 +218,30 @@ Linux 应用目录已能生成时，`.deb` 的 FPM 阶段仍会要求项目 URL 
 因此 electron-builder 在控制文件生成前停止。根 package 现在声明项目主页，staging 保留该字段；
 Linux builder 从 `distribution.branding.publisher` 写入 `maintainer` 与 `vendor`，无需将个人邮箱
 伪造为发行维护者。该变更仍须通过下一次 Ubuntu runner 的 AppImage/deb 实际构建验证。
+
+### Windows Builder 7-Zip（2026-08-23）
+
+Windows package job 两次在下载 `7zip-win-x64.tar.gz` 后，于 ZIP 阶段找不到
+electron-builder 缓存内的 `7za.exe`。下载进度表明未命中工具 archive cache，而 Builder 对解压
+目录只检查非空，不能确保预期可执行文件存在。`windows-2022` 官方镜像预装 7-Zip，因此 workflow
+先验证 `%ProgramFiles%\7-Zip\7z.exe`，再写入 `ELECTRON_BUILDER_7ZIP_PATH`，使 ZIP 与 NSIS
+直接使用受控路径。工作流不再缓存 electron-builder 工具目录；Electron runtime 与 headers 缓存
+保持不变。该修复仍须由下一次 Windows tag runner 实际生成 NSIS 和 ZIP 验收。
+
+### Linux package smoke 显示服务器（2026-08-23）
+
+Linux 的已打包应用会等待 Electron ready、创建 BrowserWindow 并等待 renderer 健康报告。无图形会话
+的 Ubuntu runner 直接执行 smoke 时，Ozone X11 以 `Missing X server or $DISPLAY` 退出，这不是
+安装包或 renderer 失败。workflow 对 `linux-x64` 改用 `xvfb-run --auto-servernum` 启动 smoke，并为
+虚拟 X server 关闭 TCP 监听；macOS 和 Windows 仍直接使用各自原生显示会话。该修复保留 sandbox、
+context isolation 和真实窗口加载，仍须由下一次 Linux tag runner 产生 AppImage/DEB 与 smoke evidence
+验收。
+
+### macOS Universal native inspect（2026-08-23）
+
+Universal profile 将 `node-pty` 的 arm64 与 x64 输出分别保存在 `prebuilds/darwin-arm64` 和
+`prebuilds/darwin-x64`。runtime manifest 使用跨平台名称 `x64`，但 macOS `lipo -archs` 将对应
+Mach-O 切片报告为 `x86_64`；此前 inspect 直接比较两者，因而把正确的 x64 预构建报为
+`NATIVE_ARCHITECTURE_MISMATCH`。现在 Darwin inspect 仅在调用 lipo 时做该名称映射，仍逐一验证
+每个预构建的摘要、相对路径、声明平台和实际切片。该修复须由下一次 macOS Universal CI 的
+package inspect 与 smoke 验收。

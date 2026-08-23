@@ -493,7 +493,9 @@ export function nativeArchitecture(file: string, architecture: RuntimeTarget['ar
   if (!fs.existsSync(file)) return false;
   if (process.platform === 'darwin') {
     const result = spawnSync('lipo', ['-archs', file], { encoding: 'utf8' });
-    return result.status === 0 && result.stdout.split(/\s+/).includes(architecture);
+    // Runtime manifest 使用 x64，Mach-O 工具使用 x86_64；其余架构名称一致。
+    const machArchitecture = architecture === 'x64' ? 'x86_64' : architecture;
+    return result.status === 0 && result.stdout.split(/\s+/).includes(machArchitecture);
   }
   const result = spawnSync('file', [file], { encoding: 'utf8' });
   if (result.status !== 0) return false;

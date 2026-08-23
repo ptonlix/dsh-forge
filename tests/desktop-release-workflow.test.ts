@@ -105,6 +105,12 @@ describe('Desktop Release workflow', () => {
     expect(workflow.jobs.package?.if).toContain("startsWith(github.ref, 'refs/tags/v')");
     expect(source).toContain('timeout-minutes: 90');
     expect(source).toContain('desktop-${{ runner.os }}-${{ runner.arch }}-');
+    expect(source).not.toContain('electron-builder/Cache');
+    expect(source).toContain("if: ${{ matrix.target == 'win32-x64' }}");
+    expect(source).toContain("Join-Path $env:ProgramFiles '7-Zip\\7z.exe'");
+    expect(source).toContain('ELECTRON_BUILDER_7ZIP_PATH=$sevenZip');
+    expect(source).toContain('& $sevenZip i | Out-Null');
+    expect(packagingSource).toContain('...process.env,\n    CSC_IDENTITY_AUTO_DISCOVERY: \'false\'');
     expect(packagingSource).toContain('NATIVE_REBUILD_TIMEOUT_MS = 15 * 60_000');
     expect(packagingSource).toContain('ELECTRON_BUILDER_TIMEOUT_MS = 45 * 60_000');
     expect(packagingSource).toContain('DEFAULT_ELECTRON_REBUILD_DIST_URL =');
@@ -157,6 +163,7 @@ describe('Desktop Release workflow', () => {
   it('macOS 应用按 electron-builder 的 executableName 定位', () => {
     expect(packagingSource).toContain('? `${executableName}.app`');
     expect(packagingSource).toContain('findApplication(unpackedOutputDir, distribution.id)');
+    expect(releaseSource).toContain("const machArchitecture = architecture === 'x64' ? 'x86_64' : architecture");
   });
 
   it('Linux 动态导入与 smoke 按发行版 id 启动主程序', () => {
@@ -166,5 +173,9 @@ describe('Desktop Release workflow', () => {
     expect(releaseSource).not.toContain("name === 'chrome-sandbox'");
     expect(smokeSource).toContain('function applicationExecutable(application: string, executableName: string)');
     expect(smokeSource).toContain("applicationExecutable(runtime.packageRoot || '', distribution.id)");
+    expect(source).toContain("if: ${{ matrix.target == 'linux-x64' }}");
+    expect(source).toContain('command -v xvfb-run');
+    expect(source).toContain('xvfb-run --auto-servernum --server-args="-screen 0 1280x860x24 -nolisten tcp"');
+    expect(source).toContain("if: ${{ matrix.target != 'linux-x64' }}");
   });
 });

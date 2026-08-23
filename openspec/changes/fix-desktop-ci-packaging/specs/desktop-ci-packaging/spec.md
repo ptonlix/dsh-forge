@@ -125,6 +125,46 @@ lockfile、配置或其余依赖；成功、失败和超时路径均 SHALL 清�
 `DSH_FORGE_PROFILE_OFFLINE=false` 和 `ELECTRON_REBUILD_DIST_URL`，并保留 frozen install。
 package 矩阵任务 SHALL 设置不少于 60 分钟的总超时预算。
 
+### Requirement: Windows Builder 必须使用已验证的 7-Zip
+
+Windows package job 在调用 electron-builder 前 SHALL 验证 `windows-2022` 预装的
+`%ProgramFiles%\7-Zip\7z.exe` 存在且可执行，并将该绝对路径写入
+`ELECTRON_BUILDER_7ZIP_PATH`。工作流不得缓存 electron-builder 工具目录；若预装工具缺失或
+自检失败，job SHALL 在调用 electron-builder 前以可操作错误失败。
+
+#### Scenario: ZIP/NSIS 不依赖临时 Builder 工具
+
+- **WHEN** Windows x64 runner 打包 `nsis,zip`
+- **THEN** electron-builder 使用经预检的系统 7-Zip
+- **AND** 不得下载或执行 `electron-builder/Cache/7zip@1.0.0/**/7za.exe`
+
+### Requirement: Linux package smoke 必须提供隔离显示服务器
+
+Linux package job SHALL 通过 `xvfb-run --auto-servernum` 启动 `package:smoke`，并为 Xvfb 显式
+关闭 TCP 监听。smoke SHALL 保留真实 Electron `BrowserWindow`、Ozone 初始化和 renderer 健康握手；
+不得以 `--headless`、`--no-sandbox` 或跳过窗口替代该检查。若 `xvfb-run` 缺失，job SHALL 在启动
+Electron 前失败。
+
+#### Scenario: 无物理显示的 Ubuntu runner
+
+- **WHEN** `linux-x64` runner 执行 package smoke 且没有宿主 `DISPLAY`
+- **THEN** `xvfb-run` 为本次 smoke 提供隔离的 X display
+- **AND** Electron 不得因 `Missing X server or $DISPLAY` 失败
+
+### Requirement: macOS Universal native inspect 必须识别 Mach-O x64 名称
+
+runtime manifest SHALL 继续使用跨平台架构名称 `x64`。在 Darwin 上检查 native 文件时，inspect
+SHALL 将 `x64` 与 `lipo -archs` 输出的 `x86_64` 视为同一切片。路径中已明确声明
+`darwin-x64` 的 native 文件 SHALL 只验证 x86_64；该规则不得跳过摘要、路径安全、平台或其他
+声明架构的验证。
+
+#### Scenario: node-pty x64 Universal 预构建
+
+- **WHEN** Universal manifest 声明 `darwin` 的 `arm64,x64`，且 node-pty 文件位于
+  `prebuilds/darwin-x64/pty.node`
+- **THEN** inspect 使用 `lipo` 验证该文件包含 `x86_64`
+- **AND** 不得返回 `NATIVE_ARCHITECTURE_MISMATCH`
+
 ### Requirement: 分发格式必须从已注入 profile 的短路径应用封装
 
 打包脚本 SHALL 先在仓库受控的 `.desktop-work/<target>` 短路径生成单一已解包 Electron

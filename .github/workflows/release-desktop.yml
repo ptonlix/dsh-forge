@@ -87,15 +87,26 @@ jobs:
           path: |
             ~/.electron-gyp
             ~/.cache/electron
-            ~/.cache/electron-builder
             ~/Library/Caches/electron
-            ~/Library/Caches/electron-builder
             ~/AppData/Local/electron/Cache
-            ~/AppData/Local/electron-builder/Cache
           key: desktop-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             desktop-${{ runner.os }}-${{ runner.arch }}-
             desktop-${{ runner.os }}-
+      - name: 配置 Windows 7-Zip
+        if: ${{ matrix.target == 'win32-x64' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sevenZip = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
+          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
+            throw "windows-2022 缺少受控 7-Zip: $sevenZip"
+          }
+          & $sevenZip i | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip 自检失败: $sevenZip (exit $LASTEXITCODE)"
+          }
+          "ELECTRON_BUILDER_7ZIP_PATH=$sevenZip" >> $env:GITHUB_ENV
       - name: 打印构建身份
         run: node -p "JSON.stringify({platform:process.platform,arch:process.arch,target:'${{ matrix.target }}',profile:process.env.PROFILE,node:process.version})"
       - run: pnpm install --frozen-lockfile
@@ -103,7 +114,17 @@ jobs:
       # 和 config dump；这里不重复执行这些步骤。
       - run: pnpm run package:desktop -- "${{ env.PROFILE }}" --target "${{ matrix.target }}" --formats "${{ matrix.formats }}"
       - run: pnpm run package:inspect -- "${{ env.PROFILE }}"
-      - run: pnpm run package:smoke -- "${{ env.PROFILE }}" --target "${{ matrix.target }}"
+      - name: Linux package smoke
+        if: ${{ matrix.target == 'linux-x64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v xvfb-run
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x860x24 -nolisten tcp" \
+            pnpm run package:smoke -- "${{ env.PROFILE }}" --target "${{ matrix.target }}"
+      - name: Native package smoke
+        if: ${{ matrix.target != 'linux-x64' }}
+        run: pnpm run package:smoke -- "${{ env.PROFILE }}" --target "${{ matrix.target }}"
       - name: 汇总目标 artifact
         shell: bash
         run: |
