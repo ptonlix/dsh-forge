@@ -93,19 +93,44 @@ jobs:
           restore-keys: |
             desktop-${{ runner.os }}-${{ runner.arch }}-
             desktop-${{ runner.os }}-
-      - name: 配置 Windows 7-Zip
+      - name: 准备 Windows Builder 7za
         if: ${{ matrix.target == 'win32-x64' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $sevenZip = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
-          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
-            throw "windows-2022 缺少受控 7-Zip: $sevenZip"
+          $sevenZipUrl = 'https://github.com/electron-userland/electron-builder-binaries/releases/download/7zip@1.0.0/7zip-win-x64.tar.gz'
+          $sevenZipSha256 = 'be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3'
+          $toolRoot = Join-Path $env:RUNNER_TEMP "dsh-forge-7zip-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $archive = Join-Path $toolRoot '7zip-win-x64.tar.gz'
+          $sevenZip = Join-Path $toolRoot 'bin\7za.exe'
+          New-Item -ItemType Directory -Path $toolRoot -ErrorAction Stop | Out-Null
+          Invoke-WebRequest -Uri $sevenZipUrl -OutFile $archive
+          $actualSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $sevenZipSha256) {
+            throw "7za 下载摘要不匹配: expected=$sevenZipSha256 actual=$actualSha256"
           }
-          & $sevenZip i | Out-Null
+          $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+          if ($null -eq $tar) {
+            throw 'windows-2022 缺少 tar.exe，无法解包已校验的 Builder 7za'
+          }
+          & $tar.Source -xzf $archive -C $toolRoot --strip-components=1
           if ($LASTEXITCODE -ne 0) {
-            throw "7-Zip 自检失败: $sevenZip (exit $LASTEXITCODE)"
+            throw "7za 解包失败: exit $LASTEXITCODE"
           }
+          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
+            throw "解包后缺少 Builder 7za: $sevenZip"
+          }
+          $probe = @'
+          const { spawnSync } = require('node:child_process');
+          const executable = process.argv[1];
+          const result = spawnSync(executable, ['i'], { encoding: 'utf8', windowsHide: true });
+          if (result.error) throw result.error;
+          if (result.status !== 0) {
+            process.stderr.write(result.stderr || result.stdout || `7za exited with ${result.status}\n`);
+            process.exit(result.status || 1);
+          }
+          '@
+          node -e $probe -- $sevenZip
           "ELECTRON_BUILDER_7ZIP_PATH=$sevenZip" >> $env:GITHUB_ENV
       - name: 打印构建身份
         run: node -p "JSON.stringify({platform:process.platform,arch:process.arch,target:'${{ matrix.target }}',profile:process.env.PROFILE,node:process.version})"

@@ -125,17 +125,18 @@ lockfile、配置或其余依赖；成功、失败和超时路径均 SHALL 清�
 `DSH_FORGE_PROFILE_OFFLINE=false` 和 `ELECTRON_REBUILD_DIST_URL`，并保留 frozen install。
 package 矩阵任务 SHALL 设置不少于 60 分钟的总超时预算。
 
-### Requirement: Windows Builder 必须使用已验证的 7-Zip
+### Requirement: Windows Builder 必须使用已验证的 7za
 
-Windows package job 在调用 electron-builder 前 SHALL 验证 `windows-2022` 预装的
-`%ProgramFiles%\7-Zip\7z.exe` 存在且可执行，并将该绝对路径写入
-`ELECTRON_BUILDER_7ZIP_PATH`。工作流不得缓存 electron-builder 工具目录；若预装工具缺失或
-自检失败，job SHALL 在调用 electron-builder 前以可操作错误失败。
+Windows package job 在调用 electron-builder 前 SHALL 下载 electron-builder 26.15.7 声明的
+`7zip-win-x64.tar.gz`，校验其固定 SHA-256，并使用 `tar.exe` 解包至本次 runner 临时目录。workflow
+SHALL 通过 Node `spawnSync` 成功启动解包后的 `bin/7za.exe`，再将其绝对路径写入
+`ELECTRON_BUILDER_7ZIP_PATH`。工作流不得缓存 electron-builder 工具目录；下载、摘要、解包或
+Node 启动验证失败时，job SHALL 在调用 electron-builder 前以可操作错误失败。
 
 #### Scenario: ZIP/NSIS 不依赖临时 Builder 工具
 
 - **WHEN** Windows x64 runner 打包 `nsis,zip`
-- **THEN** electron-builder 使用经预检的系统 7-Zip
+- **THEN** electron-builder 使用经摘要、解包和 Node 启动预检的 `7za.exe`
 - **AND** 不得下载或执行 `electron-builder/Cache/7zip@1.0.0/**/7za.exe`
 
 ### Requirement: Linux package smoke 必须提供隔离显示服务器
@@ -150,6 +151,31 @@ Electron 前失败。
 - **WHEN** `linux-x64` runner 执行 package smoke 且没有宿主 `DISPLAY`
 - **THEN** `xvfb-run` 为本次 smoke 提供隔离的 X display
 - **AND** Electron 不得因 `Missing X server or $DISPLAY` 失败
+
+### Requirement: 打包 launcher fallback 必须来自真实 resources 目录
+
+已打包应用 SHALL 将 `@dsh-forge/desktop-layer` 和 `@dsh-forge/desktop-services-local` 置于
+`resources/dsh-forge/launcher-fallback`，而不是以 `app.asar` 作为 DSH Home 中的链接目标。启动时
+SHALL 将这两个包物化到当前受管 profile 的 `node_modules`；其余 DSH 运行时依赖继续从 profile
+闭包解析。开发态 SHALL 保留 workspace runtime 的相对链接行为。
+
+#### Scenario: Linux package smoke 加载 desktop provider
+
+- **WHEN** Linux 已打包应用在隔离 DSH Home 中启动 smoke
+- **THEN** Cordis loader 能从该 profile 解析 `@dsh-forge/desktop-services-local`
+- **AND** 不得因 `ERR_MODULE_NOT_FOUND` 失败
+
+### Requirement: native inspect 必须跳过非目标平台 optional 预构建的架构检查
+
+inspect SHALL 继续校验所有 native 文件的路径安全、存在性和摘要。路径明确声明为 `linux`、
+`linuxmusl`、`freebsd`、`openbsd`、`darwin` 或 `win32` 的 `.node` 文件，只有在其平台等于当前
+构建 target 时才 SHALL 执行 native 架构检查；未声明平台的 `.node` 仍 SHALL 按 target 严格检查。
+
+#### Scenario: macOS Universal profile 包含跨平台 optional native
+
+- **WHEN** profile 同时携带 `sharp-linuxmusl-*`、`koffi-freebsd-*` 或 `koffi-openbsd-*`
+- **THEN** inspect 保留这些文件的摘要验证
+- **AND** 不对它们调用 `lipo` 或返回 `NATIVE_ARCHITECTURE_MISMATCH`
 
 ### Requirement: macOS Universal native inspect 必须识别 Mach-O x64 名称
 

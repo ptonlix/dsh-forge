@@ -111,6 +111,9 @@ function builderConfig({
     extraResources: [
       // profile 配置在 builder 阶段进入资源；node_modules 在最终 app 生成后只复制一次。
       { from: packagedProfileDir, to: 'dsh-forge/profile', filter: ['**/*'] },
+      // app.asar 不能作为 DSH Home 中模块链接的稳定文件系统目标。将 launcher 临时注入的
+      // 两个包保留在 resources 的真实目录，启动时再物化到受管 profile。
+      { from: path.join(appStagingDir, 'launcher-fallback'), to: 'dsh-forge/launcher-fallback', filter: ['**/*'] },
       { from: path.join(artifactDir, 'resolved-manifest.json'), to: 'dsh-forge/resolved-manifest.json' },
       { from: path.join(artifactDir, 'sbom.input.json'), to: 'dsh-forge/sbom.input.json' },
       { from: path.join(artifactDir, 'THIRD-PARTY-NOTICES.txt'), to: 'dsh-forge/THIRD-PARTY-NOTICES.txt' },
@@ -272,6 +275,18 @@ function createDesktopAppStaging(root: string, compiled: CompiledProfile, distri
     ),
   };
   fs.writeFileSync(path.join(staging, 'package.json'), `${JSON.stringify(stagedPackage, null, 2)}\n`, { mode: 0o600 });
+  const fallbackRoot = path.join(staging, 'launcher-fallback');
+  fs.mkdirSync(path.join(fallbackRoot, 'node_modules'), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(fallbackRoot, 'package.json'), '{"name":"dsh-forge-launcher-fallback","private":true,"type":"module"}\n', {
+    mode: 0o600,
+  });
+  for (const packageName of ['@dsh-forge/desktop-layer', '@dsh-forge/desktop-services-local']) {
+    const source = path.join(staging, 'node_modules', ...packageName.split('/'));
+    const destination = path.join(fallbackRoot, 'node_modules', ...packageName.split('/'));
+    if (!fs.existsSync(source)) fail(`应用 staging 缺少 launcher fallback 包: ${packageName}`, 'PACKAGE_APP_CLOSURE_MISSING');
+    fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+    fs.cpSync(source, destination, { recursive: true, dereference: true });
+  }
   if (fs.existsSync(path.join(staging, 'node_modules', '@deepseek-ai', 'dsh')))
     fail('应用 staging 不得包含 profile 专属 DSH runtime', 'PACKAGE_APP_CLOSURE_DUPLICATE_RUNTIME');
   assertNoSymbolicLinks(staging);

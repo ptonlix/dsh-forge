@@ -232,6 +232,37 @@ test('非当前平台的预编译 native 文件保留在清单中但不参与当
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('macOS inspect 跳过 Linux musl、FreeBSD 与 OpenBSD 的 optional native 预构建', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-native-optional-platform-'));
+  const paths = [
+    'profile/node_modules/@img/sharp-linuxmusl-arm64/lib/sharp-linuxmusl-arm64.node',
+    'profile/node_modules/@koromix/koffi-freebsd-x64/freebsd_x64/koffi.node',
+    'profile/node_modules/@koromix/koffi-openbsd-x64/openbsd_x64/koffi.node',
+  ];
+  for (const relative of paths) {
+    const file = path.join(dir, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'foreign-native-addon');
+  }
+  fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+  fs.mkdirSync(path.join(dir, 'profile'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'profile', 'package.json'), '{}');
+  const manifest: RuntimeManifest = {
+    packageRoot: dir,
+    targets: [{ os: 'darwin', architectures: ['arm64', 'x64'] }],
+    declaredTargets: [{ os: 'darwin', architectures: ['arm64', 'x64'] }],
+    nativeAddons: paths.map((relative) => ({
+      root: 'dsh-forge/profile' as const,
+      path: relative.replace('profile/', ''),
+      executable: false,
+      sha256: sha256(path.join(dir, relative)),
+    })),
+    signing: { signed: false },
+  };
+  assert.deepEqual(inspectPackage(manifest).failures, []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('产物证据要求 SBOM 与许可证通知同时存在', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-evidence-'));
   const app = path.join(dir, 'app');

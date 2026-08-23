@@ -30,3 +30,6 @@
 - [x] 3.11 为 Windows Builder 配置经预检的系统 7-Zip，移除 Builder 工具缓存并增加 workflow 回归测试
 - [x] 3.12 在 Linux package smoke 中提供隔离 Xvfb display，并增加 workflow 回归测试
 - [x] 3.13 将 macOS inspect 的 x64 映射为 Mach-O x86_64，并覆盖 Universal node-pty 预构建
+- [x] 3.14 以已校验的 Builder 7za archive 替换不可靠的 Windows 预装 7-Zip，并增加 Node spawn 预检
+- [x] 3.15 为打包 launcher fallback 提供真实 resources 目录，并在启动时物化到受管 profile
+- [x] 3.16 让 native inspect 跳过 macOS target 外的 optional 预构建架构检查

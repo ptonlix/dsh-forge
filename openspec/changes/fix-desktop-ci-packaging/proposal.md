@@ -39,12 +39,17 @@ SHASUMS 的通用 Electron 镜像，node-gyp 因远端校验值为空拒绝 Elec
   离线，在 lockfile 冻结和 integrity 校验下补下载缺失 tarball。
 - CI 声明 profile 安装策略、headers 地址和 pnpm store 缓存，避免不同 runner 隐式继承本机
   配置。
-- Windows package job 在调用 electron-builder 前验证 `windows-2022` 预装的 7-Zip，并通过
+- Windows package job 在调用 electron-builder 前下载 Builder 版本声明的 7za archive，校验固定
+  SHA-256 后使用 `tar.exe` 解包，并通过 Node 的同一 spawn 模型验证后以
   `ELECTRON_BUILDER_7ZIP_PATH` 提供确定的可执行文件；不持久化 electron-builder 工具缓存。
 - Linux package smoke 在隔离 Xvfb display 中启动完整 Electron 应用，保留 BrowserWindow、Ozone
   和 renderer 健康握手验证，不将无显示服务器的 runner 当成应用启动失败。
 - macOS Universal native inspect 将 runtime manifest 的 `x64` 映射为 Mach-O `lipo` 输出的
   `x86_64`，使架构专属预构建按其声明切片验证。
+- 打包应用将 launcher 临时注入层置于 resources 的真实目录；启动时从该目录物化到 DSH Home 的
+  受管 profile，避免将 `app.asar` 作为文件系统链接目标导致 Cordis loader 无法解析 provider。
+- macOS Universal inspect 识别 Linux musl、FreeBSD 和 OpenBSD 的 optional native 预构建，不把
+  与当前构建目标不兼容的平台二进制误交给 `lipo` 做 Mach-O 架构校验。
 
 ## Non-goals
 

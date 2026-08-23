@@ -507,6 +507,14 @@ export function nativeArchitecture(file: string, architecture: RuntimeTarget['ar
       : /32-bit|i[3-6]86/.test(value);
 }
 
+/** 从 optional native 包目录识别其声明平台；未知路径继续按当前目标严格校验。 */
+function nativePathPlatform(relativePath: string): string | null {
+  const normalized = relativePath.replaceAll('\\', '/');
+  const match = normalized.match(/(?:^|[./_-])(darwin|win32|linux(?:musl)?|freebsd|openbsd)(?:-|[./_]|$)/);
+  if (!match) return null;
+  return match[1] === 'linuxmusl' ? 'linux' : match[1]!;
+}
+
 /** 检查安装包结构、运行时闭包、native 文件、架构和签名要求。 */
 export function inspectPackage(
   manifest: RuntimeManifest,
@@ -586,11 +594,11 @@ export function inspectPackage(
         continue;
       }
       const normalizedPath = native.path.replaceAll('\\', '/');
-      const platformMatch = normalizedPath.match(/(?:^|[./_-])(darwin|win32|linux)(?:-|[./])/);
+      const nativePlatform = nativePathPlatform(normalizedPath);
       const architectureMatch = normalizedPath.match(/(?:^|[/_-])(arm64|x64|ia32)(?:-|[/]|\.|$)/);
       for (const target of manifest.targets || []) {
         if (target.os !== process.platform || !native.path.endsWith('.node')) continue;
-        if (platformMatch && platformMatch[1] !== target.os) continue;
+        if (nativePlatform && nativePlatform !== target.os) continue;
         const declaredArchitectures = target.architectures || [];
         const explicitArchitecture = architectureMatch?.[1] as RuntimeTarget['architectures'][number] | undefined;
         const architectures = explicitArchitecture

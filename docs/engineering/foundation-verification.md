@@ -223,10 +223,13 @@ Linux builder 从 `distribution.branding.publisher` 写入 `maintainer` 与 `ven
 
 Windows package job 两次在下载 `7zip-win-x64.tar.gz` 后，于 ZIP 阶段找不到
 electron-builder 缓存内的 `7za.exe`。下载进度表明未命中工具 archive cache，而 Builder 对解压
-目录只检查非空，不能确保预期可执行文件存在。`windows-2022` 官方镜像预装 7-Zip，因此 workflow
-先验证 `%ProgramFiles%\7-Zip\7z.exe`，再写入 `ELECTRON_BUILDER_7ZIP_PATH`，使 ZIP 与 NSIS
-直接使用受控路径。工作流不再缓存 electron-builder 工具目录；Electron runtime 与 headers 缓存
-保持不变。该修复仍须由下一次 Windows tag runner 实际生成 NSIS 和 ZIP 验收。
+目录只检查非空，不能确保预期可执行文件存在。随后将预装 `%ProgramFiles%\7-Zip\7z.exe` 提供给
+Builder，日志仍在 Node `execFile` 启动该文件时返回 `ENOENT`；PowerShell 成功自检不能证明该执行
+模型可用。workflow 现在下载 electron-builder 26.15.7 声明的 `7zip-win-x64.tar.gz`，用源码中的固定
+SHA-256 校验下载结果，再以 `tar.exe` 解包到本次 runner 临时目录，并通过 Node `spawnSync` 验证
+`bin/7za.exe`。只有探针成功才写入 `ELECTRON_BUILDER_7ZIP_PATH`，所以 ZIP 和 NSIS 不会触发
+Builder 的工具缓存下载。工作流仍不缓存 electron-builder 工具目录；Electron runtime 与 headers
+缓存保持不变。该修复仍须由下一次 Windows tag runner 实际生成 NSIS 和 ZIP 验收。
 
 ### Linux package smoke 显示服务器（2026-08-23）
 
@@ -236,6 +239,23 @@ Linux 的已打包应用会等待 Electron ready、创建 BrowserWindow 并等�
 虚拟 X server 关闭 TCP 监听；macOS 和 Windows 仍直接使用各自原生显示会话。该修复保留 sandbox、
 context isolation 和真实窗口加载，仍须由下一次 Linux tag runner 产生 AppImage/DEB 与 smoke evidence
 验收。
+
+### Linux launcher fallback（2026-08-23）
+
+Xvfb 修复后，Linux smoke 已经能创建 Electron 窗口，但 DSH Host 从隔离的 DSH Home 加载 profile 时仍找不到
+`@dsh-forge/desktop-services-local`。打包 profile 模板包含该 provider，受管 profile 的复制逻辑却会有意忽略
+launcher 临时 fallback；启动时原本尝试建立到 `app.asar` 内 package 的文件系统链接。`app.asar` 是 Electron
+虚拟文件系统，不能作为该链接和 ESM loader 的可靠解析根。现在打包将 desktop layer 与 local provider 放到
+`resources/dsh-forge/launcher-fallback`，启动时从该真实目录复制到当前受管 profile。provider 的 Cordis、工具链
+等依赖仍只从 profile 的闭包解析，避免重新携带 DSH runtime。该修复须由下一次 Linux package smoke 验收。
+
+### macOS optional native inspect（2026-08-23）
+
+macOS Universal profile 的 optional 依赖可同时包含 Linux musl、FreeBSD 与 OpenBSD 的预构建 `.node` 文件。
+这些文件仍属于安装包闭包，必须保留路径、存在性和 SHA-256 校验，但不是 macOS Mach-O。此前 inspect 只识别
+`darwin`、`win32` 和带分隔符的 `linux`，遗漏了 `linuxmusl`、`freebsd`、`openbsd`，因而错误调用 `lipo` 并报告
+`NATIVE_ARCHITECTURE_MISMATCH`。现在它们被明确识别为非当前 target 平台，只有当前平台或未声明平台的 native
+文件参与架构校验。该修复须由下一次 macOS Universal `package:inspect` 和 smoke 验收。
 
 ### macOS Universal native inspect（2026-08-23）
 

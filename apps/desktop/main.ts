@@ -222,16 +222,33 @@ function linkFallbackPackage(
  * runtime 的相对链接；fallback 只包含 launcher 注入层及其服务提供方，
  * 不得把 DSH runtime 或任意工作区包混入 profile 的持久闭包。
  */
-function ensureDesktopLayerFallback(profileDir: string, runtimeRoot: string | undefined): void {
+function ensureDesktopLayerFallback(
+  profileDir: string,
+  runtimeRoot: string | undefined,
+  launcherFallbackRoot?: string,
+): void {
   // 应用 staging 只携带主进程 production closure；DSH runtime 始终从 profile
-  // 解析，因此 fallback 的可信锚点是应用自身 package.json。
-  const runtimeAnchor = runtimeRoot ? path.join(runtimeRoot, 'package.json') : path.join(process.cwd(), 'package.json');
+  // 解析。已打包应用从 resources 的真实目录复制 fallback，避免 app.asar 不能作为
+  // DSH Home 文件系统链接目标；开发态仍使用当前 runtime 的相对链接。
+  const fallbackRoot = launcherFallbackRoot || runtimeRoot;
+  const runtimeAnchor = fallbackRoot ? path.join(fallbackRoot, 'package.json') : path.join(process.cwd(), 'package.json');
   if (!fs.existsSync(runtimeAnchor)) fail(`缺少桌面 runtime 锚点: ${runtimeAnchor}`, 'DESKTOP_RUNTIME_MISSING');
   const fallback = path.join(profileDir, 'node_modules');
   for (const packageName of ['@dsh-forge/desktop-layer', '@dsh-forge/desktop-services-local']) {
     const source = packageDirectoryFromAnchor(runtimeAnchor, packageName);
     if (!source) fail(`desktop runtime 缺少 ${packageName}`, 'DESKTOP_RUNTIME_PACKAGE_MISSING');
-    linkFallbackPackage(fallback, packageName, source, { allowMaterializedDependency: true });
+    if (!launcherFallbackRoot) {
+      linkFallbackPackage(fallback, packageName, source, { allowMaterializedDependency: true });
+      continue;
+    }
+    const destination = path.join(fallback, ...packageName.split('/'));
+    if (fs.existsSync(destination)) {
+      assertPackageIdentity(destination, packageName);
+      continue;
+    }
+    fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+    fs.cpSync(source, destination, { recursive: true, dereference: true });
+    assertPackageIdentity(destination, packageName);
   }
 }
 
@@ -467,6 +484,7 @@ export async function startDshHost({
   root,
   home,
   runtimeRoot,
+  launcherFallbackRoot,
   profile,
   generationId,
   capability,
@@ -474,6 +492,7 @@ export async function startDshHost({
   readonly root: string;
   readonly home: string;
   readonly runtimeRoot?: string;
+  readonly launcherFallbackRoot?: string;
   readonly profile: DesktopProfile;
   readonly generationId: string;
   readonly capability: DesktopHostCapability;
@@ -485,7 +504,7 @@ export async function startDshHost({
     pathToFileURL(profileRequire.resolve('@deepseek-ai/dsh-cmdline')).href,
   )) as unknown as CmdlineModule;
   const installAnchor = profileRequire.resolve('@deepseek-ai/dsh/package.json');
-  ensureDesktopLayerFallback(profile.dir, runtimeRoot);
+  ensureDesktopLayerFallback(profile.dir, runtimeRoot, launcherFallbackRoot);
   const loaded = appBoot.loadProfile('dsh-forge-desktop', profile.name, installAnchor, home);
   const desktopPatch = appBoot.loadOverlayPatches(
     'dsh-forge-desktop',

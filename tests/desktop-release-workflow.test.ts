@@ -26,6 +26,8 @@ const packagingSource = readFileSync(join(process.cwd(), 'scripts', 'package-des
 const smokeSource = readFileSync(join(process.cwd(), 'scripts', 'smoke-package.ts'), 'utf8');
 const compilerSource = readFileSync(join(process.cwd(), 'tools', 'profile-toolchain', 'src', 'compiler', 'index.ts'), 'utf8');
 const releaseSource = readFileSync(join(process.cwd(), 'tools', 'profile-toolchain', 'src', 'release', 'index.ts'), 'utf8');
+const electronMainSource = readFileSync(join(process.cwd(), 'apps', 'desktop', 'electron-main.ts'), 'utf8');
+const desktopMainSource = readFileSync(join(process.cwd(), 'apps', 'desktop', 'main.ts'), 'utf8');
 const workflow = parse(source) as DesktopReleaseWorkflow;
 
 describe('Desktop Release workflow', () => {
@@ -107,9 +109,14 @@ describe('Desktop Release workflow', () => {
     expect(source).toContain('desktop-${{ runner.os }}-${{ runner.arch }}-');
     expect(source).not.toContain('electron-builder/Cache');
     expect(source).toContain("if: ${{ matrix.target == 'win32-x64' }}");
-    expect(source).toContain("Join-Path $env:ProgramFiles '7-Zip\\7z.exe'");
+    expect(source).toContain("releases/download/7zip@1.0.0/7zip-win-x64.tar.gz");
+    expect(source).toContain('be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3');
+    expect(source).toContain("Join-Path $toolRoot 'bin\\7za.exe'");
+    expect(source).toContain('Get-FileHash -LiteralPath $archive -Algorithm SHA256');
+    expect(source).toContain('Get-Command tar.exe -ErrorAction SilentlyContinue');
+    expect(source).toContain('--strip-components=1');
+    expect(source).toContain("spawnSync(executable, ['i']");
     expect(source).toContain('ELECTRON_BUILDER_7ZIP_PATH=$sevenZip');
-    expect(source).toContain('& $sevenZip i | Out-Null');
     expect(packagingSource).toContain('...process.env,\n    CSC_IDENTITY_AUTO_DISCOVERY: \'false\'');
     expect(packagingSource).toContain('NATIVE_REBUILD_TIMEOUT_MS = 15 * 60_000');
     expect(packagingSource).toContain('ELECTRON_BUILDER_TIMEOUT_MS = 45 * 60_000');
@@ -137,6 +144,13 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain('PROFILE_ONLY_RUNTIME_PREFIXES');
     expect(packagingSource).toContain('installUniversalNodePtyPrebuilds');
     expect(packagingSource).toContain("asarUnpack: ['**/*.node', '**/helpers/**']");
+    expect(packagingSource).toContain("to: 'dsh-forge/launcher-fallback'");
+    expect(packagingSource).toContain("const fallbackRoot = path.join(staging, 'launcher-fallback')");
+    expect(packagingSource).toContain("'@dsh-forge/desktop-services-local'");
+    expect(electronMainSource).toContain("packagedResourcePath('dsh-forge', 'launcher-fallback')");
+    expect(desktopMainSource).toContain('launcherFallbackRoot?: string');
+    expect(desktopMainSource).toContain('assertPackageIdentity(destination, packageName);');
+    expect(desktopMainSource).toContain('fs.cpSync(source, destination, { recursive: true, dereference: true })');
     expect(packagingSource).not.toContain("from: path.join(root, 'node_modules')");
     expect(packagingSource).not.toContain("ELECTRON_REBUILD_DIST_URL: process.env.ELECTRON_REBUILD_DIST_URL || 'https://npmmirror.com/mirrors/electron/'");
     expect(source).not.toMatch(/package:\n(?:.|\n)*?\n\s+- run: pnpm run build\n/);

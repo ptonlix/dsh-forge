@@ -42,6 +42,7 @@ export async function startElectron() {
   // 应用主进程只使用 app.asar 内的一棵 production closure；DSH runtime
   // 始终从随包 profile 解析，不再复制 dsh-forge/runtime。
   const runtimeRoot = root;
+  const launcherFallbackRoot = app.isPackaged ? packagedResourcePath('dsh-forge', 'launcher-fallback') : undefined;
   const template = app.isPackaged ? packagedResourcePath('dsh-forge', 'profile') : null;
   const distribution = parseDistribution(path.join(root, 'distribution.yml'));
   const requestedProfile = profileFromArguments(process.argv);
@@ -79,7 +80,7 @@ export async function startElectron() {
     deadlineMs: 15_000,
     probe: (url) => probeLoopback(url, 15_000),
     windowFactory,
-    host: { start: (options) => startDshHost({ root, home: dshHome.path, runtimeRoot, ...options }) },
+    host: { start: (options) => startDshHost({ root, home: dshHome.path, runtimeRoot, launcherFallbackRoot, ...options }) },
     pnpm: process.execPath,
     pnpmArgs: [path.join(runtimeRoot, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')],
     pnpmEnv: { ELECTRON_RUN_AS_NODE: '1' },
