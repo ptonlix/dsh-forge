@@ -10,9 +10,14 @@ macOS Universal 还有一个独立问题：profile 首次物化发生在 arm64 r
 两份相同架构文件合并；若没有 x64 optional 包，最终 Universal 应用也无法在 x64 上运行。
 
 后续 CI 验证还暴露了两个构建系统边界：electron-builder 26 会校验配置中的全部平台段，
-而 `mac.x64ArchFiles` 只接受单个 glob，且在 `mergeASARs: false` 时没有作用；Windows 的
-MSBuild 则会在 `node-pty/build` 写入分析与追踪文件，artifact digest 与嵌套依赖路径超过
-其可用路径上限时会以 C1258/FTK1011 失败。
+而 `mac.x64ArchFiles` 只接受单个 glob。即使 `mergeASARs: false`，`@electron/universal` 仍会
+处理 `app.asar.unpacked` 内的 Mach-O 文件，因此必须用该规则跳过已按目录隔离的 native 副本；
+Windows 的 MSBuild 则会在 `node-pty/build` 写入分析与追踪文件，artifact digest 与嵌套依赖
+路径超过其可用路径上限时会以 C1258/FTK1011 失败。
+
+Linux 的 `.deb` 目标还会进入 electron-builder 的 FPM 元数据校验。独立 desktop-deploy 的
+package metadata 未携带 `homepage`，且根 package 没有带邮箱的 author；若不提供 Linux
+maintainer，FPM 会在应用目录已生成后拒绝生成 Debian 控制文件。
 
 ## Decisions
 
@@ -45,13 +50,26 @@ MSBuild 则会在 `node-pty/build` 写入分析与追踪文件，artifact digest
 10. 发布运行时不再提供 `dsh-forge/runtime` 的根 node_modules 副本；DSH runtime 只从
     `dsh-forge/profile/node_modules` 解析，主进程依赖只存在于 app.asar 的 production closure。
 11. electron-builder 配置只生成当前 runner 对应的 `mac`、`win` 或 `linux` 段。Universal
-    继续使用 `mergeASARs: false`，因为完整 profile closure 在 builder 完成后才复制；删除
-    无效的 `x64ArchFiles`，不再让 builder 合并 profile 内的架构专属文件。
+    使用 `mergeASARs: false`，并设置单个 `x64ArchFiles` brace glob 覆盖目录名已编码 Darwin
+    架构的包、所有 `prebuilds/darwin-*` 与已 universal 的文件；`@electron/universal` 因而保留
+    两套架构文件，不会对相同路径的副本再次执行 lipo。
 12. Windows 重建前将 profile 解引用复制到系统临时目录的短根路径。重建成功后，按相对目录
     逐个替换正式 profile 中对应 `node-pty/build`，不使用临时副本覆盖 lockfile、配置或其他
     依赖；无论成功、失败或超时都清理临时目录。
+13. 根 package 声明项目主页，desktop-deploy 保留该元数据；Linux 配置从
+    `distribution.branding.publisher` 写入 `maintainer` 与 `vendor`。这满足 FPM 的 URL 和
+    维护者要求，不要求为发行身份捏造个人 author 邮箱。
+14. electron-builder 分两阶段运行。第一阶段只请求 `dir`，输出到仓库受控的
+    `.desktop-work/<target>/unpacked` 短路径；脚本在此目录注入完整 profile 闭包、生成
+    runtime manifest 和 package evidence。第二阶段以该应用目录为 `--prepackaged` 输入，
+    仅在 artifact 的 `desktop-dist` 输出 DMG/ZIP、NSIS/ZIP 或 AppImage/DEB。工作目录保留到
+    当前 job 的 inspect/smoke 结束，由下次同目标构建覆盖、由 CI runner 在 job 结束时清理。
+    因此分发格式不会在 profile 闭包尚未存在时被提前生成，Windows 的 `OpenConsole.exe`
+    也始终位于短路径的已解包应用中。
 
 ## Risks
 
 - 官方 headers 服务不可达时，构建会失败；可通过同样提供 SHASUMS 的镜像覆盖环境变量。
 - CI 允许补下载会增加首次运行时间，但避免把不完整缓存误判为依赖或代码错误。
+- 已解包工作目录只在构建 runner 生命周期内有效；跨 job 的 release 汇总继续以各平台
+  inspect/smoke 证据与最终分发包为输入，不能将本机 `packageRoot` 当作可迁移路径。

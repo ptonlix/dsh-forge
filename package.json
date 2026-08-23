@@ -4,6 +4,7 @@
   "private": true,
   "packageManager": "pnpm@11.7.0",
   "description": "DSH Forge 可审计发行版基础工具链",
+  "homepage": "https://github.com/ptonlix/dsh-forge",
   "type": "commonjs",
   "main": "dist/apps/desktop/electron-main.js",
   "engines": {

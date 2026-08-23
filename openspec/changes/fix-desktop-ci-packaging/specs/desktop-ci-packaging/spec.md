@@ -85,14 +85,16 @@ ripgrep、koffi 等 optional package SHALL 保持独立路径。`node-pty/build/
 ### Requirement: builder 配置必须仅声明当前目标平台
 
 打包脚本 SHALL 只向 electron-builder 输出当前 runner 的平台配置段。macOS Universal SHALL
-设置 `mergeASARs: false`，且不得设置 `x64ArchFiles`；profile closure 不参与 builder 的 ASAR
-合并，必须在最终应用生成后再复制。
+设置 `mergeASARs: false`，并以一个 `x64ArchFiles` minimatch 字符串覆盖按目录隔离的原生包；
+不得使用数组。该规则 SHALL 覆盖目录名已编码 Darwin 架构的包、所有 `prebuilds/darwin-*` 与
+已 universal 的文件，避免 `@electron/universal` 对 `app.asar.unpacked` 内相同路径的文件再次
+执行 lipo。
 
 #### Scenario: macOS Universal 配置校验
 
 - **WHEN** `darwin-universal` 打包生成 electron-builder 配置
-- **THEN** 配置只包含 `mac` 平台段，不包含 `linux`、`win` 或数组形式的 `x64ArchFiles`，并通过
-  当前 electron-builder 版本的 schema 校验。
+- **THEN** 配置只包含 `mac` 平台段，不包含 `linux`、`win`，且 `x64ArchFiles` 为覆盖 native
+  package 路径的单个字符串，并通过当前 electron-builder 版本的 schema 校验与 Universal 合并。
 
 ### Requirement: Windows native rebuild 必须使用短路径 staging
 
@@ -106,8 +108,37 @@ lockfile、配置或其余依赖；成功、失败和超时路径均 SHALL 清�
 - **THEN** MSBuild 的输出路径位于短临时 staging，不因正式 artifact 的嵌套路径写入 C1258 或
   FTK1011 失败。
 
+### Requirement: Linux Debian 包必须携带 FPM 元数据
+
+独立 desktop-deploy 的 package metadata SHALL 保留项目 `homepage`。Linux builder 配置 SHALL
+从 distribution branding 提供非空 `maintainer` 与 `vendor`，使 `.deb` 目标不依赖根 package
+的个人 author 邮箱。
+
+#### Scenario: Ubuntu Deb 打包
+
+- **WHEN** `linux-x64` 请求 `deb` 格式
+- **THEN** electron-builder FPM 能读取项目 URL、维护者和 vendor，并继续创建 Debian 控制文件。
+
 ### Requirement: CI 必须显式声明构建网络策略
 
 工作流 SHALL 为所有 validate/package/summary 相关 profile 命令声明
 `DSH_FORGE_PROFILE_OFFLINE=false` 和 `ELECTRON_REBUILD_DIST_URL`，并保留 frozen install。
 package 矩阵任务 SHALL 设置不少于 60 分钟的总超时预算。
+
+### Requirement: 分发格式必须从已注入 profile 的短路径应用封装
+
+打包脚本 SHALL 先在仓库受控的 `.desktop-work/<target>` 短路径生成单一已解包 Electron
+应用。完整 profile `node_modules` 闭包、runtime manifest 和 package evidence SHALL 基于该
+已解包应用生成。请求 DMG、ZIP、NSIS、AppImage 或 DEB 时，脚本 SHALL 使用
+electron-builder 的 `--prepackaged` 从该已解包应用封装分发格式；不得在复制 profile 闭包前
+生成任何请求的分发格式。
+
+工作目录 SHALL 保留至当前 runner 的 `package:inspect` 与 `package:smoke` 完成，不得写入
+发布 artifact；下次相同目标构建可以覆盖该目录。
+
+#### Scenario: Windows ConPTY helper 进入 NSIS 和 ZIP
+
+- **WHEN** `win32-x64` profile 中的 `node-pty` 包含 ConPTY `OpenConsole.exe`
+- **THEN** 已解包应用及其 profile 闭包位于 `.desktop-work/win32-x64` 的短路径
+- **AND** `package:inspect` 不因该 helper 返回 `NATIVE_FILE_MISSING`
+- **AND** NSIS 与 ZIP 均从该已注入闭包的应用封装。

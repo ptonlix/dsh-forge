@@ -53,10 +53,12 @@ describe('Desktop Release workflow', () => {
     const packageManifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
       readonly engines?: { readonly node?: string };
       readonly packageManager?: string;
+      readonly homepage?: string;
       readonly scripts?: Readonly<Record<string, string>>;
     };
     expect(packageManifest.packageManager).toBe('pnpm@11.7.0');
     expect(packageManifest.engines?.node).toBe('>=22.13.0');
+    expect(packageManifest.homepage).toBe('https://github.com/ptonlix/dsh-forge');
     expect(packageManifest.scripts?.typecheck).toBe(
       'pnpm run build:desktop-services && tsc -p tsconfig.json --noEmit',
     );
@@ -108,8 +110,14 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain('executableName: distribution.id');
     expect(packagingSource).toContain('desktopName: distribution.id');
     expect(packagingSource).toContain('syncDesktopName: true');
+    expect(packagingSource).toContain('maintainer: distribution.branding.publisher');
+    expect(packagingSource).toContain('vendor: distribution.branding.publisher');
+    expect(packagingSource).toContain('homepage: rootPackage.homepage');
     expect(packagingSource).not.toContain('desktopName: distribution.id,\n      executableName: distribution.id');
-    expect(packagingSource).not.toContain('x64ArchFiles');
+    expect(packagingSource).toContain('MACOS_UNIVERSAL_X64_ARCH_FILES');
+    expect(packagingSource).toContain('x64ArchFiles: MACOS_UNIVERSAL_X64_ARCH_FILES');
+    expect(packagingSource).toContain('**/*-darwin-*/**');
+    expect(packagingSource).toContain('**/prebuilds/darwin-*/**');
     expect(packagingSource).toContain("targetName === 'darwin-universal' || (!targetName && process.platform === 'darwin')");
     expect(packagingSource).toContain('copyWindowsNodePtyBuildOutputs');
     expect(packagingSource).toContain("fs.mkdtempSync(path.join(os.tmpdir(), 'dshf-native-'))");
@@ -128,5 +136,19 @@ describe('Desktop Release workflow', () => {
     expect(compilerSource).toContain("offline ? '--offline' : '--prefer-offline'");
     expect(compilerSource).toContain('DSH_FORGE_PROFILE_OFFLINE');
     expect(compilerSource).toContain('PROFILE_PNPM_TIMEOUT_MS = 15 * 60_000');
+  });
+
+  it('先在短路径注入 profile 闭包，再封装分发格式', () => {
+    const mainSource = packagingSource.slice(packagingSource.indexOf('function main(): void'));
+    const gitignore = readFileSync(join(process.cwd(), '.gitignore'), 'utf8');
+    const unpacked = "runBuilder(root, unpackedConfigFile, targetName, ['dir'])";
+    const closure = 'copyPackagedProfileClosure(compiled, appStagingDir, application)';
+    const distributable = 'distributableBuild = runBuilder(';
+    expect(gitignore).toContain('.desktop-work/');
+    expect(packagingSource).toContain('prepareDesktopWorkDirectory');
+    expect(packagingSource).toContain("args.push('--prepackaged', path.resolve(prepackaged))");
+    expect(mainSource.indexOf(unpacked)).toBeGreaterThanOrEqual(0);
+    expect(mainSource.indexOf(closure)).toBeGreaterThan(mainSource.indexOf(unpacked));
+    expect(mainSource.indexOf(distributable)).toBeGreaterThan(mainSource.indexOf(closure));
   });
 });

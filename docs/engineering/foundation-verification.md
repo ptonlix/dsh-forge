@@ -175,9 +175,10 @@ electron-builder 另使用 45 分钟预算。macOS Universal 会先生成架构�
 
 后续 Tag CI 证明前一轮修复仍有两个实现缺口。macOS 的配置同时包含 Linux/Windows 段，且将
 只接受单个 glob 的 `mac.x64ArchFiles` 写为数组；electron-builder 26 因 schema 校验在打包前
-停止。现在配置生成器只写入本次 runner 的平台段；Universal 保留 `mergeASARs: false`，删除
-无效的 `x64ArchFiles`。profile closure 在 builder 完成后复制，因此不存在需要 builder 合并的
-profile 原生文件。
+停止。现在配置生成器只写入本次 runner 的平台段；Universal 保留 `mergeASARs: false`，同时以
+单个 brace glob 设置 `x64ArchFiles`，覆盖 `app.asar.unpacked` 内目录名已编码 Darwin 架构的
+native 包、所有 `prebuilds/darwin-*` 与已 universal 的文件。该规则避免 `@electron/universal`
+将两份临时应用中相同路径的架构副本再次交给 lipo；profile closure 仍在 builder 完成后复制。
 
 Windows 的 node-pty 重建此前直接在带 artifact digest 的 profile 路径执行，MSBuild 创建
 native code analysis 与 file tracker 中间文件时出现 C1258/FTK1011。现在脚本将 profile 解引用
@@ -188,3 +189,24 @@ profile，且在成功、失败或超时后清理临时目录。该修复不改�
 本次仅能在本机完成 TypeScript、聚焦测试、electron-builder 配置 schema 和静态门禁验证；尚未
 重新运行 GitHub 的 macOS/Windows 原生 runner。因此真实 Universal 安装包、Windows MSBuild
 重建和三平台 smoke 仍需由下一次 `v*` Tag CI 作为验收证据。
+
+### 短路径两阶段封装（2026-08-23）
+
+profile 闭包注入发生在 electron-builder 生成已解包应用之后；若此时才生成 NSIS、ZIP、DMG、
+AppImage 或 DEB，安装包不会遗漏 `dsh-forge/profile/node_modules`。脚本现先以 `dir` 目标在
+仓库 `.desktop-work/<target>/unpacked` 中生成已解包应用，再在该短路径写入完整 profile 闭包、
+runtime manifest 和 package evidence，最后以 electron-builder `--prepackaged` 封装请求的
+分发格式。该目录对 Windows 的 ConPTY `OpenConsole.exe` 等深层 helper 保持在安全路径预算内，
+并在当前 runner 中保留至 `package:inspect`、`package:smoke` 完成。
+
+`.desktop-work/` 不进入 Git 或 Actions release artifact；它只承载本平台构建阶段的可执行
+验证。跨 job 汇总继续传递最终安装包、runtime manifest、package evidence 与平台 smoke
+evidence，不能将 `packageRoot` 视为另一台 runner 上可访问的路径。
+
+### Linux Debian FPM 元数据修复（2026-08-23）
+
+Linux 应用目录已能生成时，`.deb` 的 FPM 阶段仍会要求项目 URL 和维护者。独立
+`desktop-deploy/package.json` 此前没有保留 `homepage`，根 package 也没有带邮箱的 author，
+因此 electron-builder 在控制文件生成前停止。根 package 现在声明项目主页，staging 保留该字段；
+Linux builder 从 `distribution.branding.publisher` 写入 `maintainer` 与 `vendor`，无需将个人邮箱
+伪造为发行维护者。该变更仍须通过下一次 Ubuntu runner 的 AppImage/deb 实际构建验证。

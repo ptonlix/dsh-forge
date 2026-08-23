@@ -50,11 +50,26 @@ type PackageFormat = 'dir' | 'dmg' | 'zip' | 'nsis' | 'AppImage' | 'deb';
 const DEFAULT_ELECTRON_REBUILD_DIST_URL = 'https://www.electronjs.org/headers';
 const NATIVE_REBUILD_TIMEOUT_MS = 15 * 60_000;
 const ELECTRON_BUILDER_TIMEOUT_MS = 45 * 60_000;
+// @electron/universal 仍会处理 app.asar.unpacked；目录已经编码 Darwin 架构的包、
+// prebuilds/darwin-* 与已 universal 的文件必须保留，不能对同路径副本再次执行 lipo。
+const MACOS_UNIVERSAL_X64_ARCH_FILES = '**/node_modules/{**/*-darwin-*/**,**/prebuilds/darwin-*/**,**/*darwin-universal*}';
 
 interface PackageOptions {
   readonly profileName?: string;
   readonly targetName?: DesktopTargetName;
   readonly formats: readonly PackageFormat[];
+}
+
+/**
+ * 最终 profile 闭包包含深层第三方依赖。已解包应用必须位于短路径，避免 Windows
+ * 将 ConPTY helper 复制到 artifact digest 下后突破文件系统路径限制。
+ */
+function prepareDesktopWorkDirectory(root: string, targetName: DesktopTargetName | undefined): string {
+  const target = targetName || `${process.platform}-${process.arch}`;
+  const directory = path.join(root, '.desktop-work', target);
+  if (fs.existsSync(directory)) fs.rmSync(directory, { recursive: true, force: true });
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  return directory;
 }
 
 function rootDirectory(): string {
@@ -107,7 +122,12 @@ function builderConfig({
   if (targetName === 'darwin-universal' || (!targetName && process.platform === 'darwin')) {
     config.mac = {
       target: formats,
-      ...(targetName === 'darwin-universal' ? { mergeASARs: false } : {}),
+      ...(targetName === 'darwin-universal'
+        ? {
+          mergeASARs: false,
+          x64ArchFiles: MACOS_UNIVERSAL_X64_ARCH_FILES,
+        }
+        : {}),
     };
   } else if (targetName === 'win32-x64' || (!targetName && process.platform === 'win32')) {
     config.win = { target: formats };
@@ -115,6 +135,9 @@ function builderConfig({
     config.linux = {
       target: formats,
       category: 'Utility',
+      // FPM 生成 deb 控制文件需要维护者；发行身份由 distribution 统一提供。
+      maintainer: distribution.branding.publisher,
+      vendor: distribution.branding.publisher,
       // desktopName 是 app package.json metadata，Linux 配置仅负责同步该名称。
       syncDesktopName: true,
     };
@@ -125,6 +148,10 @@ function builderConfig({
     config.electronDist = electronZip;
   }
   return config;
+}
+
+function writeBuilderConfig(configFile: string, input: BuilderConfigInput): void {
+  fs.writeFileSync(configFile, `${JSON.stringify(builderConfig(input), null, 2)}\n`, { mode: 0o600 });
 }
 
 const APP_RUNTIME_ROOTS = Object.freeze([
@@ -232,6 +259,7 @@ function createDesktopAppStaging(root: string, compiled: CompiledProfile, distri
     type: rootPackage.type,
     main: rootPackage.main,
     description: rootPackage.description,
+    homepage: rootPackage.homepage,
     // electron-builder 26 从应用 package.json 读取 desktopName；不能放入 linux 配置。
     desktopName: distribution.id,
     dependencies: Object.fromEntries(
@@ -597,6 +625,7 @@ function runBuilder(
   configFile: string,
   targetName: DesktopTargetName | undefined,
   formats: readonly PackageFormat[],
+  prepackaged?: string,
 ): BuilderResult {
   let binary: string;
   try {
@@ -607,6 +636,11 @@ function runBuilder(
   // Tag 只触发构建；发布由 workflow 的 release job 统一处理，避免 builder
   // 根据 git tag 隐式访问 GitHub Release 并在 package job 中失败。
   const args = ['--config', configFile, '--publish', 'never'];
+  if (prepackaged) {
+    if (!fs.existsSync(prepackaged))
+      fail(`已解包 Electron 应用不存在: ${prepackaged}`, 'PACKAGE_ARTIFACT_MISSING');
+    args.push('--prepackaged', path.resolve(prepackaged));
+  }
   const builderFormats = formats.length ? formats : ['dir'];
   if (process.platform === 'darwin') args.push('--mac', ...builderFormats, ...(targetName === 'darwin-universal' ? ['--universal'] : [process.arch === 'arm64' ? '--arm64' : '--x64']));
   else if (process.platform === 'win32') args.push('--win', ...builderFormats, '--x64');
@@ -770,28 +804,23 @@ function main(): void {
   const packagedProfileDir = materializePackagedProfile(compiled);
   const appStagingDir = createDesktopAppStaging(root, compiled, distribution);
   const outputDir = path.join(compiled.outputDir, 'desktop-dist');
+  if (fs.existsSync(outputDir)) fs.rmSync(outputDir, { recursive: true, force: true });
   fs.mkdirSync(outputDir, { recursive: true, mode: 0o700 });
-  const configFile = path.join(compiled.outputDir, 'electron-builder.generated.json');
-  fs.writeFileSync(
-    configFile,
-    `${JSON.stringify(
-      builderConfig({
-        outputDir,
-        packagedProfileDir,
-        appStagingDir,
-        resolved: compiled.resolved,
-        distribution,
-        targetName,
-        formats: options.formats,
-      }),
-      null,
-      2,
-    )}\n`,
-    { mode: 0o600 },
-  );
-  const build = runBuilder(root, configFile, targetName, options.formats);
-  assertRequestedFormats(outputDir, options.formats);
-  const application = findApplication(outputDir, distribution.branding.productName, distribution.id);
+  const workDir = prepareDesktopWorkDirectory(root, targetName);
+  const unpackedOutputDir = path.join(workDir, 'unpacked');
+  const unpackedConfigFile = path.join(compiled.outputDir, 'electron-builder.unpacked.generated.json');
+  writeBuilderConfig(unpackedConfigFile, {
+    outputDir: unpackedOutputDir,
+    packagedProfileDir,
+    appStagingDir,
+    resolved: compiled.resolved,
+    distribution,
+    targetName,
+    formats: ['dir'],
+  });
+  // 先得到短路径的已解包应用，再注入完整 profile 闭包；此阶段不生成可分发安装包。
+  const unpackedBuild = runBuilder(root, unpackedConfigFile, targetName, ['dir']);
+  const application = findApplication(unpackedOutputDir, distribution.branding.productName, distribution.id);
   if (targetName === 'darwin-universal') assertUniversalApplication(application);
   const profileClosure = copyPackagedProfileClosure(compiled, appStagingDir, application);
   const runtime = createRuntimeManifest({
@@ -810,8 +839,30 @@ function main(): void {
     mode: 0o600,
   });
   generateEvidence(runtime, compiled.outputDir);
+  // --prepackaged 只封装已经验证的应用，防止 NSIS/DMG 等格式早于 profile 闭包生成。
+  let distributableBuild: BuilderResult | null = null;
+  if (!options.formats.includes('dir')) {
+    const distributableConfigFile = path.join(compiled.outputDir, 'electron-builder.generated.json');
+    writeBuilderConfig(distributableConfigFile, {
+      outputDir,
+      packagedProfileDir,
+      appStagingDir,
+      resolved: compiled.resolved,
+      distribution,
+      targetName,
+      formats: options.formats,
+    });
+    distributableBuild = runBuilder(
+      root,
+      distributableConfigFile,
+      targetName,
+      options.formats,
+      application,
+    );
+    assertRequestedFormats(outputDir, options.formats);
+  }
   process.stdout.write(
-    `${JSON.stringify({ application, profileClosure, runtimeManifest: path.join(compiled.outputDir, 'runtime-manifest.json'), evidence: path.join(compiled.outputDir, 'package-evidence.json'), build: build.command }, null, 2)}\n`,
+    `${JSON.stringify({ application, profileClosure, runtimeManifest: path.join(compiled.outputDir, 'runtime-manifest.json'), evidence: path.join(compiled.outputDir, 'package-evidence.json'), build: { unpacked: unpackedBuild.command, distributable: distributableBuild?.command || null } }, null, 2)}\n`,
   );
 }
 
