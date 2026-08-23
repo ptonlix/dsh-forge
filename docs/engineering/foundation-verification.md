@@ -170,3 +170,21 @@ profile 或因 Tag 隐式发布失败；Actions artifact 由独立 release job �
 electron-builder 另使用 45 分钟预算。macOS Universal 会先生成架构临时应用，再合并应用资源并
 压缩 DMG/zip；profile 闭包只在最终应用生成后复制一次。15 分钟预算可能在第二阶段触发
 `ETIMEDOUT`（status 143），这不代表 native addon 编译失败。
+
+### CI schema 与 Windows 路径修复（2026-08-23）
+
+后续 Tag CI 证明前一轮修复仍有两个实现缺口。macOS 的配置同时包含 Linux/Windows 段，且将
+只接受单个 glob 的 `mac.x64ArchFiles` 写为数组；electron-builder 26 因 schema 校验在打包前
+停止。现在配置生成器只写入本次 runner 的平台段；Universal 保留 `mergeASARs: false`，删除
+无效的 `x64ArchFiles`。profile closure 在 builder 完成后复制，因此不存在需要 builder 合并的
+profile 原生文件。
+
+Windows 的 node-pty 重建此前直接在带 artifact digest 的 profile 路径执行，MSBuild 创建
+native code analysis 与 file tracker 中间文件时出现 C1258/FTK1011。现在脚本将 profile 解引用
+复制到系统临时目录的短路径，仅在该副本中重建；成功后只回写每个 `node-pty/build` 目录到正式
+profile，且在成功、失败或超时后清理临时目录。该修复不改变 lockfile、profile 配置或安装包内
+其他依赖。
+
+本次仅能在本机完成 TypeScript、聚焦测试、electron-builder 配置 schema 和静态门禁验证；尚未
+重新运行 GitHub 的 macOS/Windows 原生 runner。因此真实 Universal 安装包、Windows MSBuild
+重建和三平台 smoke 仍需由下一次 `v*` Tag CI 作为验收证据。

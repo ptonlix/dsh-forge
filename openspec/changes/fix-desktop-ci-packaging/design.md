@@ -9,6 +9,11 @@ macOS Universal 还有一个独立问题：profile 首次物化发生在 arm64 r
 `node-pty`，导致 `@img/sharp-darwin-arm64` 被错误地同时出现在两个 staging 中。lipo 不能把
 两份相同架构文件合并；若没有 x64 optional 包，最终 Universal 应用也无法在 x64 上运行。
 
+后续 CI 验证还暴露了两个构建系统边界：electron-builder 26 会校验配置中的全部平台段，
+而 `mac.x64ArchFiles` 只接受单个 glob，且在 `mergeASARs: false` 时没有作用；Windows 的
+MSBuild 则会在 `node-pty/build` 写入分析与追踪文件，artifact digest 与嵌套依赖路径超过
+其可用路径上限时会以 C1258/FTK1011 失败。
+
 ## Decisions
 
 1. Electron runtime 下载与 native headers 下载分离。builder 继续使用
@@ -39,6 +44,12 @@ macOS Universal 还有一个独立问题：profile 首次物化发生在 arm64 r
    45 分钟。后者覆盖 Universal 临时应用复制、双架构合并、asar 生成和 DMG/zip 压缩。
 10. 发布运行时不再提供 `dsh-forge/runtime` 的根 node_modules 副本；DSH runtime 只从
     `dsh-forge/profile/node_modules` 解析，主进程依赖只存在于 app.asar 的 production closure。
+11. electron-builder 配置只生成当前 runner 对应的 `mac`、`win` 或 `linux` 段。Universal
+    继续使用 `mergeASARs: false`，因为完整 profile closure 在 builder 完成后才复制；删除
+    无效的 `x64ArchFiles`，不再让 builder 合并 profile 内的架构专属文件。
+12. Windows 重建前将 profile 解引用复制到系统临时目录的短根路径。重建成功后，按相对目录
+    逐个替换正式 profile 中对应 `node-pty/build`，不使用临时副本覆盖 lockfile、配置或其他
+    依赖；无论成功、失败或超时都清理临时目录。
 
 ## Risks
 

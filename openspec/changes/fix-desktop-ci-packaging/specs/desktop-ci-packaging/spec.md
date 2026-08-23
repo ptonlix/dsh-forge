@@ -82,6 +82,30 @@ Universal staging SHALL 只复制和保存 node-pty 等原生模块的架构输�
 ripgrep、koffi 等 optional package SHALL 保持独立路径。`node-pty/build/Release` 等 host-specific
 输出 SHALL 在完成重建后删除，避免覆盖另一架构。
 
+### Requirement: builder 配置必须仅声明当前目标平台
+
+打包脚本 SHALL 只向 electron-builder 输出当前 runner 的平台配置段。macOS Universal SHALL
+设置 `mergeASARs: false`，且不得设置 `x64ArchFiles`；profile closure 不参与 builder 的 ASAR
+合并，必须在最终应用生成后再复制。
+
+#### Scenario: macOS Universal 配置校验
+
+- **WHEN** `darwin-universal` 打包生成 electron-builder 配置
+- **THEN** 配置只包含 `mac` 平台段，不包含 `linux`、`win` 或数组形式的 `x64ArchFiles`，并通过
+  当前 electron-builder 版本的 schema 校验。
+
+### Requirement: Windows native rebuild 必须使用短路径 staging
+
+Windows 打包 SHALL 在系统临时目录的短路径副本中执行 `node-pty` 原生重建。重建成功后，脚本
+SHALL 只回写对应 `node-pty/build` 输出至正式 profile，临时副本不得替代正式 profile 的
+lockfile、配置或其余依赖；成功、失败和超时路径均 SHALL 清理临时目录。
+
+#### Scenario: Windows MSBuild 中间文件
+
+- **WHEN** profile artifact 路径包含长 digest 且 `node-pty` 需要为 Electron 重建
+- **THEN** MSBuild 的输出路径位于短临时 staging，不因正式 artifact 的嵌套路径写入 C1258 或
+  FTK1011 失败。
+
 ### Requirement: CI 必须显式声明构建网络策略
 
 工作流 SHALL 为所有 validate/package/summary 相关 profile 命令声明

@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -99,32 +100,25 @@ function builderConfig({
       { from: path.join(artifactDir, 'sbom.input.json'), to: 'dsh-forge/sbom.input.json' },
       { from: path.join(artifactDir, 'THIRD-PARTY-NOTICES.txt'), to: 'dsh-forge/THIRD-PARTY-NOTICES.txt' },
     ],
-    mac: {
-      target: targetName === 'darwin-universal' ? formats : ['dir'],
-      ...(targetName === 'darwin-universal'
-        ? {
-          mergeASARs: false,
-          // profile 内的架构专属 native 包必须保持独立路径，不能尝试 lipo。
-          x64ArchFiles: [
-            '**/node_modules/node-pty/prebuilds/darwin-x64/**',
-            '**/node_modules/@img/sharp-darwin-x64/**',
-            '**/node_modules/@img/sharp-libvips-darwin-x64/**',
-            '**/node_modules/@koromix/koffi-darwin-x64/**',
-            '**/node_modules/@vscode/ripgrep-darwin-x64/**',
-            '**/node_modules/node-addon-require-builtin-darwin-x64/**',
-          ],
-        }
-        : {}),
-    },
-    win: { target: targetName === 'win32-x64' ? formats : ['dir'] },
-    linux: {
-      target: targetName === 'linux-x64' ? formats : ['dir'],
-      category: 'Utility',
-      desktopName: distribution.id,
-      executableName: distribution.id,
-    },
     artifactName: `${distribution.id}-${resolved.profile.name}-${distribution.version}-\${os}-\${arch}.\${ext}`,
   };
+  // electron-builder 会校验整个配置对象。只写入当前 runner 的平台段，避免无关平台的
+  // 字段或版本差异阻断本次构建；Universal 的 profile 闭包在 builder 后复制，不参与 ASAR 合并。
+  if (targetName === 'darwin-universal' || (!targetName && process.platform === 'darwin')) {
+    config.mac = {
+      target: formats,
+      ...(targetName === 'darwin-universal' ? { mergeASARs: false } : {}),
+    };
+  } else if (targetName === 'win32-x64' || (!targetName && process.platform === 'win32')) {
+    config.win = { target: formats };
+  } else if (targetName === 'linux-x64' || (!targetName && process.platform === 'linux')) {
+    config.linux = {
+      target: formats,
+      category: 'Utility',
+      // desktopName 是 app package.json metadata，Linux 配置仅负责同步该名称。
+      syncDesktopName: true,
+    };
+  }
   if (process.env.DSH_FORGE_ELECTRON_ZIP) {
     const electronZip = path.resolve(process.env.DSH_FORGE_ELECTRON_ZIP);
     if (!fs.existsSync(electronZip)) fail(`Electron 压缩包不存在: ${electronZip}`, 'ELECTRON_DIST_MISSING');
@@ -190,7 +184,7 @@ function packageDependencyNames(manifest: Record<string, unknown>): readonly str
  * 生成只包含 Electron 主进程真实入口的物理 production closure。
  * 每个包只复制一次，去掉 pnpm workspace 链接和 profile 专属 DSH 依赖。
  */
-function createDesktopAppStaging(root: string, compiled: CompiledProfile): string {
+function createDesktopAppStaging(root: string, compiled: CompiledProfile, distribution: Distribution): string {
   const staging = path.join(compiled.outputDir, 'desktop-deploy');
   if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
   fs.mkdirSync(path.join(staging, 'node_modules'), { recursive: true, mode: 0o700 });
@@ -238,6 +232,8 @@ function createDesktopAppStaging(root: string, compiled: CompiledProfile): strin
     type: rootPackage.type,
     main: rootPackage.main,
     description: rootPackage.description,
+    // electron-builder 26 从应用 package.json 读取 desktopName；不能放入 linux 配置。
+    desktopName: distribution.id,
     dependencies: Object.fromEntries(
       [...packageNames]
         .filter((name) => (APP_RUNTIME_ROOTS as readonly string[]).includes(name))
@@ -500,6 +496,36 @@ function installUniversalNodePtyPrebuilds(
   }
 }
 
+function profileRelativeDirectory(profileDir: string, directory: string): string {
+  const relative = path.relative(profileDir, directory);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+    fail(`native staging 路径越过 profile 根目录: ${directory}`, 'ELECTRON_REBUILD_FAILED');
+  return relative;
+}
+
+/**
+ * Windows 的 MSBuild 会在 node-pty 源目录写入大量中间文件。artifact digest 加上嵌套依赖
+ * 容易突破其路径上限，因此只在短临时路径重建，并将受控 build 输出回写至正式 profile。
+ */
+function copyWindowsNodePtyBuildOutputs(stagedProfileDir: string, profileDir: string): number {
+  let copied = 0;
+  for (const stagedDirectory of nodePtyDirectories(stagedProfileDir)) {
+    const stagedBuild = path.join(stagedDirectory, 'build');
+    if (!fs.existsSync(stagedBuild) || !fs.statSync(stagedBuild).isDirectory())
+      fail(`Windows node-pty 未生成 build 输出: ${stagedDirectory}`, 'ELECTRON_REBUILD_FAILED');
+    const relativeDirectory = profileRelativeDirectory(stagedProfileDir, stagedDirectory);
+    const profileDirectory = path.join(profileDir, relativeDirectory);
+    if (!fs.existsSync(path.join(profileDirectory, 'package.json')))
+      fail(`Windows profile 缺少 node-pty 目录: ${profileDirectory}`, 'ELECTRON_REBUILD_FAILED');
+    const profileBuild = path.join(profileDirectory, 'build');
+    if (fs.existsSync(profileBuild)) fs.rmSync(profileBuild, { recursive: true, force: true });
+    fs.cpSync(stagedBuild, profileBuild, { recursive: true, dereference: true });
+    copied += 1;
+  }
+  if (!copied) fail('Windows profile 未发现 node-pty 原生模块', 'ELECTRON_REBUILD_FAILED');
+  return copied;
+}
+
 /** 仅重建 profile 闭包内已审计的 node-pty，超时或未发现模块均阻断打包。 */
 function rebuildProfileNativeAddons(
   root: string,
@@ -513,47 +539,56 @@ function rebuildProfileNativeAddons(
   const universal = architectures.length > 1;
   const reports: string[] = [];
   const commands: string[] = [];
-  const universalNativeRoot = universal ? fs.mkdtempSync(path.join(path.dirname(profileDir), 'native-node-pty-')) : null;
-  if (universal) installUniversalProfileDependencies(root, profileDir);
-  for (const architecture of architectures) {
-    const moduleDir = profileDir;
-    const args = [
-      binary,
-      '--version', electronVersion,
-      '--module-dir', moduleDir,
-      '--only', 'node-pty',
-      '--force', '--arch', architecture,
-      '--types', 'prod,optional',
-    ];
-    const rebuildDistUrl = process.env.ELECTRON_REBUILD_DIST_URL || DEFAULT_ELECTRON_REBUILD_DIST_URL;
-    const result = spawnSync(process.execPath, args, {
-      cwd: moduleDir,
-      encoding: 'utf8',
-      timeout: NATIVE_REBUILD_TIMEOUT_MS,
-      env: {
-        ...process.env,
-        ELECTRON_REBUILD_DIST_URL: rebuildDistUrl,
-      },
-    });
-    const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
-    if (result.status !== 0 || result.signal || !output.includes('node-pty'))
-      fail(
-        `Electron native addon 重建失败 (${architecture}): ${spawnFailureMessage(result, output || 'unknown error')}`,
-        'ELECTRON_REBUILD_FAILED',
-        { ...spawnFailureDetails(result), args: args.slice(1), headersUrl: rebuildDistUrl },
-      );
-    reports.push(`[${architecture}] ${output}`);
-    commands.push(`${process.execPath} ${args.join(' ')}`);
-    if (universal) {
-      const captured = rebuildUniversalNodePty(profileDir, architecture, universalNativeRoot!);
-      if (captured === 0) fail(`node-pty ${architecture} 未生成 native 输出`, 'ELECTRON_REBUILD_FAILED');
+  const universalNativeRoot = universal && process.platform === 'darwin'
+    ? fs.mkdtempSync(path.join(path.dirname(profileDir), 'native-node-pty-'))
+    : null;
+  const windowsStagingRoot = process.platform === 'win32'
+    ? fs.mkdtempSync(path.join(os.tmpdir(), 'dshf-native-'))
+    : null;
+  const moduleDir = windowsStagingRoot ? path.join(windowsStagingRoot, 'p') : profileDir;
+  try {
+    if (windowsStagingRoot) fs.cpSync(profileDir, moduleDir, { recursive: true, dereference: true });
+    if (universal) installUniversalProfileDependencies(root, profileDir);
+    for (const architecture of architectures) {
+      const args = [
+        binary,
+        '--version', electronVersion,
+        '--module-dir', moduleDir,
+        '--only', 'node-pty',
+        '--force', '--arch', architecture,
+        '--types', 'prod,optional',
+      ];
+      const rebuildDistUrl = process.env.ELECTRON_REBUILD_DIST_URL || DEFAULT_ELECTRON_REBUILD_DIST_URL;
+      const result = spawnSync(process.execPath, args, {
+        cwd: moduleDir,
+        encoding: 'utf8',
+        timeout: NATIVE_REBUILD_TIMEOUT_MS,
+        env: {
+          ...process.env,
+          ELECTRON_REBUILD_DIST_URL: rebuildDistUrl,
+        },
+      });
+      const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
+      if (result.status !== 0 || result.signal || !output.includes('node-pty'))
+        fail(
+          `Electron native addon 重建失败 (${architecture}): ${spawnFailureMessage(result, output || 'unknown error')}`,
+          'ELECTRON_REBUILD_FAILED',
+          { ...spawnFailureDetails(result), args: args.slice(1), headersUrl: rebuildDistUrl },
+        );
+      reports.push(`[${architecture}] ${output}`);
+      commands.push(`${process.execPath} ${args.join(' ')}`);
+      if (universal) {
+        const captured = rebuildUniversalNodePty(profileDir, architecture, universalNativeRoot!);
+        if (captured === 0) fail(`node-pty ${architecture} 未生成 native 输出`, 'ELECTRON_REBUILD_FAILED');
+      }
     }
+    if (universalNativeRoot) installUniversalNodePtyPrebuilds(profileDir, universalNativeRoot, architectures);
+    if (windowsStagingRoot) copyWindowsNodePtyBuildOutputs(moduleDir, profileDir);
+    return { command: commands.join(' && '), output: reports.join('\n'), electronAbi: abi, architectures: architectures.slice() };
+  } finally {
+    if (universalNativeRoot) fs.rmSync(universalNativeRoot, { recursive: true, force: true });
+    if (windowsStagingRoot) fs.rmSync(windowsStagingRoot, { recursive: true, force: true });
   }
-  if (universal && process.platform === 'darwin') {
-    installUniversalNodePtyPrebuilds(profileDir, universalNativeRoot!, architectures);
-    fs.rmSync(universalNativeRoot!, { recursive: true, force: true });
-  }
-  return { command: commands.join(' && '), output: reports.join('\n'), electronAbi: abi, architectures: architectures.slice() };
 }
 
 /** 调用 electron-builder；Universal 产物允许 45 分钟复制、合并和压缩预算。 */
@@ -733,7 +768,7 @@ function main(): void {
     target.architectures,
   );
   const packagedProfileDir = materializePackagedProfile(compiled);
-  const appStagingDir = createDesktopAppStaging(root, compiled);
+  const appStagingDir = createDesktopAppStaging(root, compiled, distribution);
   const outputDir = path.join(compiled.outputDir, 'desktop-dist');
   fs.mkdirSync(outputDir, { recursive: true, mode: 0o700 });
   const configFile = path.join(compiled.outputDir, 'electron-builder.generated.json');

@@ -20,5 +20,6 @@
 - [x] 3.1 生成独立 desktop-deploy production closure，移除根 node_modules runtime 副本
 - [x] 3.2 builder 阶段只复制 profile 配置，最终应用生成后复制一次 profile 闭包
 - [x] 3.3 将 Universal native staging 限制为 node-pty 输出并清理 host-specific build
-- [x] 3.4 配置 Universal mergeASARs/x64ArchFiles，保留架构专属 optional native 包
+- [x] 3.4 配置 Universal 仅生成 mac 平台段并关闭 mergeASARs，保留架构专属 optional native 包
 - [x] 3.5 删除 CI package job 中重复的 build/profile resolve/verify 步骤
+- [x] 3.6 在 Windows 短临时路径重建 node-pty，并仅回写 build 输出

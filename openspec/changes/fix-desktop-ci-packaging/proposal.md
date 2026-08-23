@@ -19,6 +19,10 @@ SHASUMS 的通用 Electron 镜像，node-gyp 因远端校验值为空拒绝 Elec
   的 Actions artifact。
 - 为 Linux/Windows 显式设置不含 scope 的可执行文件名，避免 electron-builder 从根 package
   名称推导出非法路径。
+- 只向 electron-builder 写入当前目标平台的配置，并移除 Universal 下无效的
+  `x64ArchFiles` 数组，避免 schema 校验先被无关平台或无效字段阻断。
+- Windows 在短临时路径中重建 `node-pty`，只将受控 `build` 输出回写正式 profile，避免
+  MSBuild 在 artifact digest 与嵌套依赖构成的长路径中创建中间文件失败。
 - 将 profile 临时物化的 pnpm 安装超时提高到 15 分钟，并保留超时、signal 和安装输出诊断。
 - 将 electron-builder 的产物复制、Universal 合并和压缩预算提高到 45 分钟，避免大体积
   profile 在 macOS Universal 第二阶段被脚本误杀。

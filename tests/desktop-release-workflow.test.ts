@@ -107,6 +107,12 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain('npmRebuild: false');
     expect(packagingSource).toContain('executableName: distribution.id');
     expect(packagingSource).toContain('desktopName: distribution.id');
+    expect(packagingSource).toContain('syncDesktopName: true');
+    expect(packagingSource).not.toContain('desktopName: distribution.id,\n      executableName: distribution.id');
+    expect(packagingSource).not.toContain('x64ArchFiles');
+    expect(packagingSource).toContain("targetName === 'darwin-universal' || (!targetName && process.platform === 'darwin')");
+    expect(packagingSource).toContain('copyWindowsNodePtyBuildOutputs');
+    expect(packagingSource).toContain("fs.mkdtempSync(path.join(os.tmpdir(), 'dshf-native-'))");
     expect(packagingSource).toContain("'--publish', 'never'");
     expect(packagingSource).toContain("'--os=darwin'");
     expect(packagingSource).toContain("'--cpu=arm64'");
