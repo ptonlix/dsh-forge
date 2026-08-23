@@ -92,6 +92,17 @@ macOS 生成 `dmg,zip`，产物名中的架构固定为 `universal`；Windows �
 版本；不缓存 `artifacts/`、`dist/`、native 二进制或最终安装包。重跑会生成新的 run-scoped
 artifact，不覆盖源文件。
 
+### 7. 跨平台 CLI 入口与长耗时构建
+
+Node 工具不得直接执行 pnpm 的 `node_modules/.bin` shim。profile composer 通过固定依赖的
+package manifest 解析 `@deepseek-ai/dsh` 的 JS bin，再由当前 Node runtime 执行；桌面打包脚本
+通过 Electron package 返回的真实 runtime 获取 ABI，并通过真实 `electron-builder` JS CLI
+启动构建。ABI 检查子进程清理继承的 `NODE_OPTIONS`，避免 tsx loader 污染 Electron 输出。
+
+原生重建和 electron-builder 允许首次下载、缓存未命中及 macOS Universal 合并耗时；builder
+超时提高到 15 分钟。所有失败统一记录 `spawnSync.error`、status、signal 以及有长度上限的
+stdout/stderr，既保留诊断又避免把环境或凭据无限写入日志。
+
 ## Risks / Trade-offs
 
 - [GitHub runner label 或镜像工具链变化] -> `pnpm 11.7.0` 要求 Node `>=22.13`，workflow

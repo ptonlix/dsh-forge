@@ -29,3 +29,9 @@
 ## 6. 干净检出 typecheck
 
 - [x] 6.1 让根 typecheck 在检查应用前构建 workspace 类型出口，验证 fresh CI 不依赖未跟踪的 dist 声明文件
+
+## 7. 跨平台子进程与打包稳定性
+
+- [x] 7.1 统一解析真实 DSH、Electron 和 electron-builder 入口，移除对 pnpm `.bin` shim 的依赖
+- [x] 7.2 保留 spawnSync 启动错误、状态、signal 和截断输出，清理 ABI 子进程的 NODE_OPTIONS
+- [x] 7.3 将 electron-builder 超时提高到 15 分钟，补充入口解析与诊断回归测试

@@ -17,6 +17,7 @@
     "./acceptance": "./dist/acceptance/index.js",
     "./core/digest": "./dist/core/digest.js",
     "./core/errors": "./dist/core/errors.js",
+    "./core/process": "./dist/core/process.js",
     "./core/yaml": "./dist/core/yaml.js",
     "./schema": "./dist/core/schema.js",
     "./release": "./dist/release/index.js",

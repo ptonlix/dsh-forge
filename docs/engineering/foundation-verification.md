@@ -120,3 +120,16 @@ release job 才会请求 `contents: write`。
 当前仍未配置或执行代码签名、公证和 Windows Authenticode。unsigned smoke artifact 可以用于
 诊断和平台验证，但 `release:gate` 会拒绝未签名或缺少更新信任根的生产 Release。Linux 只承诺
 Ubuntu LTS x64；未覆盖 ARM Linux、其他发行版和跨平台交叉编译。
+
+### 跨平台打包入口诊断（2026-08-22）
+
+桌面打包脚本不直接执行 pnpm 的 `node_modules/.bin` shim。profile composer 通过
+`@deepseek-ai/dsh` 的 package manifest 解析真实 JS bin，Electron ABI 检查使用 Electron
+package 返回的真实 runtime，electron-builder 使用其真实 JS CLI。ABI 子进程会清理继承的
+`NODE_OPTIONS`，启动失败保留状态、signal、错误码以及截断后的 stdout/stderr；首次构建和
+Universal 合并允许较长的 builder 超时。
+
+本机 macOS ARM64 已验证 Electron `43.4.0` 输出 ABI `148`，并越过 ABI 检查进入 Universal
+native rebuild。完整 Universal 构建未在本机完成，因为环境缺少 Xcode Command Line Tools；
+GitHub `macos-14` runner 仍需执行 native rebuild 和真实安装包 smoke。Windows 的真实 runner
+验证同样仍需通过 CI 完成。

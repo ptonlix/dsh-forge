@@ -7,6 +7,12 @@ import { writeConfigDump } from '@dsh-forge/profile-toolchain/composer';
 import { parseDistribution } from '@dsh-forge/profile-toolchain/schema';
 import { createRuntimeManifest, generateEvidence } from '@dsh-forge/profile-toolchain/release';
 import { fail } from '@dsh-forge/profile-toolchain/core/errors';
+import {
+  resolveElectronBinary,
+  resolvePackageBin,
+  spawnFailureDetails,
+  spawnFailureMessage,
+} from '@dsh-forge/profile-toolchain/core/process';
 import { errorCode, errorMessage } from '@dsh-forge/profile-toolchain/types';
 import type { CompiledProfile } from '@dsh-forge/profile-toolchain/compiler';
 import type { Distribution, RuntimePlatform } from '@dsh-forge/profile-toolchain/schema';
@@ -208,21 +214,27 @@ function parseOptions(argv: readonly string[], distribution: Distribution): Pack
 
 /** 读取实际 Electron runtime 的 ABI，禁止以构建 Node 的 ABI 冒充目标 ABI。 */
 function electronAbi(root: string, expectedVersion: string): string {
-  const binary = path.join(root, 'node_modules', '.bin', 'electron');
-  if (!fs.existsSync(binary)) fail('未安装 Electron runtime', 'ELECTRON_RUNTIME_MISSING');
+  let binary: string;
+  try {
+    binary = resolveElectronBinary(root);
+  } catch (error) {
+    fail(`未安装 Electron runtime: ${errorMessage(error)}`, 'ELECTRON_RUNTIME_MISSING');
+  }
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+  delete childEnv.NODE_OPTIONS;
   const result = spawnSync(binary, ['-p', 'JSON.stringify({ electron: process.versions.electron, abi: process.versions.modules })'], {
     cwd: root,
     encoding: 'utf8',
-    timeout: 10_000,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    timeout: 30_000,
+    env: childEnv,
   });
   if (result.status !== 0)
-    fail(`无法读取 Electron ABI: ${(result.stderr || result.stdout || result.signal || 'unknown error').trim()}`, 'ELECTRON_ABI');
+    fail(`无法读取 Electron ABI: ${spawnFailureMessage(result, 'unknown error')}`, 'ELECTRON_ABI', spawnFailureDetails(result));
   let value: { electron?: unknown; abi?: unknown };
   try {
     value = JSON.parse(result.stdout.trim()) as { electron?: unknown; abi?: unknown };
   } catch {
-    fail('Electron ABI 输出无效', 'ELECTRON_ABI');
+    fail(`Electron ABI 输出无效: ${spawnFailureMessage(result, 'stdout 为空或不是 JSON')}`, 'ELECTRON_ABI', spawnFailureDetails(result));
   }
   if (value.electron !== expectedVersion || typeof value.abi !== 'string' || !/^\d+$/.test(value.abi))
     fail(`Electron runtime 与 profile 不一致: ${String(value.electron)} / ${expectedVersion}`, 'ELECTRON_ABI');
@@ -316,35 +328,38 @@ function runBuilder(
   targetName: DesktopTargetName | undefined,
   formats: readonly PackageFormat[],
 ): BuilderResult {
-  const binary = path.join(root, 'node_modules', '.bin', 'electron-builder');
-  if (!fs.existsSync(binary)) fail('未安装 electron-builder', 'ELECTRON_BUILDER_MISSING');
+  let binary: string;
+  try {
+    binary = resolvePackageBin(root, 'electron-builder', 'electron-builder');
+  } catch (error) {
+    fail(`未安装 electron-builder: ${errorMessage(error)}`, 'ELECTRON_BUILDER_MISSING');
+  }
   const args = ['--config', configFile];
   const builderFormats = formats.length ? formats : ['dir'];
   if (process.platform === 'darwin') args.push('--mac', ...builderFormats, ...(targetName === 'darwin-universal' ? ['--universal'] : [process.arch === 'arm64' ? '--arm64' : '--x64']));
   else if (process.platform === 'win32') args.push('--win', ...builderFormats, '--x64');
   else if (process.platform === 'linux') args.push('--linux', ...builderFormats, '--x64');
   else fail(`当前平台不支持桌面产物构建: ${process.platform}`, 'PACKAGE_TARGET_UNSUPPORTED');
-  const result = spawnSync(binary, args, {
+  const builderCli = binary;
+  const builderEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+    ELECTRON_MIRROR: process.env.ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/',
+  };
+  delete builderEnv.NODE_OPTIONS;
+  const result = spawnSync(process.execPath, [builderCli, ...args], {
     cwd: root,
     encoding: 'utf8',
-    timeout: 60_000,
-    env: {
-      ...process.env,
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false',
-      ELECTRON_MIRROR: process.env.ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/',
-    },
+    timeout: 15 * 60_000,
+    env: builderEnv,
   });
   if (result.status !== 0)
     fail(
-      `Electron Builder 失败: ${(result.stderr || result.stdout || 'unknown error').trim()}`,
+      `Electron Builder 失败: ${spawnFailureMessage(result, 'unknown error')}`,
       'ELECTRON_BUILDER_FAILED',
-      {
-        args,
-        status: result.status,
-        signal: result.signal,
-      },
+      { ...spawnFailureDetails(result), args },
     );
-  return { command: `${binary} ${args.join(' ')}`, output: (result.stdout || result.stderr || '').trim() };
+  return { command: `${process.execPath} ${builderCli} ${args.join(' ')}`, output: (result.stdout || result.stderr || '').trim() };
 }
 
 /** 在构建输出中定位平台应用目录，找不到时阻止生成 runtime manifest。 */
