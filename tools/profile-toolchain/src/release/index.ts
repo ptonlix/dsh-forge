@@ -374,15 +374,17 @@ function packageEntryExists(paths: RuntimePaths | null, packageName: string): bo
   }
 }
 
-function runtimeDistributionId(manifest: RuntimeManifest): string | null {
+function runtimeExecutableName(manifest: RuntimeManifest): string | null {
   const distribution = manifest.distribution;
   if (!distribution || typeof distribution !== 'object' || Array.isArray(distribution)) return null;
-  const id = (distribution as Record<string, unknown>).id;
-  return typeof id === 'string' && id ? id : null;
+  const branding = (distribution as Record<string, unknown>).branding;
+  if (!branding || typeof branding !== 'object' || Array.isArray(branding)) return null;
+  const productName = (branding as Record<string, unknown>).productName;
+  return typeof productName === 'string' && productName ? productName : null;
 }
 
 /**
- * distribution.id 同时是 electron-builder 的 executableName。Linux 共享库可能带执行位，
+ * branding.productName 同时是 electron-builder 的 executableName。Linux 共享库可能带执行位，
  * 不能从目录中猜测唯一可执行文件，否则动态导入检查会误判 runner 缺失。
  */
 function packagedElectronExecutable(paths: RuntimePaths, executableName: string | null): string | null {
@@ -415,7 +417,7 @@ function inspectProfileDynamicImports(
   manifest: RuntimeManifest,
   failures: InspectionFailure[],
 ): void {
-  const executable = packagedElectronExecutable(paths, runtimeDistributionId(manifest));
+  const executable = packagedElectronExecutable(paths, runtimeExecutableName(manifest));
   if (!executable) {
     failures.push({ code: 'PROFILE_CORDIS_IMPORT_RUNNER_MISSING' });
     return;

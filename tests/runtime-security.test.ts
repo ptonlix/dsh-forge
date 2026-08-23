@@ -46,10 +46,17 @@ describe('桌面 renderer 导航策略', () => {
       ipcMain: ipc,
       shell,
       preload: '/tmp/preload.js',
+      icon: '/tmp/dsh-forge-app-icon.png',
       deadlineMs: 100,
       onClose: (event) => event.preventDefault(),
     });
-    await factory({ url: 'http://127.0.0.1:39123/app', sandbox: true, contextIsolation: true, nodeIntegration: false });
+    await factory({
+      url: 'http://127.0.0.1:39123/app',
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    });
+    expect(windows[0]?.options.icon).toBe('/tmp/dsh-forge-app-icon.png');
     expect(windows[0]?.options.webPreferences).toEqual({
       sandbox: true,
       contextIsolation: true,

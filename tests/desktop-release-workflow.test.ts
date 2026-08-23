@@ -122,13 +122,22 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain('ELECTRON_BUILDER_TIMEOUT_MS = 45 * 60_000');
     expect(packagingSource).toContain('DEFAULT_ELECTRON_REBUILD_DIST_URL =');
     expect(packagingSource).toContain('npmRebuild: false');
-    expect(packagingSource).toContain('executableName: distribution.id');
-    expect(packagingSource).toContain('desktopName: distribution.id');
+    expect(packagingSource).toContain('executableName: distribution.branding.productName');
+    expect(packagingSource).toContain('buildResources: path.join(rootDirectory(), \'build\')');
+    expect(packagingSource).toContain('icon: \'app-icon-mac.png\'');
+    expect(packagingSource).toContain('icon: \'app-icon.png\'');
+    expect(packagingSource).toContain('to: \'dsh-forge/app-icon.png\'');
+    expect(packagingSource).toContain('to: \'dsh-forge/app-icon-mac.png\'');
+    expect(packagingSource).toContain('to: \'dsh-forge/APP-ICON-LICENSE.txt\'');
+    expect(electronMainSource).toContain('packagedResourcePath(\'dsh-forge\', filename)');
+    expect(electronMainSource).toContain('icon: applicationIconPath(root)');
+    expect(packagingSource).toContain('desktopName: distribution.branding.productName');
+    expect(packagingSource).toContain('artifactName: `${distribution.id}-${distribution.version}-\\${os}-\\${arch}.\\${ext}`');
     expect(packagingSource).toContain('syncDesktopName: true');
     expect(packagingSource).toContain('maintainer: distribution.branding.publisher');
     expect(packagingSource).toContain('vendor: distribution.branding.publisher');
     expect(packagingSource).toContain('homepage: rootPackage.homepage');
-    expect(packagingSource).not.toContain('desktopName: distribution.id,\n      executableName: distribution.id');
+    expect(packagingSource).not.toContain('artifactName: `${distribution.id}-${resolved.profile.name}-');
     expect(packagingSource).toContain('MACOS_UNIVERSAL_X64_ARCH_FILES');
     expect(packagingSource).toContain('x64ArchFiles: MACOS_UNIVERSAL_X64_ARCH_FILES');
     expect(packagingSource).toContain('**/*-darwin-*/**');
@@ -137,16 +146,24 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain('copyWindowsNodePtyBuildOutputs');
     expect(packagingSource).toContain("fs.mkdtempSync(path.join(os.tmpdir(), 'dshf-native-'))");
     expect(packagingSource).toContain("'--publish', 'never'");
+    expect(packagingSource).toContain("'--frozen-lockfile',\n    '--os=darwin'");
     expect(packagingSource).toContain("'--os=darwin'");
     expect(packagingSource).toContain("'--cpu=arm64'");
     expect(packagingSource).toContain("'--cpu=x64'");
     expect(packagingSource).toContain('createDesktopAppStaging');
+    expect(packagingSource).toContain("directory !== 'packages' || path.basename(candidate) !== 'node_modules'");
     expect(packagingSource).toContain('PROFILE_ONLY_RUNTIME_PREFIXES');
     expect(packagingSource).toContain('installUniversalNodePtyPrebuilds');
     expect(packagingSource).toContain("asarUnpack: ['**/*.node', '**/helpers/**']");
-    expect(packagingSource).toContain("to: 'dsh-forge/launcher-fallback'");
+    expect(packagingSource).toContain("'!node_modules/**/node-pty/bin/**'");
+    expect(packagingSource).toContain("'!node_modules/**/node-pty/build/**'");
+    expect(packagingSource).toContain("const fallbackSource = path.join(appStagingDir, 'launcher-fallback')");
+    expect(packagingSource).toContain("const fallbackDestination = path.join(resourceRoot, 'dsh-forge', 'launcher-fallback')");
     expect(packagingSource).toContain("const fallbackRoot = path.join(staging, 'launcher-fallback')");
     expect(packagingSource).toContain("'@dsh-forge/desktop-services-local'");
+    expect(packagingSource).toContain('const profileRuntimeExclusions = profileRuntimePackages.map');
+    expect(packagingSource).toContain('...profileRuntimeExclusions');
+    expect(packagingSource).toContain('.filter((name) => !(APP_RUNTIME_ROOTS as readonly string[]).includes(name))');
     expect(electronMainSource).toContain("packagedResourcePath('dsh-forge', 'launcher-fallback')");
     expect(desktopMainSource).toContain('launcherFallbackRoot?: string');
     expect(desktopMainSource).toContain('assertPackageIdentity(destination, packageName);');
@@ -174,19 +191,19 @@ describe('Desktop Release workflow', () => {
     expect(mainSource.indexOf(distributable)).toBeGreaterThan(mainSource.indexOf(closure));
   });
 
-  it('macOS 应用按 electron-builder 的 executableName 定位', () => {
+  it('macOS 应用按统一的 electron-builder executableName 定位', () => {
     expect(packagingSource).toContain('? `${executableName}.app`');
-    expect(packagingSource).toContain('findApplication(unpackedOutputDir, distribution.id)');
+    expect(packagingSource).toContain('findApplication(unpackedOutputDir, distribution.branding.productName)');
     expect(releaseSource).toContain("const machArchitecture = architecture === 'x64' ? 'x86_64' : architecture");
   });
 
-  it('Linux 动态导入与 smoke 按发行版 id 启动主程序', () => {
-    expect(releaseSource).toContain('function runtimeDistributionId(manifest: RuntimeManifest)');
+  it('Linux 动态导入与 smoke 按应用名称启动主程序', () => {
+    expect(releaseSource).toContain('function runtimeExecutableName(manifest: RuntimeManifest)');
     expect(releaseSource).toContain("? path.join(paths.application, 'Contents', 'MacOS', executableName)");
     expect(releaseSource).toContain('? path.join(paths.application, executableName)');
     expect(releaseSource).not.toContain("name === 'chrome-sandbox'");
     expect(smokeSource).toContain('function applicationExecutable(application: string, executableName: string)');
-    expect(smokeSource).toContain("applicationExecutable(runtime.packageRoot || '', distribution.id)");
+    expect(smokeSource).toContain("applicationExecutable(runtime.packageRoot || '', distribution.branding.productName)");
     expect(source).toContain("if: ${{ matrix.target == 'linux-x64' }}");
     expect(source).toContain('command -v xvfb-run');
     expect(source).toContain('xvfb-run --auto-servernum --server-args="-screen 0 1280x860x24 -nolisten tcp"');

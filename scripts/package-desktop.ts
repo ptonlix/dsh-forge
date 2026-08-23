@@ -26,7 +26,8 @@ interface BuilderConfigInput {
   readonly packagedProfileDir: string;
   /** 独立的 Electron 应用 staging，包含唯一一棵生产依赖闭包。 */
   readonly appStagingDir: string;
-  readonly resolved: CompiledProfile['resolved'];
+  /** profile 运行时闭包只允许位于 resources，不能被 builder 再次放入 app.asar。 */
+  readonly profileRuntimePackages: readonly string[];
   readonly distribution: Distribution;
   readonly targetName?: DesktopTargetName;
   readonly formats: readonly PackageFormat[];
@@ -81,18 +82,24 @@ function builderConfig({
   outputDir,
   packagedProfileDir,
   appStagingDir,
-  resolved,
+  profileRuntimePackages,
   distribution,
   targetName,
   formats,
 }: BuilderConfigInput): Record<string, unknown> {
   const artifactDir = path.dirname(packagedProfileDir);
+  const profileRuntimeExclusions = profileRuntimePackages.map((name) => `!node_modules/${name}/**`);
   const config: Record<string, unknown> = {
     appId: distribution.applicationId,
     productName: distribution.branding.productName,
-    // 根 package 名称带 scope，不能让 builder 推导出非法的 Linux/Windows 文件名。
-    executableName: distribution.id,
-    directories: { app: appStagingDir, output: outputDir },
+    // 应用 bundle、主程序和 Linux desktop entry 统一使用发行 branding 名称。
+    executableName: distribution.branding.productName,
+    directories: {
+      app: appStagingDir,
+      output: outputDir,
+      // 应用 staging 不复制仓库 build 资源；图标从唯一的受控资源目录读取。
+      buildResources: path.join(rootDirectory(), 'build'),
+    },
     asar: true,
     // native addon 已由本脚本按 Electron ABI 重建，禁止 builder 再次修改 profile 闭包。
     npmRebuild: false,
@@ -104,27 +111,36 @@ function builderConfig({
       'catalog/**',
       'package.json',
       'distribution.yml',
-      'node_modules/**',
+      // builder 会递归 app package 依赖；profile 闭包只能从 resources 解析，不能重复进入 app.asar。
+      ...profileRuntimeExclusions,
+      // node-pty 当前 loader 只从 build/Release 与 prebuilds 解析 native addon；旧式
+      // bin/<platform>-<arch>-<abi> 预编译文件不参与运行时，却会阻断 Universal 合并。
+      '!node_modules/**/node-pty/bin/**',
+      // Universal runtime 必须从受控生成的 prebuilds 读取；遗留 build 输出可能保留
+      // 构建机架构，且在 loader 中优先于正确的 prebuilds 被加载。
+      '!node_modules/**/node-pty/build/**',
       '!node_modules/.cache/**',
       '!node_modules/**/.pnpm-store/**',
     ],
     extraResources: [
       // profile 配置在 builder 阶段进入资源；node_modules 在最终 app 生成后只复制一次。
       { from: packagedProfileDir, to: 'dsh-forge/profile', filter: ['**/*'] },
-      // app.asar 不能作为 DSH Home 中模块链接的稳定文件系统目标。将 launcher 临时注入的
-      // 两个包保留在 resources 的真实目录，启动时再物化到受管 profile。
-      { from: path.join(appStagingDir, 'launcher-fallback'), to: 'dsh-forge/launcher-fallback', filter: ['**/*'] },
       { from: path.join(artifactDir, 'resolved-manifest.json'), to: 'dsh-forge/resolved-manifest.json' },
       { from: path.join(artifactDir, 'sbom.input.json'), to: 'dsh-forge/sbom.input.json' },
       { from: path.join(artifactDir, 'THIRD-PARTY-NOTICES.txt'), to: 'dsh-forge/THIRD-PARTY-NOTICES.txt' },
+      // 窗口运行时与安装包图标共享同一资源，并随包保留其上游许可。
+      { from: path.join(rootDirectory(), 'build', 'app-icon.png'), to: 'dsh-forge/app-icon.png' },
+      { from: path.join(rootDirectory(), 'build', 'app-icon-mac.png'), to: 'dsh-forge/app-icon-mac.png' },
+      { from: path.join(rootDirectory(), 'build', 'APP-ICON-LICENSE.txt'), to: 'dsh-forge/APP-ICON-LICENSE.txt' },
     ],
-    artifactName: `${distribution.id}-${resolved.profile.name}-${distribution.version}-\${os}-\${arch}.\${ext}`,
+    artifactName: `${distribution.id}-${distribution.version}-\${os}-\${arch}.\${ext}`,
   };
   // electron-builder 会校验整个配置对象。只写入当前 runner 的平台段，避免无关平台的
   // 字段或版本差异阻断本次构建；Universal 的 profile 闭包在 builder 后复制，不参与 ASAR 合并。
   if (targetName === 'darwin-universal' || (!targetName && process.platform === 'darwin')) {
     config.mac = {
       target: formats,
+      icon: 'app-icon-mac.png',
       ...(targetName === 'darwin-universal'
         ? {
           mergeASARs: false,
@@ -133,10 +149,11 @@ function builderConfig({
         : {}),
     };
   } else if (targetName === 'win32-x64' || (!targetName && process.platform === 'win32')) {
-    config.win = { target: formats };
+    config.win = { target: formats, icon: 'app-icon.png' };
   } else if (targetName === 'linux-x64' || (!targetName && process.platform === 'linux')) {
     config.linux = {
       target: formats,
+      icon: 'app-icon.png',
       category: 'Utility',
       // FPM 生成 deb 控制文件需要维护者；发行身份由 distribution 统一提供。
       maintainer: distribution.branding.publisher,
@@ -221,7 +238,12 @@ function createDesktopAppStaging(root: string, compiled: CompiledProfile, distri
   for (const directory of ['dist', 'packages', 'catalog']) {
     const source = path.join(root, directory);
     if (!fs.existsSync(source)) fail(`应用 staging 缺少 ${directory}`, 'PACKAGE_APP_STAGING_MISSING');
-    fs.cpSync(source, path.join(staging, directory), { recursive: true, dereference: true });
+    fs.cpSync(source, path.join(staging, directory), {
+      recursive: true,
+      dereference: true,
+      // bundle 下的 node_modules 仅是工作区开发态链接；运行时闭包由下面的 packageNames 单独物化。
+      filter: (candidate) => directory !== 'packages' || path.basename(candidate) !== 'node_modules',
+    });
   }
   for (const file of ['distribution.yml']) fs.copyFileSync(path.join(root, file), path.join(staging, file));
 
@@ -264,7 +286,7 @@ function createDesktopAppStaging(root: string, compiled: CompiledProfile, distri
     description: rootPackage.description,
     homepage: rootPackage.homepage,
     // electron-builder 26 从应用 package.json 读取 desktopName；不能放入 linux 配置。
-    desktopName: distribution.id,
+    desktopName: distribution.branding.productName,
     dependencies: Object.fromEntries(
       [...packageNames]
         .filter((name) => (APP_RUNTIME_ROOTS as readonly string[]).includes(name))
@@ -428,13 +450,13 @@ function installUniversalProfileDependencies(root: string, profileDir: string): 
   if (fs.existsSync(nodeModules)) fs.rmSync(nodeModules, { recursive: true, force: true });
   const binary = profilePnpmBinary(root);
   // pnpm 11 已将 supportedArchitectures 从 package.json 迁移为 CLI 选项；重复
-  // --cpu 会让同一份 profile 同时保留 arm64 与 x64 的 optionalDependencies。
+  // --cpu 会让同一份 profile 同时保留 arm64 与 x64 的 optionalDependencies。不得使用
+  // --force，它会绕过 OS/CPU 条件并把其他平台的 optionalDependencies 一并安装。
   const installArgs = [
     binary,
     'install',
     '--prefer-offline',
     '--frozen-lockfile',
-    '--force',
     '--os=darwin',
     '--cpu=arm64',
     '--cpu=x64',
@@ -750,11 +772,12 @@ function copyPackagedProfileClosure(
   const source = path.join(compiled.profileDir, 'node_modules');
   if (!fs.existsSync(source) || !fs.statSync(source).isDirectory())
     fail('打包 profile staging 缺少 node_modules 闭包', 'PACKAGE_PROFILE_CLOSURE_MISSING');
-  const profile = process.platform === 'darwin'
-    ? path.join(application, 'Contents', 'Resources', 'dsh-forge', 'profile')
+  const resourceRoot = process.platform === 'darwin'
+    ? path.join(application, 'Contents', 'Resources')
     : process.platform === 'win32'
-      ? path.join(path.dirname(application), 'resources', 'dsh-forge', 'profile')
-      : path.join(application, 'resources', 'dsh-forge', 'profile');
+      ? path.join(path.dirname(application), 'resources')
+      : path.join(application, 'resources');
+  const profile = path.join(resourceRoot, 'dsh-forge', 'profile');
   if (!fs.existsSync(path.join(profile, 'package.json')))
     fail(`最终应用缺少 profile 资源目录: ${profile}`, 'PACKAGED_PROFILE_MISSING');
   const destination = path.join(profile, 'node_modules');
@@ -787,6 +810,21 @@ function copyPackagedProfileClosure(
   for (const dependency of compiled.dependencyClosure) {
     if (!packageDirectoryFromAnchor(anchor, dependency.name))
       fail(`最终应用缺少 profile 依赖闭包: ${dependency.name}`, 'PACKAGE_PROFILE_CLOSURE_MISSING');
+  }
+  // electron-builder 会过滤 extraResources 中的 node_modules，不能让它复制 launcher
+  // fallback。目录产物完成 Universal 合并后，在真实 Resources 根物化完整 fallback，
+  // 后续 --prepackaged 封装会原样复用此应用。
+  const fallbackSource = path.join(appStagingDir, 'launcher-fallback');
+  const fallbackDestination = path.join(resourceRoot, 'dsh-forge', 'launcher-fallback');
+  if (!fs.existsSync(path.join(fallbackSource, 'package.json')))
+    fail('应用 staging 缺少 launcher fallback', 'PACKAGE_APP_CLOSURE_MISSING');
+  if (fs.existsSync(fallbackDestination)) fs.rmSync(fallbackDestination, { recursive: true, force: true });
+  fs.cpSync(fallbackSource, fallbackDestination, { recursive: true, dereference: true });
+  assertNoSymbolicLinks(fallbackDestination);
+  const fallbackAnchor = path.join(fallbackDestination, 'package.json');
+  for (const packageName of ['@dsh-forge/desktop-layer', '@dsh-forge/desktop-services-local']) {
+    if (!packageDirectoryFromAnchor(fallbackAnchor, packageName))
+      fail(`最终应用缺少 launcher fallback 包: ${packageName}`, 'PACKAGE_APP_CLOSURE_MISSING');
   }
   return destination;
 }
@@ -831,14 +869,16 @@ function main(): void {
     outputDir: unpackedOutputDir,
     packagedProfileDir,
     appStagingDir,
-    resolved: compiled.resolved,
+    profileRuntimePackages: compiled.dependencyClosure
+      .map((dependency) => dependency.name)
+      .filter((name) => !(APP_RUNTIME_ROOTS as readonly string[]).includes(name)),
     distribution,
     targetName,
     formats: ['dir'],
   });
   // 先得到短路径的已解包应用，再注入完整 profile 闭包；此阶段不生成可分发安装包。
   const unpackedBuild = runBuilder(root, unpackedConfigFile, targetName, ['dir']);
-  const application = findApplication(unpackedOutputDir, distribution.id);
+  const application = findApplication(unpackedOutputDir, distribution.branding.productName);
   if (targetName === 'darwin-universal') assertUniversalApplication(application);
   const profileClosure = copyPackagedProfileClosure(compiled, appStagingDir, application);
   const runtime = createRuntimeManifest({
@@ -865,7 +905,9 @@ function main(): void {
       outputDir,
       packagedProfileDir,
       appStagingDir,
-      resolved: compiled.resolved,
+      profileRuntimePackages: compiled.dependencyClosure
+        .map((dependency) => dependency.name)
+        .filter((name) => !(APP_RUNTIME_ROOTS as readonly string[]).includes(name)),
       distribution,
       targetName,
       formats: options.formats,

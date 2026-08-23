@@ -84,7 +84,7 @@ export interface ResolvedManifest {
   };
   readonly distribution: Pick<
     Distribution,
-    'id' | 'name' | 'applicationId' | 'version' | 'packageScope' | 'channel' | 'platforms' | 'updates'
+    'id' | 'name' | 'applicationId' | 'version' | 'packageScope' | 'channel' | 'platforms' | 'updates' | 'branding'
   >;
   readonly profile: Pick<Profile, 'name' | 'runtime' | 'bundles'>;
   readonly bundles: readonly Record<string, unknown>[];
@@ -466,6 +466,7 @@ function inputSummary(
       id: distribution.id,
       version: distribution.version,
       applicationId: distribution.applicationId,
+      branding: distribution.branding,
       platforms: distribution.platforms,
       updates: distribution.updates,
     },
@@ -818,6 +819,7 @@ export function compileProfile({
       id: distribution.id,
       name: distribution.name,
       applicationId: distribution.applicationId,
+      branding: distribution.branding,
       version: distribution.version,
       packageScope: distribution.packageScope,
       channel: distribution.channel,

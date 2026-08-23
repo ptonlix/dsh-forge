@@ -19,14 +19,16 @@
 ### Requirement: Universal native 依赖必须按架构隔离
 
 macOS Universal SHALL 为 profile staging 安装 lockfile 声明的 arm64 和 x64 optional native
-依赖。合并器 SHALL 只对一份 arm64 Mach-O 和一份 x86_64 Mach-O 执行 lipo；相同架构文件或
-架构专属 package 路径不得重复合并。
+依赖，且不得安装 Linux、Windows、BSD 等非 Darwin 平台的 optional native 包。合并器 SHALL
+只对一份 arm64 Mach-O 和一份 x86_64 Mach-O 执行 lipo；相同架构文件或架构专属 package
+路径不得重复合并。
 
 #### Scenario: sharp optional package
 
 - **WHEN** profile 同时包含 `@img/sharp-darwin-arm64` 和 `@img/sharp-darwin-x64`
 - **THEN** Universal 产物保留两套 package，并按 Electron `process.arch` 选择对应文件；不因
   同一 staging 中的相同架构文件触发 lipo 失败。
+- **AND** 不得包含 `@img/sharp-linux-*`、`@img/sharp-win32-*` 等非 Darwin package。
 
 ### Requirement: builder 不得重复重建 native addon
 
@@ -45,8 +47,22 @@ electron-builder SHALL 使用 `--publish never`。Tag package job 只生成并�
 
 ### Requirement: 跨平台产物必须使用安全可执行文件名
 
-electron-builder 配置 SHALL 使用不含 `@`、`/` 等 scope 字符的发行版 id 作为
-`executableName`；Linux SHALL 同时设置相同的 `desktopName`。
+electron-builder 配置 SHALL 使用 `distribution.branding.productName` 作为 `executableName`；
+Linux SHALL 同时设置相同的 `desktopName`。发行安装包文件名 SHALL 仅包含稳定的发行版 id、
+版本、平台和架构，不得重复 profile 名称。
+
+### Requirement: 安装包与窗口必须使用受控应用图标
+
+打包配置 SHALL 从仓库 `build/` 读取应用图标。macOS SHALL 使用带 Dock 安全边距的
+`app-icon-mac.png`，Windows 与 Linux SHALL 使用 `app-icon.png`。两份图标及其许可 SHALL
+作为 `resources/dsh-forge` 的资源随应用交付；主进程 SHALL 将当前平台图标的真实路径传给
+`BrowserWindow`，不得回退为 Electron 默认图标。
+
+#### Scenario: Windows 已安装应用创建主窗口
+
+- **WHEN** Windows 打包应用创建主窗口
+- **THEN** BrowserWindow 使用 `resources/dsh-forge/app-icon.png`
+- **AND** Windows 可执行文件和安装包使用相同的图标源。
 
 ### Requirement: profile 安装必须容纳首次下载
 
@@ -75,6 +91,10 @@ profile lock 解析 SHALL 保持 offline；物化安装 SHALL 使用 frozen lock
 不得把 workspace 根 `node_modules` 再复制到第二个 runtime 目录。builder 阶段的 profile
 资源 SHALL 只包含配置文件，完整 profile `node_modules` SHALL 在最终应用生成后复制一次。
 打包应用启动时，DSH runtime SHALL 从 `dsh-forge/profile/node_modules` 解析。
+
+electron-builder 的 `files` SHALL 排除已解析 profile 的完整 dependency closure；主应用依赖
+SHALL 由独立 staging 的 package.json 生产闭包解析，避免 pnpm workspace 根递归依赖时把 profile
+runtime 复制进 `app.asar`。属于主应用 production closure 的包不得被排除。
 
 ### Requirement: Universal native staging 必须限制在原生模块
 
@@ -211,13 +231,12 @@ electron-builder 的 `--prepackaged` 从该已解包应用封装分发格式；�
 
 #### Scenario: macOS Universal 已解包应用定位
 
-- **WHEN** `darwin-universal` 设置安全的 `executableName` 为发行版 id
-- **THEN** 脚本以该 id 对应的 `<executableName>.app` 定位第一阶段产物
-- **AND** 不得将展示名称 `productName` 误认为 `.app` 文件名。
+- **WHEN** `darwin-universal` 设置 `executableName` 为 `distribution.branding.productName`
+- **THEN** 脚本以该名称对应的 `<executableName>.app` 定位第一阶段产物。
 
-### Requirement: 平台检查必须按发行版 id 定位主程序
+### Requirement: 平台检查必须按应用名称定位主程序
 
-package inspect 与 smoke SHALL 使用 runtime manifest 或当前 distribution 的 `id` 作为
+package inspect 与 smoke SHALL 使用 runtime manifest 或当前 distribution 的 `branding.productName` 作为
 electron-builder `executableName`，按平台精确定位主程序。Linux SHALL 不得通过文件执行位
 推断主程序，因为 Electron 共享库和 helper 可以带执行位。找不到该精确入口时，动态 Cordis
 导入检查与 smoke SHALL 失败。
@@ -225,5 +244,5 @@ electron-builder `executableName`，按平台精确定位主程序。Linux SHALL
 #### Scenario: Linux 共享库带执行位
 
 - **WHEN** Linux 已解包应用同时包含主程序、`libEGL.so` 等带执行位的共享库和 Chromium helper
-- **THEN** package inspect 仅使用 `<distribution.id>` 作为 Electron runner
+- **THEN** package inspect 仅使用 `<distribution.branding.productName>` 作为 Electron runner
 - **AND** 不得返回 `PROFILE_CORDIS_IMPORT_RUNNER_MISSING`。

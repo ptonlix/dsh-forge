@@ -10,7 +10,7 @@ import type { RuntimeManifest } from '@dsh-forge/profile-toolchain/types';
 
 /** 对已构建 Electron 目录产物执行结构检查和真实 smoke 启动。 */
 
-/** distribution.id 与 electron-builder executableName 保持一致，不能按 Unix 执行位猜测入口。 */
+/** branding.productName 与 electron-builder executableName 保持一致，不能按 Unix 执行位猜测入口。 */
 function applicationExecutable(application: string, executableName: string): string {
   if (process.platform === 'darwin') {
     const executable = path.join(application, 'Contents', 'MacOS', executableName);
@@ -75,7 +75,7 @@ function main(): void {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-package-smoke-'));
   try {
     const electronReport = path.join(userData, 'electron-runtime.json');
-    const executable = applicationExecutable(runtime.packageRoot || '', distribution.id);
+    const executable = applicationExecutable(runtime.packageRoot || '', distribution.branding.productName);
     const result = spawnSync(executable, ['--dsh-forge-smoke'], {
       encoding: 'utf8',
       timeout: 30_000,

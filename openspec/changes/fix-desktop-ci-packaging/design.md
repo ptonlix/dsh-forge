@@ -35,15 +35,18 @@ maintainer，FPM 会在应用目录已生成后拒绝生成 Debian 控制文件�
 5. 打包先生成独立 `desktop-deploy` staging，只复制 Electron 主进程的 production
    dependency closure；profile 在 builder 阶段只携带配置文件，最终应用生成后再复制一次
    完整 profile 闭包。Universal 使用同一份 profile lockfile 和 pnpm 11 的重复
-   `--cpu=arm64 --cpu=x64` 选项物化 optional 依赖；native staging 只保存 node-pty 的两个
-   架构输出，并写入对应 `prebuilds`，不再复制完整 profile 两份或对 sharp 等架构专属文件
-   执行 lipo。host-specific `node-pty/build/Release` 输出必须删除。
+   `--os=darwin --cpu=arm64 --cpu=x64` 选项物化 optional 依赖，且不得使用会绕过平台筛选的
+   `--force`；native staging 只保存 node-pty 的两个架构输出，并写入对应 `prebuilds`，不再复制
+   完整 profile 两份或对 sharp 等架构专属文件执行 lipo。host-specific `node-pty/build/Release`
+   输出必须删除。builder 的 `files` 排除已解析 profile 的完整 dependency closure，避免 pnpm
+   workspace 根递归主应用依赖时把 profile runtime 错误写入 `app.asar`。
 6. 生成的 electron-builder 配置设置 `npmRebuild: false`。native addon 已由脚本按目标 ABI
    重建，builder 只负责打包和格式生成，避免二次 rebuild 受 workspace 依赖扫描影响。
 7. builder 命令固定传入 `--publish never`。Tag 只决定 workflow 是否进入 package job，实际
    Release 由后续 job 统一发布，避免构建阶段因 GitHub 权限或隐式发布状态失败。
-8. builder 配置显式使用 `distribution.id` 作为 `executableName` 和 Linux `desktopName`，
-   不从带 scope 的根 package 名称推导文件名。profile 的 pnpm 物化和 verify 临时安装共用
+8. builder 配置显式使用 `distribution.branding.productName` 作为 `executableName` 和 Linux
+   `desktopName`，发行文件名仅使用稳定的 `distribution.id`、版本、平台和架构，不从带 scope 的
+   根 package 名称推导文件名。profile 的 pnpm 物化和 verify 临时安装共用
    15 分钟超时，并在失败时保留头尾诊断。
 9. native rebuild/profile 安装与 electron-builder 使用分离预算：前者为 15 分钟，后者为
    45 分钟。后者覆盖 Universal 临时应用复制、双架构合并、asar 生成和 DMG/zip 压缩。
@@ -66,10 +69,10 @@ maintainer，FPM 会在应用目录已生成后拒绝生成 Debian 控制文件�
     当前 job 的 inspect/smoke 结束，由下次同目标构建覆盖、由 CI runner 在 job 结束时清理。
     因此分发格式不会在 profile 闭包尚未存在时被提前生成，Windows 的 `OpenConsole.exe`
     也始终位于短路径的已解包应用中。
-15. `executableName` 同时决定 macOS 的 `productFilename`，因此已解包 `.app` 定位统一使用
-    `distribution.id`，不能使用展示名称 `branding.productName`。这使第一阶段的
-    `dsh-forge-official.app` 能被稳定作为 `--prepackaged` 输入。
-16. package inspect 与 smoke 从 runtime manifest 或 distribution 配置读取 `distribution.id`，
+15. `executableName` 同时决定 macOS 的 `productFilename`，已解包 `.app`、package inspect 与
+    smoke 因此统一使用 `distribution.branding.productName`。这使第一阶段的 `DSH Forge.app`
+    能被稳定作为 `--prepackaged` 输入。
+16. package inspect 与 smoke 从 runtime manifest 或 distribution 配置读取应用名称，
     并按平台计算唯一主程序路径。Linux `.so` 文件可能设置执行位，不能以“目录中唯一可执行
     文件”作为 runner 判据；动态 Cordis 导入仍必须在真实 Electron runtime 中执行。
 17. Windows Builder 的 ZIP 阶段两次在新下载 `7zip-win-x64.tar.gz` 后仍以 `ENOENT` 找不到
@@ -95,6 +98,9 @@ maintainer，FPM 会在应用目录已生成后拒绝生成 Debian 控制文件�
 21. native inspect 仍收集并校验所有 `.node` 的相对路径、存在性与摘要，但架构校验只适用于当前
     target 平台或未在路径中声明平台的 native 文件。optional package 名称中的 `linuxmusl` 归为
     Linux，`freebsd` 与 `openbsd` 也视为明确的非 macOS 平台，不能送入 `lipo` 检查 Mach-O 切片。
+22. 应用图标固定保存在仓库 `build/`，由 builder 的 `buildResources` 从 staging 之外读取。macOS
+    使用带 Dock 安全边距的 `app-icon-mac.png`，Windows/Linux 使用 `app-icon.png`；两份图标与其
+    MIT 许可作为 `resources/dsh-forge` 的资源交付，主进程把同一文件路径传给 `BrowserWindow`。
 
 ## Risks
 

@@ -162,8 +162,9 @@ native staging 只暂存 node-pty 的 `pty.node`/`spawn-helper` 并写入对应 
 重建后，electron-builder 设置 `npmRebuild: false` 并传入 `--publish never`，避免重复扫描
 profile 或因 Tag 隐式发布失败；Actions artifact 由独立 release job 处理。
 
-跨平台 builder 不再从根 package 的 `@dsh-forge/core` 名称推导可执行文件名，而是固定使用
-`distribution.id`，Linux 的 `desktopName` 也使用该值。profile verify 的临时 pnpm 安装预算
+跨平台 builder 不再从根 package 的 `@dsh-forge/core` 名称推导可执行文件名，而是统一使用
+`distribution.branding.productName`，Linux 的 `desktopName` 也使用该值。发行安装包文件名仅使用
+稳定的 `distribution.id`、版本、平台和架构，不重复 profile 名称。profile verify 的临时 pnpm 安装预算
 同步提高到 15 分钟，并保留安装进程的超时、signal 和头尾诊断，避免首次 CI 下载在 60 秒时被
 误判为解析失败。
 
@@ -199,13 +200,18 @@ runtime manifest 和 package evidence，最后以 electron-builder `--prepackage
 分发格式。该目录对 Windows 的 ConPTY `OpenConsole.exe` 等深层 helper 保持在安全路径预算内，
 并在当前 runner 中保留至 `package:inspect`、`package:smoke` 完成。
 
-electron-builder 设置 `executableName` 后会以该值生成 macOS `.app` 文件名。脚本因此按
-`distribution.id` 定位 `dsh-forge-official.app`，而不按界面展示名称 `DSH Forge.app` 查找，
+electron-builder 会递归主应用 package 的依赖，在 pnpm workspace 中可能将 profile 运行时再次写入
+`app.asar`。脚本从已解析 profile 的 dependency closure 生成 builder 排除规则；DSH 与 profile
+bundle 因此只由 `dsh-forge/profile/node_modules` 提供，主应用仍按 `desktop-deploy/package.json` 的
+受控 production closure 解析。属于主应用 closure 的包不会被排除，避免削弱 launcher 或主进程。
+
+electron-builder 设置 `executableName` 后会以该值生成 macOS `.app` 文件名。脚本、inspect 与
+smoke 都从 `distribution.branding.productName` 使用同一个名称定位 `DSH Forge.app` 及其主程序，
 避免 Universal `dir` 阶段成功后被错误报告为缺少应用。
 
-同一发行版 id 也用于 Linux 的 package inspect 与 smoke 主程序定位。Electron 的 `libEGL.so`
+同一应用名称也用于 Linux 的 package inspect 与 smoke 主程序定位。Electron 的 `libEGL.so`
 等共享库可能带执行位，因此不得通过“目录中唯一可执行文件”推断 runner；检查只启动
-`linux-unpacked/dsh-forge-official`，缺少该文件才报告 runner 缺失。
+`linux-unpacked/DSH Forge`，缺少该文件才报告 runner 缺失。
 
 `.desktop-work/` 不进入 Git 或 Actions release artifact；它只承载本平台构建阶段的可执行
 验证。跨 job 汇总继续传递最终安装包、runtime manifest、package evidence 与平台 smoke

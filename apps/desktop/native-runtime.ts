@@ -8,6 +8,7 @@ export interface DesktopRuntime {
   setSecondInstanceHandler(handler: () => void): void;
   createWindowFactory(options: {
     readonly preload: string;
+    readonly icon: string;
     readonly deadlineMs: number;
     readonly onClose: (event: { preventDefault(): void }, window: BrowserWindow) => void;
   }): ReturnType<typeof createSecureWindowFactory>;
@@ -28,6 +29,7 @@ export function createElectronRuntime(): DesktopRuntime {
     },
     createWindowFactory: (options: {
       readonly preload: string;
+      readonly icon: string;
       readonly deadlineMs: number;
       readonly onClose: (event: { preventDefault(): void }, window: BrowserWindow) => void;
     }) => createSecureWindowFactory({ ...options, ipcMain, shell }),

@@ -23,6 +23,14 @@ function reportDevelopmentPhase(message: string): void {
   if (!app.isPackaged) process.stdout.write(`[dsh-forge:dev] ${message}\n`);
 }
 
+/** 返回构建期与运行期共用的原生窗口图标，缺失时在启动前明确失败。 */
+function applicationIconPath(root: string): string {
+  const filename = process.platform === 'darwin' ? 'app-icon-mac.png' : 'app-icon.png';
+  const icon = app.isPackaged ? packagedResourcePath('dsh-forge', filename) : path.join(root, 'build', filename);
+  if (!fs.existsSync(icon)) throw new Error(`应用图标不存在: ${icon}`);
+  return icon;
+}
+
 /** 启动桌面应用；smoke 模式会在成功握手后主动退出，避免测试进程常驻。 */
 export async function startElectron() {
   if (process.env.DSH_FORGE_SMOKE_USER_DATA)
@@ -66,6 +74,7 @@ export async function startElectron() {
   let quitting = false;
   const windowFactory = runtime.createWindowFactory({
     preload: path.join(__dirname, 'preload.js'),
+    icon: applicationIconPath(root),
     deadlineMs: 15_000,
     onClose: (event) => {
       if (quitting) return;

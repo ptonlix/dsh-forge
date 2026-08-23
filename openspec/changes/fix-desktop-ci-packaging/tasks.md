@@ -33,3 +33,7 @@
 - [x] 3.14 以已校验的 Builder 7za archive 替换不可靠的 Windows 预装 7-Zip，并增加 Node spawn 预检
 - [x] 3.15 为打包 launcher fallback 提供真实 resources 目录，并在启动时物化到受管 profile
 - [x] 3.16 让 native inspect 跳过 macOS target 外的 optional 预构建架构检查
+- [x] 3.17 统一应用、可执行文件与 Linux desktop entry 为 `branding.productName`，并删除 artifact 文件名中的重复 profile 标识
+- [x] 3.18 限制 macOS Universal profile 的 optional native 依赖为 Darwin arm64/x64，删除非目标平台副本
+- [x] 3.19 排除 profile dependency closure，避免主应用与 profile runtime 重复打包
+- [x] 3.20 为三平台安装包和运行时窗口配置受控应用图标，并随包交付上游许可

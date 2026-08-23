@@ -23,6 +23,7 @@ export interface SecureWindowFactoryOptions {
   readonly ipcMain: IpcMain;
   readonly shell: Shell;
   readonly preload: string;
+  readonly icon: string;
   readonly deadlineMs: number;
   readonly onClose: (event: { preventDefault(): void }, window: BrowserWindow) => void;
 }
@@ -60,6 +61,7 @@ export function createSecureWindowFactory({
   ipcMain,
   shell,
   preload,
+  icon,
   deadlineMs,
   onClose,
 }: SecureWindowFactoryOptions): (options: WindowFactoryOptions) => Promise<RendererWindow> {
@@ -70,6 +72,7 @@ export function createSecureWindowFactory({
       width: 1280,
       height: 860,
       show: false,
+      icon,
       webPreferences: { sandbox, contextIsolation, nodeIntegration, preload },
     });
     window.webContents.on('will-navigate', (event, target) => {
