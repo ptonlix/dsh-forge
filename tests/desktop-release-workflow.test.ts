@@ -243,9 +243,12 @@ describe('Desktop Release workflow', () => {
     expect(source).toContain('release-artifacts/win32-x64/packages/desktop-dist');
     expect(source).toContain('release-artifacts/linux-x64/packages/desktop-dist');
     expect(source).not.toContain("find release-artifacts -type f \\( -name '*.dmg'");
+    expect(source).toContain('git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"');
+    expect(source).toContain('tag_object_type="$(git cat-file -t "refs/tags/$RELEASE_TAG")"');
+    expect(source).toContain("test \"$tag_object_type\" = 'tag'");
     expect(source).toContain("git for-each-ref --format='%(contents)' \"refs/tags/$RELEASE_TAG\"");
     expect(source).toContain('--notes-file "$notes_file"');
-    expect(source).not.toContain('--notes-from-tag');
+    expect(source).not.toContain('git log -1 --format=%B "$RELEASE_TAG"');
     expect(source).toContain('gh release upload "$RELEASE_TAG"');
     expect(source).toContain('if [ "$GITHUB_EVENT_NAME" = \'release\' ]; then');
     expect(source).not.toContain('--generate-notes');

@@ -117,8 +117,9 @@ validate。summary 使用
 digest 及文件 SHA-256；缺少或漂移的 evidence 会阻止后续 job。普通 job 只有
 `contents: read`，tag 打包只产生 run-scoped artifact。只有 tag 对应的 package、summary 和
 `release:gate` 全部成功且 Tag commit 仍等于 `GITHUB_SHA` 时，release job 才会请求
-`contents: write` 并发布安装包；新建 Release 时 workflow 显式读取 annotated tag 的正文并通过
-`--notes-file` 传入，网页已存在的 Release 则只上传构建附件，不覆盖已有公告。当前不依赖
+`contents: write` 并发布安装包；新建 Release 时 workflow 在 checkout 后重新获取并校验 annotated
+tag，再显式读取正文并通过 `--notes-file` 传入；网页已存在的 Release 则只上传构建附件，不覆盖
+已有公告。非 annotated Tag 会直接失败，不会回退到 commit message。当前不依赖
 `DSH_FORGE_PRODUCTION_RELEASE`、受保护 environment 或签名/公证凭据。
 
 工作流固定使用 Node.js `22.14.0` 和 pnpm `11.7.0`。pnpm 11.7 的 engine 下限为 Node
