@@ -108,8 +108,8 @@ manifest 和最终包结构。
 - **WHEN** tag 与 distribution version 一致、矩阵完整、安装包结构、native evidence、SBOM、
   license 和真实 smoke 均通过且 `release:gate` 返回成功
 - **THEN** release job 使用最小 `contents: write` 权限创建或补充 GitHub Release；push 或
-  Tag ref 手动运行从 annotated tag 读取发布公告，Release 事件向已有 Release 上传安装包和
-  汇总索引；安装包可以是 `unsigned-smoke`
+  Tag ref 手动运行显式读取 annotated tag 正文作为发布公告，Release 事件向已有 Release 上传
+  安装包和汇总索引且不覆盖已有公告；安装包可以是 `unsigned-smoke`
 
 #### Scenario: 门禁失败或版本不匹配
 

@@ -91,8 +91,8 @@ summary 或 Release job；`push` 到 `v*`、GitHub Release `published` 事件，
 `distribution.yml.version` 一致。默认权限为 `contents: read`；只有 package、summary 成功且
 完整 evidence 通过的 tag release job 使用 `contents: write`。当前不读取签名、公证或自动更新
 凭据，也不依赖仓库变量或受保护 environment。release job 使用完整 checkout 校验 Tag 仍指向
-本次 workflow 的 `GITHUB_SHA`；push 或 Tag ref 手动运行时从 annotated tag 读取公告，Release
-事件触发时向已有 Release 上传附件。
+本次 workflow 的 `GITHUB_SHA`；push 或 Tag ref 手动运行时显式读取 annotated tag 正文并作为
+`--notes-file` 传给 GitHub CLI，Release 事件触发时向已有 Release 上传附件，不覆盖已有公告。
 
 ### 6. 失败与重跑语义
 
