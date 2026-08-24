@@ -40,7 +40,7 @@ test('发行版与官方 profile 能生成确定性上游 profile 产物', () =>
     dependencyClosure?: unknown;
     sourceLockfileDigest?: unknown;
     tools: { compiler: string; pnpm: string; node?: unknown };
-    bundles: readonly { source: { kind: string; path?: unknown; integrity: string } }[];
+    bundles: readonly { name: string; source: { kind: string; path?: unknown; integrity: string } }[];
   };
   assert.equal(input.dependencyClosure, undefined);
   assert.match(String(input.sourceLockfileDigest), /^sha256-[a-f0-9]{64}$/);
@@ -51,6 +51,11 @@ test('发行版与官方 profile 能生成确定性上游 profile 产物', () =>
     assert.equal(bundle.source.path, undefined);
     assert.match(bundle.source.integrity, /^sha256-[a-f0-9]{64}$/);
   }
+  const sidebarInput = input.bundles.find((bundle) => bundle.source && bundle.source.kind === 'installed' && bundle.name === 'dsh-better-sidebar');
+  assert.equal(
+    sidebarInput?.source.integrity,
+    `sha256-${digest(JSON.parse(fs.readFileSync(path.join(root, 'node_modules/dsh-better-sidebar/package.json'), 'utf8')) as unknown)}`,
+  );
   assert.ok(fs.existsSync(path.join(compiled.profileDir, 'cordis.yml')));
   assert.match(fs.readFileSync(path.join(compiled.profileDir, 'pnpm-lock.yaml'), 'utf8'), /lockfileVersion:/);
   const profilePackage = JSON.parse(fs.readFileSync(path.join(compiled.profileDir, 'package.json'), 'utf8')) as {

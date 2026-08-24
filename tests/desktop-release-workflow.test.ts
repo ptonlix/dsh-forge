@@ -33,13 +33,17 @@ const desktopMainSource = readFileSync(join(process.cwd(), 'apps', 'desktop', 'm
 const workflow = parse(source) as DesktopReleaseWorkflow;
 
 describe('Desktop Release workflow', () => {
-  it('PR 和手动运行只进入 validate，tag 才进入打包矩阵', () => {
+  it('PR 和普通分支手动运行只进入 validate，Tag 入口进入打包矩阵', () => {
     expect(Object.hasOwn(workflow.on, 'pull_request')).toBe(true);
     expect(Object.hasOwn(workflow.on, 'workflow_dispatch')).toBe(true);
     expect(workflow.on.push).toEqual({ tags: ['v*'] });
+    expect(workflow.on.release).toEqual({ types: ['published'] });
     expect(workflow.jobs.validate?.if).toBeUndefined();
+    expect(workflow.jobs.package?.if).toContain("github.event_name == 'release'");
+    expect(workflow.jobs.package?.if).toContain("github.event_name == 'workflow_dispatch'");
     expect(workflow.jobs.package?.if).toContain("startsWith(github.ref, 'refs/tags/v')");
-    expect(workflow.jobs.summary?.if).toContain("startsWith(github.ref, 'refs/tags/v')");
+    expect(workflow.jobs.summary?.if).toContain("github.event_name == 'release'");
+    expect(workflow.jobs.release?.if).toContain("github.event_name == 'workflow_dispatch'");
   });
 
   it('保留三个原生目标并允许完整 tag 结果创建 Release', () => {
@@ -51,6 +55,9 @@ describe('Desktop Release workflow', () => {
     expect(source).not.toContain('environment: desktop-release');
     expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(workflow.jobs.release?.permissions).toEqual({ contents: 'write' });
+    expect(source).toContain('fetch-depth: 0');
+    expect(source).toContain('git rev-parse "${RELEASE_TAG}^{commit}"');
+    expect(source).toContain('test "$tag_commit" = "$GITHUB_SHA"');
   });
 
   it('跨平台命令不使用 PowerShell 的 PROFILE 自动变量', () => {
@@ -219,11 +226,27 @@ describe('Desktop Release workflow', () => {
   });
 
   it('release gate 使用 Linux 目标的 profile 证据作为汇总 runner 基线', () => {
+    expect(source).toContain('release-artifacts/linux-x64/profile');
     expect(source).toContain('release-artifacts/linux-x64/resolved-manifest.json');
     expect(source).toContain('release-artifacts/linux-x64/sbom.input.json');
     expect(source).toContain('release-artifacts/linux-x64/THIRD-PARTY-NOTICES.txt');
-    expect(source).toContain('release-artifacts/darwin-universal/runtime-manifest.json');
-    expect(source).toContain('release-artifacts/darwin-universal/package-evidence.json');
+    expect(source).toContain('release-artifacts/linux-x64/runtime-manifest.json');
+    expect(source).toContain('release-artifacts/linux-x64/package-evidence.json');
+    expect(source).toContain('package-inspection.$target.json');
+    expect(source).toContain('release-artifacts/release-index/release-index.json');
+  });
+
+  it('只归档最终分发目录并读取 annotated tag 公告', () => {
+    expect(source).toContain('cp -R "$entry" "ci-artifact/${{ matrix.target }}/"');
+    expect(source).toContain("[ \"$(basename \"$entry\")\" = 'desktop-dist' ] && continue");
+    expect(source).toContain('release-artifacts/darwin-universal/packages/desktop-dist');
+    expect(source).toContain('release-artifacts/win32-x64/packages/desktop-dist');
+    expect(source).toContain('release-artifacts/linux-x64/packages/desktop-dist');
+    expect(source).not.toContain("find release-artifacts -type f \\( -name '*.dmg'");
+    expect(source).toContain('--notes-from-tag');
+    expect(source).toContain('gh release upload "$RELEASE_TAG"');
+    expect(source).toContain('if [ "$GITHUB_EVENT_NAME" = \'release\' ]; then');
+    expect(source).not.toContain('--generate-notes');
   });
 
   it('先在短路径注入 profile 闭包，再封装分发格式', () => {

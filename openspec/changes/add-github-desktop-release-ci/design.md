@@ -71,23 +71,28 @@ macOS 生成 `dmg,zip`，产物名中的架构固定为 `universal`；Windows �
 ### 4. 证据优先于 Release 上传
 
 每个 package job 将以下内容放入一个压缩 artifact：安装包、目录应用（如脚本生成）、
-`runtime-manifest.json`、`package-evidence.json`、`native-verification.<target>.json`、
-`package-smoke.<target>.json`、resolved manifest、SBOM 和 license notice。汇总 job 通过
-结构化 manifest 索引检查“三个交付目标各一个、profile/version/digest 相同”，再决定是否允许
-创建 Release。这里的 `inputDigest` 只摘要 distribution、profile、bundle、构建授权和根
-`pnpm-lock.yaml` 的规范化 YAML 语义等跨平台源输入；实际 `dependencyClosure` 仍保留在各目标的 resolved
-manifest、SBOM 和许可证证据中，因为 pnpm 会按 runner 平台裁剪 optional native 包。Release
-gate 在 Ubuntu 汇总 runner 上使用 Linux 目标的 profile 证据进行严格复核，运行时和各目标
-smoke 证据仍分别来自对应目标。GitHub artifact 只是传输介质，权威事实仍是 profile artifact
-中的 evidence。
+`runtime-manifest.json`、`package-evidence.json`、`package-inspection.<target>.json`、
+`native-verification.<target>.json`、`package-smoke.<target>.json`、resolved manifest、SBOM
+和 license notice。`package-inspection` 必须在目标平台 runner 上生成；Ubuntu 汇总 runner
+不得重新打开 macOS `.app` 或 Windows `.exe` 的绝对路径。汇总 job 通过结构化 manifest 索引
+检查“三个交付目标各一个、profile/version/digest 相同”，再决定是否允许创建 Release。
+这里的 `inputDigest` 只摘要 distribution、profile、bundle、构建授权和根 `pnpm-lock.yaml`
+的规范化 YAML 语义等跨平台源输入；实际 `dependencyClosure` 仍保留在各目标的 resolved
+manifest、SBOM 和许可证证据中，因为 pnpm 会按 runner 平台裁剪 optional native 包。
+Release gate 在 Ubuntu 汇总 runner 上使用 Linux 目标的 profile、manifest 和 evidence 作为
+重建基线，逐项验证各目标预先生成的 inspection 和 smoke 证据。GitHub artifact 只是传输介质，
+权威事实仍是 profile artifact 中的 evidence。
 
 ### 5. 触发和权限采用最小授权
 
-工作流响应 `pull_request` 和 `workflow_dispatch` 时只运行 `validate`，不创建 package、summary
-或 Release job；只有 `push` 到 `v*` 才运行三平台 package 和 summary，且 tag 必须与
+工作流响应 pull request 或普通分支上的 `workflow_dispatch` 时只运行 `validate`，不创建 package、
+summary 或 Release job；`push` 到 `v*`、GitHub Release `published` 事件，以及从 `v*` Tag ref
+手动运行 `workflow_dispatch` 均运行三平台 package 和 summary，且 tag 必须与
 `distribution.yml.version` 一致。默认权限为 `contents: read`；只有 package、summary 成功且
 完整 evidence 通过的 tag release job 使用 `contents: write`。当前不读取签名、公证或自动更新
-凭据，也不依赖仓库变量或受保护 environment。
+凭据，也不依赖仓库变量或受保护 environment。release job 使用完整 checkout 校验 Tag 仍指向
+本次 workflow 的 `GITHUB_SHA`；push 或 Tag ref 手动运行时从 annotated tag 读取公告，Release
+事件触发时向已有 Release 上传附件。
 
 ### 6. 失败与重跑语义
 

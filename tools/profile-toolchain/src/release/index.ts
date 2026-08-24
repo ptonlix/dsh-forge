@@ -710,7 +710,7 @@ function nativeEvidenceTargets(evidence: unknown): readonly string[] {
 export function releaseGate({
   profileVerified,
   configDump,
-  packageInspection,
+  packageInspections,
   catalogVerified,
   manifest,
   packageSmokes,
@@ -718,7 +718,7 @@ export function releaseGate({
 }: {
   profileVerified: boolean;
   configDump: { readonly healthy?: boolean } | null;
-  packageInspection: { readonly valid?: boolean } | null;
+  packageInspections: readonly { readonly valid?: boolean }[];
   catalogVerified: { readonly valid?: boolean } | null;
   manifest: RuntimeManifest | null;
   packageSmokes: readonly PackageSmoke[];
@@ -727,7 +727,8 @@ export function releaseGate({
   const failures: string[] = [];
   if (!profileVerified) failures.push('profile verify 未通过');
   if (!configDump?.healthy) failures.push('Loader config dump 未通过');
-  if (!packageInspection?.valid) failures.push('安装包检查未通过');
+  if (!packageInspections.length || packageInspections.some((inspection) => !inspection?.valid))
+    failures.push('安装包检查未通过');
   if (!packageSmokes.length) failures.push('缺少真实安装包 smoke evidence');
   if (!evidence?.valid) failures.push('产物证据、SBOM 或许可证未通过');
   if (!catalogVerified?.valid) failures.push('catalog 验证未通过');

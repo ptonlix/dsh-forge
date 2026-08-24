@@ -218,6 +218,11 @@ function sha256File(file: string): string {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+/** package.json 的身份按 JSON 语义摘要，避免跨平台 checkout 行尾改变输入 digest。 */
+function packageManifestDigest(file: string): string {
+  return `sha256-${digest(JSON.parse(fs.readFileSync(file, 'utf8')) as unknown)}`;
+}
+
 function allowsVersion(range: string, version: string): boolean {
   return satisfies(version, range, { includePrerelease: true, loose: false });
 }
@@ -246,11 +251,11 @@ function packageSource(directory: string, root: string, workspaceRoots: readonly
       return child && !child.startsWith(`..${path.sep}`) && !path.isAbsolute(child);
     });
   return workspace
-    ? { kind: 'workspace', path: normalizedRelative, integrity: `sha256-${sha256File(path.join(directory, 'package.json'))}` }
+    ? { kind: 'workspace', path: normalizedRelative, integrity: packageManifestDigest(path.join(directory, 'package.json')) }
     : {
       kind: 'installed',
       path: normalizedRelative || '.',
-      integrity: `sha256-${sha256File(path.join(directory, 'package.json'))}`,
+      integrity: packageManifestDigest(path.join(directory, 'package.json')),
     };
 }
 

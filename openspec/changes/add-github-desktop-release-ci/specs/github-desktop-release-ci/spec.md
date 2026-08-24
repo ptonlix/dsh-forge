@@ -69,7 +69,8 @@ manifest 和最终包结构。
 #### Scenario: 平台 smoke 通过
 
 - **WHEN** 安装包启动、Host entry、profile Loader 和 native addon 校验全部成功
-- **THEN** 任务上传 `runtime-manifest.json`、`package-evidence.json`、
+- **THEN** 任务在目标 runner 上生成并上传 `package-inspection.<target>.json`、
+  `runtime-manifest.json`、`package-evidence.json`、
   `native-verification.<target>.json` 和 `package-smoke.<target>.json`
 
 #### Scenario: 平台 smoke 失败
@@ -86,8 +87,9 @@ manifest 和最终包结构。
 #### Scenario: 完整矩阵汇总
 
 - **WHEN** universal macOS、Windows x64 与 Linux x64 artifact 均成功上传且 manifest 字段一致
-- **THEN** 汇总任务生成包含三个交付目标、文件 SHA-256、profile、version 和 CI run id 的索引，
-  并允许进入 tag Release 判断
+- **THEN** 汇总任务生成包含三个交付目标、文件 SHA-256、profile、version、CI run id 和
+  `package-inspection.<target>.json` 的索引，并允许进入 tag Release 判断；发布 runner 不重新
+  检查其它平台的应用目录
 
 #### Scenario: 缺少目标证据
 
@@ -96,7 +98,8 @@ manifest 和最终包结构。
 
 ### Requirement: tag Release 必须通过发布门禁
 
-仅 `v*` tag 触发的发布路径可以创建 GitHub Release；tag 版本 SHALL 等于
+由 `push` 事件、GitHub Release `published` 事件或从 `v*` Tag ref 手动运行触发的 `v*` tag
+发布路径可以创建或补充 GitHub Release；tag 版本 SHALL 等于
 `distribution.yml.version`，且所有目标的 `release:gate` 必须通过。当前发布门禁 SHALL
 允许明确标记为 `unsigned-smoke` 的安装包；本变更不要求代码签名、公证或自动更新 channel。
 
@@ -104,8 +107,9 @@ manifest 和最终包结构。
 
 - **WHEN** tag 与 distribution version 一致、矩阵完整、安装包结构、native evidence、SBOM、
   license 和真实 smoke 均通过且 `release:gate` 返回成功
-- **THEN** release job 使用最小 `contents: write` 权限创建一个不可覆盖的 GitHub Release，
-  附加安装包和汇总索引；安装包可以是 `unsigned-smoke`
+- **THEN** release job 使用最小 `contents: write` 权限创建或补充 GitHub Release；push 或
+  Tag ref 手动运行从 annotated tag 读取发布公告，Release 事件向已有 Release 上传安装包和
+  汇总索引；安装包可以是 `unsigned-smoke`
 
 #### Scenario: 门禁失败或版本不匹配
 
@@ -115,8 +119,9 @@ manifest 和最终包结构。
 
 ### Requirement: PR 和手动工作流不得取得发布写权限
 
-Pull request 和 `workflow_dispatch` 路径 SHALL 只使用 `contents: read`，不得读取发布 secrets，
-不得启动 package、summary 或 release job。只有 `v*` tag 可以生成 run-scoped desktop artifact；
+Pull request 和普通分支上的 `workflow_dispatch` 路径 SHALL 只使用 `contents: read`，不得读取发布
+secrets，不得启动 package、summary 或 release job。从 `v*` Tag ref 手动运行、`push` 或 Release
+事件可以生成 run-scoped desktop artifact；
 只有 package、summary 和 `release:gate` 全部成功的 tag release job 可以请求 `contents: write`。
 
 #### Scenario: 外部 pull request
@@ -130,6 +135,21 @@ Pull request 和 `workflow_dispatch` 路径 SHALL 只使用 `contents: read`，�
 - **WHEN** 仓库收到与 `distribution.yml.version` 一致的 `v*` tag
 - **THEN** 工作流在 `validate` 通过后启动三个原生 package 任务和 summary，并将产物限定在
   当前 run；完整门禁通过后 release job 创建 GitHub Release
+
+#### Scenario: 普通分支手动运行
+
+- **WHEN** 通过 `workflow_dispatch` 选择普通分支
+- **THEN** 工作流只运行 `validate`，package、summary 和 release job 均被跳过
+
+#### Scenario: GitHub 网页发布 Release
+
+- **WHEN** 在 GitHub 网页发布一个带 `v*` Tag 的 Release
+- **THEN** `release.published` 触发三平台构建，完成后向已有 Release 上传安装包和汇总索引
+
+#### Scenario: Tag 在构建期间漂移
+
+- **WHEN** release job 发现 `${GITHUB_REF_NAME}^{commit}` 与 `GITHUB_SHA` 不一致
+- **THEN** release job 在下载产物或创建 GitHub Release 前失败
 
 ### Requirement: 跨平台工具入口必须独立于 pnpm shim
 

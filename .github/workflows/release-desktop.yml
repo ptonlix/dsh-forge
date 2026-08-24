@@ -12,6 +12,9 @@ on:
   push:
     tags:
       - "v*"
+  release:
+    types:
+      - published
 
 concurrency:
   group: desktop-release-${{ github.ref }}
@@ -24,6 +27,7 @@ env:
   NODE_VERSION: "22.14.0"
   PNPM_VERSION: "11.7.0"
   PROFILE: ${{ inputs.profile || 'dsh-forge-official' }}
+  RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
   DSH_FORGE_PROFILE_OFFLINE: "false"
   ELECTRON_REBUILD_DIST_URL: "https://www.electronjs.org/headers"
 
@@ -48,14 +52,14 @@ jobs:
       - run: pnpm run catalog:verify
       - run: pnpm run docs:check
       - name: 校验 tag 版本
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) }}
         shell: bash
         run: |
           expected="$(pnpm exec tsx -e "import {parseDistribution} from './tools/profile-toolchain/src/core/schema.ts'; console.log(parseDistribution('distribution.yml').version)")"
-          test "${GITHUB_REF_NAME#v}" = "$expected"
+          test "${RELEASE_TAG#v}" = "$expected"
 
   package:
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')) }}
     needs: validate
     strategy:
       fail-fast: false
@@ -201,7 +205,6 @@ jobs:
       # package:desktop 会在同一进程中完成一次 workspace build、profile resolve
       # 和 config dump；这里不重复执行这些步骤。
       - run: pnpm run package:desktop -- "${{ env.PROFILE }}" --target "${{ matrix.target }}" --formats "${{ matrix.formats }}"
-      - run: pnpm run package:inspect -- "${{ env.PROFILE }}"
       - name: Linux package smoke
         if: ${{ matrix.target == 'linux-x64' }}
         shell: bash
@@ -213,13 +216,25 @@ jobs:
       - name: Native package smoke
         if: ${{ matrix.target != 'linux-x64' }}
         run: pnpm run package:smoke -- "${{ env.PROFILE }}" --target "${{ matrix.target }}"
+      - name: 记录目标 package inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="$(find "artifacts/dsh-forge-official/${{ env.PROFILE }}" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+          test -n "$artifact_dir"
+          pnpm exec tsx tools/profile-toolchain/src/cli/index.ts package:inspect -- "${{ env.PROFILE }}" \
+            --target "${{ matrix.target }}" \
+            --output "$artifact_dir/package-inspection.${{ matrix.target }}.json"
       - name: 汇总目标 artifact
         shell: bash
         run: |
           artifact_dir="$(find "artifacts/dsh-forge-official/${{ env.PROFILE }}" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
           test -n "$artifact_dir"
           mkdir -p "ci-artifact/${{ matrix.target }}/packages"
-          cp -R "$artifact_dir"/* "ci-artifact/${{ matrix.target }}/"
+          for entry in "$artifact_dir"/*; do
+            [ "$(basename "$entry")" = 'desktop-dist' ] && continue
+            cp -R "$entry" "ci-artifact/${{ matrix.target }}/"
+          done
           cp -R "$artifact_dir/desktop-dist" "ci-artifact/${{ matrix.target }}/packages/"
           printf '%s\n' "${{ matrix.target }}" > "ci-artifact/${{ matrix.target }}/target.txt"
       - uses: actions/upload-artifact@v4
@@ -230,7 +245,7 @@ jobs:
           retention-days: 14
 
   summary:
-    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.package.result == 'success' }}
+    if: ${{ always() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v'))) && needs.package.result == 'success' }}
     needs: package
     runs-on: ubuntu-22.04
     steps:
@@ -271,13 +286,15 @@ jobs:
           retention-days: 14
 
   release:
-    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.summary.result == 'success' && needs.package.result == 'success' }}
+    if: ${{ always() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v'))) && needs.summary.result == 'success' && needs.package.result == 'success' }}
     needs: [package, summary]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -285,6 +302,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - name: 校验 Tag 未漂移
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_commit="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          test "$tag_commit" = "$GITHUB_SHA"
       - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
@@ -297,14 +320,17 @@ jobs:
           mkdir -p "$target_dir"
           # release gate 在 Ubuntu runner 上重编译 profile，使用 Linux 目标的
           # 实际闭包证据，避免与 macOS/Windows 的 optional native 选择混用。
+          cp -R "release-artifacts/linux-x64/profile" "$target_dir/"
           cp "release-artifacts/linux-x64/resolved-manifest.json" "$target_dir/"
           cp "release-artifacts/linux-x64/sbom.input.json" "$target_dir/"
           cp "release-artifacts/linux-x64/THIRD-PARTY-NOTICES.txt" "$target_dir/"
-          cp "release-artifacts/darwin-universal/runtime-manifest.json" "$target_dir/"
-          cp "release-artifacts/darwin-universal/package-evidence.json" "$target_dir/"
+          cp "release-artifacts/linux-x64/runtime-manifest.json" "$target_dir/"
+          cp "release-artifacts/linux-x64/package-evidence.json" "$target_dir/"
+          cp "release-artifacts/release-index/release-index.json" "$target_dir/"
           for target in darwin-universal win32-x64 linux-x64; do
             cp "release-artifacts/$target/native-verification.$target.json" "$target_dir/"
             cp "release-artifacts/$target/package-smoke.$target.json" "$target_dir/"
+            cp "release-artifacts/$target/package-inspection.$target.json" "$target_dir/"
           done
       - run: pnpm install --frozen-lockfile
       - name: 执行 release gate
@@ -314,7 +340,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mapfile -t files < <(find release-artifacts -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' \) | sort)
+          for target in darwin-universal win32-x64 linux-x64; do
+            test -d "release-artifacts/$target/packages/desktop-dist"
+          done
+          mapfile -t files < <(find \
+            release-artifacts/darwin-universal/packages/desktop-dist \
+            release-artifacts/win32-x64/packages/desktop-dist \
+            release-artifacts/linux-x64/packages/desktop-dist \
+            -mindepth 1 -maxdepth 1 -type f \
+            \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' \) | sort)
           test "${#files[@]}" -gt 0
-          gh release create "$GITHUB_REF_NAME" "${files[@]}" release-artifacts/release-index/release-index.json \
-            --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+          if [ "$GITHUB_EVENT_NAME" = 'release' ]; then
+            gh release upload "$RELEASE_TAG" "${files[@]}" release-artifacts/release-index/release-index.json --clobber
+          else
+            gh release create "$RELEASE_TAG" "${files[@]}" release-artifacts/release-index/release-index.json \
+              --verify-tag --title "$RELEASE_TAG" --notes-from-tag
+          fi

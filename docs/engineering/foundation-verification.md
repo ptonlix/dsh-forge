@@ -104,16 +104,21 @@ evidence 均保存在对应 profile artifact 中，记录所有最终 `.node` �
 runner 目标：`macos-14` 构建一个同时包含 `arm64/x64` 的 `darwin-universal`，`windows-2022`
 构建 `win32-x64`，`ubuntu-22.04` 构建面向 Ubuntu 22.04 及以上 LTS 的 `linux-x64`。对应输出为
 `universal.dmg`/zip、Windows x64 `nsis`/zip 和 Linux x64 `AppImage`/deb；每个目标还上传
-`runtime-manifest.json`、`package-evidence.json`、native verification、smoke report、resolved
-manifest、SBOM 输入和许可证通知。
+`runtime-manifest.json`、`package-evidence.json`、`package-inspection.<target>.json`、native
+verification、smoke report、resolved manifest、SBOM 输入和许可证通知。`package-inspection` 在
+目标 runner 上执行，release runner 不重新打开其它平台的 `.app` 或 `.exe`。
 
 工作流分为 `validate`、原生 `package` 矩阵和 `summary`/`release`。Pull request 与
 `workflow_dispatch` 只执行 `validate`，不会启动 macOS、Windows 或 Linux runner；只有与
-`distribution.yml.version` 一致的 `v*` tag 才启动三平台 package 和 summary。summary 使用
+`distribution.yml.version` 一致的 `v*` tag 由 git push、GitHub Release `published` 事件或从
+Tag ref 手动运行 `workflow_dispatch` 启动三平台 package 和 summary；普通分支手动运行仍只执行
+validate。summary 使用
 `pnpm run release:index` 检查三个目标是否齐全，并比较 distribution、version、profile、input
 digest 及文件 SHA-256；缺少或漂移的 evidence 会阻止后续 job。普通 job 只有
 `contents: read`，tag 打包只产生 run-scoped artifact。只有 tag 对应的 package、summary 和
-`release:gate` 全部成功时，release job 才会请求 `contents: write` 并发布安装包；当前不依赖
+`release:gate` 全部成功且 Tag commit 仍等于 `GITHUB_SHA` 时，release job 才会请求
+`contents: write` 并发布安装包；新建 Release 时公告从 annotated tag 读取，网页已存在的
+Release 则上传构建附件。当前不依赖
 `DSH_FORGE_PRODUCTION_RELEASE`、受保护 environment 或签名/公证凭据。
 
 工作流固定使用 Node.js `22.14.0` 和 pnpm `11.7.0`。pnpm 11.7 的 engine 下限为 Node
@@ -164,13 +169,16 @@ profile 或因 Tag 隐式发布失败；Actions artifact 由独立 release job �
 
 ### 跨平台 input digest（2026-08-24）
 
-`inputDigest` 不再摘要当前 runner 已物化的 `dependencyClosure`。pnpm 会根据 OS/架构裁剪
+`inputDigest` 不再摘要当前 runner 已物化的 `dependencyClosure`，package manifest 完整性按
+JSON 语义计算。pnpm 会根据 OS/架构裁剪
 `sharp`、`koffi` 等 optional native 包，直接摘要 node_modules 会让 macOS、Windows 和
-Linux 的同一 profile 产生不同目录。现在摘要由 distribution、profile、bundle、构建授权和
-根 `pnpm-lock.yaml` 的规范化 YAML 语义摘要组成，因此 checkout 换行符不会造成漂移，三个目标共享同一 profile artifact 路径；各平台实际
+Linux 的同一 profile 产生不同目录。现在摘要由 distribution、profile、bundle、构建授权、
+package manifest 的 JSON 语义和根 `pnpm-lock.yaml` 的规范化 YAML 语义摘要组成，因此 checkout
+换行符不会造成漂移，三个目标共享同一 profile artifact 路径；各平台实际
 闭包仍写入对应的 `resolved-manifest.json`、SBOM 和许可证证据，profile verify 继续逐文件检查
 同一 runner 上的真实闭包和锁文件。Release gate 在 Ubuntu 汇总 runner 上复核 Linux 目标的
-resolved/SBOM/许可证证据，同时使用 macOS runtime manifest 和三个目标的 native/smoke evidence。
+profile、runtime manifest、resolved/SBOM/许可证证据，同时使用三个目标预先生成的
+package inspection、native/smoke evidence。
 
 跨平台 builder 不再从根 package 的 `@dsh-forge/core` 名称推导可执行文件名，而是统一使用
 `distribution.branding.productName`，Linux 的 `desktopName` 也使用该值。发行安装包文件名仅使用

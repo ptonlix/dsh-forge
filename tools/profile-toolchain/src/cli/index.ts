@@ -23,6 +23,18 @@ function json(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function optionValue(name: string): string | undefined {
+  const index = process.argv.indexOf(name);
+  const value = index >= 0 ? process.argv[index + 1] : undefined;
+  if (index >= 0 && (!value || value.startsWith('--'))) throw new Error(`参数 ${name} 缺少值`);
+  return value;
+}
+
+function writeJsonFile(file: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+}
+
 interface SelectedProfile {
   readonly name: string;
   readonly file: string;
@@ -82,7 +94,16 @@ export function main(command = process.argv[2], profileName = process.argv[3]): 
       typeof inspectPackage
     >[0];
     const result = inspectPackage(runtime);
-    json({ profile: selected.name, ...result, signing: runtime.signing, artifact: runtime.artifact });
+    const report = {
+      profile: selected.name,
+      ...(optionValue('--target') ? { target: optionValue('--target') } : {}),
+      ...result,
+      signing: runtime.signing,
+      artifact: runtime.artifact,
+    };
+    const output = optionValue('--output');
+    if (output) writeJsonFile(output, report);
+    json(report);
     return result.valid ? 0 : 1;
   }
   if (command === 'release:gate') {
@@ -95,7 +116,33 @@ export function main(command = process.argv[2], profileName = process.argv[3]): 
       artifact && fs.existsSync(path.join(artifact, 'runtime-manifest.json'))
         ? JSON.parse(fs.readFileSync(path.join(artifact, 'runtime-manifest.json'), 'utf8'))
         : null;
-    const inspection = runtime ? inspectPackage(runtime) : { valid: false };
+    const inspectionFiles = artifact
+      ? fs
+        .readdirSync(artifact)
+        .filter((file) => /^package-inspection\.[a-z0-9-]+\.json$/.test(file))
+        .sort()
+      : [];
+    const inspections = inspectionFiles.map((file) => JSON.parse(fs.readFileSync(path.join(artifact!, file), 'utf8')) as {
+      readonly valid?: boolean;
+      readonly target?: unknown;
+    });
+    let packageInspections: readonly { readonly valid?: boolean }[];
+    if (inspectionFiles.length) {
+      const releaseIndexFile = path.join(artifact!, 'release-index.json');
+      const releaseIndex = fs.existsSync(releaseIndexFile)
+        ? JSON.parse(fs.readFileSync(releaseIndexFile, 'utf8')) as { readonly targets?: readonly { readonly target?: unknown }[] }
+        : null;
+      const expectedTargets = releaseIndex?.targets?.map((entry) => entry.target).filter((target): target is string => typeof target === 'string') || [];
+      const actualTargets = inspections.map((inspection) => inspection.target).filter((target): target is string => typeof target === 'string');
+      const targetSetMatches = expectedTargets.length > 0 && expectedTargets.length === inspections.length &&
+        new Set(expectedTargets).size === expectedTargets.length &&
+        expectedTargets.every((target) => actualTargets.includes(target));
+      packageInspections = targetSetMatches && inspections.every((inspection) => inspection.valid === true)
+        ? inspections
+        : [{ valid: false }];
+    } else {
+      packageInspections = runtime ? [inspectPackage(runtime)] : [];
+    }
     const smokes = artifact
       ? fs
         .readdirSync(artifact)
@@ -115,7 +162,7 @@ export function main(command = process.argv[2], profileName = process.argv[3]): 
     const result = releaseGate({
       profileVerified: compiled.verified,
       configDump: dump,
-      packageInspection: inspection,
+      packageInspections,
       catalogVerified: catalog,
       manifest: runtime,
       packageSmokes: smokes,

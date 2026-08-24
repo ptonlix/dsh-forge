@@ -171,7 +171,7 @@ test('运行时闭包检查原生文件，包检查仍可单独要求签名', ()
       releaseGate({
         profileVerified: true,
         configDump: { healthy: true },
-        packageInspection: { valid: true },
+        packageInspections: [{ valid: true }],
         catalogVerified: { valid: true },
         manifest,
         packageSmokes: [],
@@ -292,7 +292,7 @@ test('发布门禁拒绝缺少声明目标 native evidence 的单平台 smoke', 
       releaseGate({
         profileVerified: true,
         configDump: { healthy: true },
-        packageInspection: { valid: true },
+        packageInspections: [{ valid: true }],
         catalogVerified: { valid: true },
         manifest,
         packageSmokes: [passingSmoke('darwin', 'arm64')],
@@ -316,7 +316,7 @@ test('发布门禁接受覆盖全部声明目标的独立 native evidence', () =
     releaseGate({
       profileVerified: true,
       configDump: { healthy: true },
-      packageInspection: { valid: true },
+      packageInspections: [{ valid: true }],
       catalogVerified: { valid: true },
       manifest,
       packageSmokes: [passingSmoke('darwin', 'arm64'), passingSmoke('darwin', 'x64'), passingSmoke('win32', 'x64')],

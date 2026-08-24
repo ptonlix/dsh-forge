@@ -16,6 +16,7 @@ function writeTarget(root: string, target: string, digest: string): void {
   };
   fs.writeFileSync(path.join(directory, 'runtime-manifest.json'), JSON.stringify(runtime));
   fs.writeFileSync(path.join(directory, 'package-evidence.json'), JSON.stringify({ manifest: runtime }));
+  fs.writeFileSync(path.join(directory, `package-inspection.${target}.json`), JSON.stringify({ target, valid: true, failures: [] }));
   fs.writeFileSync(path.join(directory, `native-verification.${target}.json`), JSON.stringify({ result: 'passed' }));
   fs.writeFileSync(path.join(directory, `package-smoke.${target}.json`), JSON.stringify({ healthy: true }));
   fs.writeFileSync(path.join(directory, 'package.zip'), `${target}\n`);
@@ -60,6 +61,29 @@ test('release index 拒绝 input digest 漂移', () => {
       version: '0.1.0',
       profile: 'dsh-forge-official',
     }), /inputDigest 漂移: win32-x64.*expectedTarget.*darwin-universal.*expectedDigest.*actualDigest/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('release index 拒绝目标 inspection 错位', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-release-index-inspection-'));
+  try {
+    for (const target of ['darwin-universal', 'win32-x64', 'linux-x64']) writeTarget(root, target, 'a'.repeat(64));
+    fs.writeFileSync(
+      path.join(root, 'win32-x64', 'package-inspection.win32-x64.json'),
+      JSON.stringify({ target: 'linux-x64', valid: true, failures: [] }),
+    );
+    assert.throws(
+      () => buildReleaseIndex({
+        root,
+        expectedTargets: ['darwin-universal', 'win32-x64', 'linux-x64'],
+        distribution: 'dsh-forge-official',
+        version: '0.1.0',
+        profile: 'dsh-forge-official',
+      }),
+      /inspect\/smoke\/evidence 未通过: win32-x64/,
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

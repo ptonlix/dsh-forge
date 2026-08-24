@@ -41,3 +41,12 @@
 - [x] 8.1 移除 `DSH_FORGE_PRODUCTION_RELEASE` 和受保护 environment 对 tag Release 的额外控制
 - [x] 8.2 移除 `release:gate` 对平台签名和更新信任配置的强制要求，保留安装包、证据和 smoke 门禁
 - [x] 8.3 增加 unsigned manifest 的 gate 回归测试，并同步 OpenSpec、设计文档和工程验证记录
+
+## 9. 跨 runner 发布证据与 Tag 一致性
+
+- [x] 9.1 在各目标 runner 生成 `package-inspection.<target>.json`，汇总索引要求 inspection
+  通过，release gate 只消费目标 runner 的 inspection，不跨平台重检绝对路径
+- [x] 9.2 去除重复 desktop package 归档，Release 只从各目标 `packages/desktop-dist` 一级目录
+  上传最终安装包
+- [x] 9.3 将 package、summary、release 限定为 `push` 的 `v*` tag，使用 annotated tag 公告，
+  并在发布前校验 Tag commit 与 `GITHUB_SHA` 一致

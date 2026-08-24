@@ -164,6 +164,9 @@ export interface PackageInspection {
   readonly valid: boolean;
   readonly failures: readonly Record<string, unknown>[];
   readonly signing?: RuntimeManifest['signing'];
+  readonly target?: string;
+  readonly profile?: string;
+  readonly artifact?: string | null;
 }
 
 export interface UpdateInstallResult {

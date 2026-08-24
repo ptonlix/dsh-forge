@@ -13,6 +13,7 @@ export interface ReleaseIndexTarget {
   readonly directory: string;
   readonly runtimeManifest: string;
   readonly packageEvidence: string;
+  readonly packageInspection: string;
   readonly nativeVerification: string;
   readonly packageSmoke: string;
   readonly files: readonly ReleaseIndexFile[];
@@ -83,10 +84,12 @@ export function buildReleaseIndex({
     const directory = path.join(root, target);
     const runtimeFile = path.join(directory, 'runtime-manifest.json');
     const evidenceFile = path.join(directory, 'package-evidence.json');
+    const inspectionFile = path.join(directory, `package-inspection.${target}.json`);
     const nativeFile = path.join(directory, `native-verification.${target}.json`);
     const smokeFile = path.join(directory, `package-smoke.${target}.json`);
     const runtime = jsonFile(runtimeFile);
     const evidence = jsonFile(evidenceFile);
+    const inspection = jsonFile(inspectionFile);
     const native = jsonFile(nativeFile);
     const smoke = jsonFile(smokeFile);
     const manifest = (evidence.manifest || {}) as Record<string, unknown>;
@@ -109,7 +112,8 @@ export function buildReleaseIndex({
       );
     inputDigest = digest;
     inputDigestTarget = target;
-    if (native.result !== 'passed' || smoke.healthy !== true) fail(`release artifact smoke/evidence 未通过: ${target}`);
+    if (inspection.valid !== true || inspection.target !== target || native.result !== 'passed' || smoke.healthy !== true)
+      fail(`release artifact inspect/smoke/evidence 未通过: ${target}`);
     const runtimeTargets = Array.isArray(runtime.targets) ? runtime.targets : [];
     if (!runtimeTargets.some((item) => {
       if (!item || typeof item !== 'object') return false;
@@ -122,6 +126,7 @@ export function buildReleaseIndex({
       directory,
       runtimeManifest: runtimeFile,
       packageEvidence: evidenceFile,
+      packageInspection: inspectionFile,
       nativeVerification: nativeFile,
       packageSmoke: smokeFile,
       files: filesUnder(directory),
