@@ -247,6 +247,8 @@ jobs:
           path: release-artifacts
           merge-multiple: false
       - run: pnpm install --frozen-lockfile
+      - name: 构建 profile toolchain 的 desktop services 类型依赖
+        run: pnpm --filter @dsh-forge/desktop-services build
       - name: 构建 release index 所需的 profile toolchain
         run: pnpm run build:toolchain
       - name: 校验矩阵结果并生成索引

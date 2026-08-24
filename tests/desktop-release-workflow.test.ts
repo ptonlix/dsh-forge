@@ -207,7 +207,11 @@ describe('Desktop Release workflow', () => {
     const summaryEnd = source.indexOf('\n  release:\n', summaryStart);
     const summary = source.slice(summaryStart, summaryEnd);
     expect(summary).toContain('pnpm install --frozen-lockfile');
+    expect(summary).toContain('pnpm --filter @dsh-forge/desktop-services build');
     expect(summary).toContain('pnpm run build:toolchain');
+    expect(summary.indexOf('pnpm --filter @dsh-forge/desktop-services build')).toBeLessThan(
+      summary.indexOf('pnpm run build:toolchain'),
+    );
     expect(summary.indexOf('pnpm run build:toolchain')).toBeLessThan(summary.indexOf('pnpm run release:index'));
   });
 
