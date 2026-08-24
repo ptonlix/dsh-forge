@@ -47,7 +47,7 @@ Closing a window hides it by default. Explicit exit, signals, generation failure
 
 ## Composition and Release
 
-The compiler resolves runtime compatibility, bundle manifests, peer dependencies, static catalog entries, exact Git commits, lifecycle-script authorization, and the dependency closure. The input digest covers the cross-platform source inputs and the root lockfile; the platform-selected closure remains resolution evidence in the resolved manifest and SBOM. The composer runs the real DSH loader to produce a configuration dump; a healthy dump is required for verification and packaging.
+The compiler resolves runtime compatibility, bundle manifests, peer dependencies, static catalog entries, exact Git commits, lifecycle-script authorization, and the dependency closure. The input digest covers the cross-platform source inputs and the normalized YAML semantics of the root lockfile; the platform-selected closure remains resolution evidence in the resolved manifest and SBOM. The composer runs the real DSH loader to produce a configuration dump; a healthy dump is required for verification and packaging.
 
 The release gate also checks package layout, dynamic imports, native files, SBOM and license notices, platform evidence, smoke results, signing, and update trust configuration. A local unsigned smoke proves only local structure and startup behavior; it cannot authorize production release.
 

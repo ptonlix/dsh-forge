@@ -30,6 +30,7 @@ import { loadStaticCatalog } from '../trust/catalog.ts';
  */
 
 export const TOOL_VERSIONS = Object.freeze({ compiler: '0.2.0', pnpm: '11.7.0', node: process.versions.node });
+const INPUT_TOOL_VERSIONS = Object.freeze({ compiler: TOOL_VERSIONS.compiler, pnpm: TOOL_VERSIONS.pnpm });
 const LIFECYCLE_SCRIPTS = new Set(['preinstall', 'install', 'postinstall']);
 const PROFILE_PNPM_TIMEOUT_MS = 15 * 60_000;
 
@@ -219,6 +220,18 @@ function sha256File(file: string): string {
 
 function allowsVersion(range: string, version: string): boolean {
   return satisfies(version, range, { includePrerelease: true, loose: false });
+}
+
+/** 只保留源输入身份；已安装包的虚拟 store 路径不是可复现的源事实。 */
+function inputPackageSource(source: PackageSource): Record<string, string> {
+  return source.kind === 'workspace'
+    ? { kind: source.kind, path: source.path, integrity: source.integrity }
+    : { kind: source.kind, integrity: source.integrity };
+}
+
+/** 按锁文件语义而不是原始换行字节计算摘要，避免 checkout 行尾造成跨平台漂移。 */
+function sourceLockfileDigest(file: string): string {
+  return `sha256-${digest(readYaml(file))}`;
 }
 
 function packageSource(directory: string, root: string, workspaceRoots: readonly string[]): PackageSource {
@@ -462,7 +475,8 @@ function inputSummary(
   buildPolicy: Readonly<Record<string, boolean>>,
 ): unknown {
   return stable({
-    tools: TOOL_VERSIONS,
+    // Node 补丁版本属于当前 runner 的运行时证据，不属于跨平台源摘要身份。
+    tools: INPUT_TOOL_VERSIONS,
     distribution: {
       id: distribution.id,
       version: distribution.version,
@@ -478,7 +492,7 @@ function inputSummary(
     bundles: bundles.map((bundle) => ({
       name: bundle.name,
       version: bundle.version,
-      source: bundle.source,
+      source: inputPackageSource(bundle.source),
       license: bundle.license,
       dependencies: bundle.dependencies,
       peerDependencies: bundle.peerDependencies,
@@ -772,7 +786,7 @@ export function compileProfile({
     profile,
     collected.bundles,
     profilePatch,
-    `sha256-${sha256File(rootLockfile)}`,
+    sourceLockfileDigest(rootLockfile),
     collected.allowBuilds,
     collected.buildPolicy,
   );

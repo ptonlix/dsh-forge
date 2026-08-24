@@ -75,7 +75,7 @@ macOS 生成 `dmg,zip`，产物名中的架构固定为 `universal`；Windows �
 `package-smoke.<target>.json`、resolved manifest、SBOM 和 license notice。汇总 job 通过
 结构化 manifest 索引检查“三个交付目标各一个、profile/version/digest 相同”，再决定是否允许
 创建 Release。这里的 `inputDigest` 只摘要 distribution、profile、bundle、构建授权和根
-`pnpm-lock.yaml` 等跨平台源输入；实际 `dependencyClosure` 仍保留在各目标的 resolved
+`pnpm-lock.yaml` 的规范化 YAML 语义等跨平台源输入；实际 `dependencyClosure` 仍保留在各目标的 resolved
 manifest、SBOM 和许可证证据中，因为 pnpm 会按 runner 平台裁剪 optional native 包。Release
 gate 在 Ubuntu 汇总 runner 上使用 Linux 目标的 profile 证据进行严格复核，运行时和各目标
 smoke 证据仍分别来自对应目标。GitHub artifact 只是传输介质，权威事实仍是 profile artifact

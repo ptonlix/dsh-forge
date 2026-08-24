@@ -12,6 +12,7 @@ import {
   ForgeError,
 } from '@dsh-forge/profile-toolchain/schema';
 import { bundleDirectory, collectBundles, compileProfile, verifyProfile } from '@dsh-forge/profile-toolchain/compiler';
+import { digest } from '@dsh-forge/profile-toolchain/core/digest';
 import { readYaml } from '@dsh-forge/profile-toolchain/core/yaml';
 import { assertResolvedManifest } from './helpers.ts';
 
@@ -38,12 +39,18 @@ test('发行版与官方 profile 能生成确定性上游 profile 产物', () =>
   const input = compiled.resolved.input as {
     dependencyClosure?: unknown;
     sourceLockfileDigest?: unknown;
-    bundles: readonly { source: { path: string } }[];
+    tools: { compiler: string; pnpm: string; node?: unknown };
+    bundles: readonly { source: { kind: string; path?: unknown; integrity: string } }[];
   };
   assert.equal(input.dependencyClosure, undefined);
   assert.match(String(input.sourceLockfileDigest), /^sha256-[a-f0-9]{64}$/);
-  for (const bundle of input.bundles as readonly { source: { path: string } }[])
-    assert.equal(bundle.source.path.includes('\\'), false);
+  assert.equal(input.sourceLockfileDigest, `sha256-${digest(readYaml(path.join(root, 'pnpm-lock.yaml')))}`);
+  assert.deepEqual(input.tools, { compiler: '0.2.0', pnpm: '11.7.0' });
+  for (const bundle of input.bundles) {
+    assert.equal(bundle.source.kind, 'installed');
+    assert.equal(bundle.source.path, undefined);
+    assert.match(bundle.source.integrity, /^sha256-[a-f0-9]{64}$/);
+  }
   assert.ok(fs.existsSync(path.join(compiled.profileDir, 'cordis.yml')));
   assert.match(fs.readFileSync(path.join(compiled.profileDir, 'pnpm-lock.yaml'), 'utf8'), /lockfileVersion:/);
   const profilePackage = JSON.parse(fs.readFileSync(path.join(compiled.profileDir, 'package.json'), 'utf8')) as {

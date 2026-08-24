@@ -42,7 +42,7 @@ The same concurrent target shares one operation. A different concurrent target f
 
 The descriptor and catalog use `executionMode: 'trusted-in-process'`. Review, authorization, and enforcement facts are separate; `enforcement: unavailable` means the public API is not a Node or Electron security boundary.
 
-`resolved-manifest.json` records the profile runtime, bundles, sources, integrity, licenses, scripts, `allowBuilds`, the actual platform dependency closure, and input digest. The input digest covers cross-platform source inputs and the root lockfile; platform-selected optional native packages remain evidence rather than digest identity. `runtime-manifest.json` adds Electron, Node, pnpm, native-addon, built-target, declared-target, and signing facts. Neither manifest proves author trustworthiness, license accuracy, a valid signature, or safety of executed code.
+`resolved-manifest.json` records the profile runtime, bundles, sources, integrity, licenses, scripts, `allowBuilds`, the actual platform dependency closure, and input digest. The input digest covers cross-platform source inputs and the normalized YAML semantics of the root lockfile; platform-selected optional native packages remain evidence rather than digest identity. `runtime-manifest.json` adds Electron, Node, pnpm, native-addon, built-target, declared-target, and signing facts. Neither manifest proves author trustworthiness, license accuracy, a valid signature, or safety of executed code.
 
 ## Verification
 
