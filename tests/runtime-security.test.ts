@@ -50,12 +50,16 @@ describe('桌面 renderer 导航策略', () => {
       deadlineMs: 100,
       onClose: (event) => event.preventDefault(),
     });
-    await factory({
+    const windowRef = await factory({
       url: 'http://127.0.0.1:39123/app',
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
     });
+    const window = windows[0];
+    if (!window) throw new Error('测试窗口未创建');
+    ipc.emit('dsh-forge:renderer-boot', { sender: window.webContents }, { status: 'healthy' });
+    await windowRef.waitForBootReport();
     expect(windows[0]?.options.icon).toBe('/tmp/dsh-forge-app-icon.png');
     expect(windows[0]?.options.webPreferences).toEqual({
       sandbox: true,
@@ -68,17 +72,40 @@ describe('桌面 renderer 导航策略', () => {
     await Promise.resolve();
     expect(opened).toEqual(['https://example.com']);
   });
+
+  it('renderer preload 失败时返回具体诊断', async () => {
+    const ipc = new EventEmitter() as unknown as IpcMain;
+    const shell = { openExternal: async () => {} } as unknown as Shell;
+    const windows: FakeWindow[] = [];
+    const factory = createSecureWindowFactory({
+      BrowserWindowConstructor: class extends FakeWindow {
+        constructor(options: Record<string, unknown>) {
+          super(options);
+          windows.push(this);
+        }
+      } as unknown as typeof import('electron').BrowserWindow,
+      ipcMain: ipc,
+      shell,
+      preload: '/tmp/preload.js',
+      icon: '/tmp/dsh-forge-app-icon.png',
+      deadlineMs: 100,
+      onClose: (event) => event.preventDefault(),
+    });
+    const windowRef = await factory({
+      url: 'http://127.0.0.1:39123/app',
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    });
+    const window = windows[0];
+    if (!window) throw new Error('测试窗口未创建');
+    window.webContents.emit('preload-error', {}, '/tmp/preload.js', new Error('脚本不存在'));
+    await expect(windowRef.waitForBootReport()).rejects.toThrow('preload 加载失败');
+  });
 });
 
-class FakeWebContents {
-  private navigation: ((event: { preventDefault(): void }, url: string) => void) | null = null;
+class FakeWebContents extends EventEmitter {
   private windowOpen: ((details: { url: string }) => { action: 'deny' }) | null = null;
-
-  on(event: 'will-navigate', listener: (event: { preventDefault(): void }, url: string) => void): void {
-    if (event === 'will-navigate') this.navigation = listener;
-  }
-
-  once(): void {}
 
   setWindowOpenHandler(listener: (details: { url: string }) => { action: 'deny' }): void {
     this.windowOpen = listener;
@@ -86,7 +113,7 @@ class FakeWebContents {
 
   navigate(url: string): boolean {
     let prevented = false;
-    this.navigation?.({ preventDefault: () => (prevented = true) }, url);
+    this.emit('will-navigate', { preventDefault: () => (prevented = true) }, url);
     return prevented;
   }
 

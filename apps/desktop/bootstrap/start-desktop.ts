@@ -47,23 +47,35 @@ export async function startDesktop() {
   reportDevelopmentPhase('等待 Electron 应用就绪');
   await app.whenReady();
   writeSmokeReport('starting', 'electron-ready');
+  writeSmokeReport('starting', 'app-path-starting');
   const root = app.getAppPath();
+  writeSmokeReport('starting', 'app-path-ready');
   reportDevelopmentPhase(`Electron 已就绪，加载应用根目录: ${root}`);
+  writeSmokeReport('starting', 'catalog-loading');
   const catalog = loadStaticCatalog(path.join(root, 'catalog', 'catalog.yml'));
+  writeSmokeReport('starting', 'catalog-validating');
   assertNoStartupInstall(catalog);
+  writeSmokeReport('starting', 'catalog-ready');
   // 应用主进程只使用 app.asar 内的一棵 production closure；DSH runtime
   // 始终从随包 profile 解析，不再复制 dsh-forge/runtime。
   const runtimeRoot = root;
   const launcherFallbackRoot = app.isPackaged ? packagedResourcePath('dsh-forge', 'launcher-fallback') : undefined;
   const template = app.isPackaged ? packagedResourcePath('dsh-forge', 'profile') : null;
+  writeSmokeReport('starting', 'distribution-loading');
   const distribution = parseDistribution(path.join(root, 'distribution.yml'));
+  writeSmokeReport('starting', 'distribution-ready');
   const requestedProfile = profileFromArguments(process.argv);
+  writeSmokeReport('starting', 'profile-selection-starting');
   const sourceProfile = selectDesktopProfile({
     defaultProfile: distribution.defaultProfile,
     requestedProfile,
     packagedProfile: app.isPackaged ? packagedProfileName(packagedResourcePath('dsh-forge', 'resolved-manifest.json')) : null,
   });
+  writeSmokeReport('starting', 'profile-selection-ready');
+  writeSmokeReport('starting', 'dsh-home-starting');
   const dshHome = resolveDesktopDshHome();
+  writeSmokeReport('starting', 'dsh-home-ready');
+  writeSmokeReport('starting', 'profile-materialization-starting');
   const managedProfile = ensureDistributionProfile({
     root,
     dshHome: dshHome.path,
@@ -71,13 +83,18 @@ export async function startDesktop() {
     distributionId: distribution.id,
     sourceProfile,
   });
+  writeSmokeReport('starting', 'profile-materialization-ready');
+  writeSmokeReport('starting', 'profile-listing-starting');
   const profiles = listProfiles(dshHome.path, managedProfile.profileName);
   if (!profiles.some((profile) => profile.selectable)) throw new Error('没有可启动的 desktop profile');
+  writeSmokeReport('starting', 'profile-ready');
   reportDevelopmentPhase(`使用 DSH Home: ${dshHome.source === 'default' ? '~/.dsh' : '$DSH_HOME'}`);
   reportDevelopmentPhase(`使用 profile: ${managedProfile.profileName}`);
   let quitting = false;
   const windowFactory = runtime.createWindowFactory({
-    preload: path.join(__dirname, 'preload.js'),
+    // start-desktop.js 位于 bootstrap 子目录，preload.js 与 electron-main.js
+    // 同级；使用显式父目录避免拆分入口后指向 bootstrap/preload.js。
+    preload: path.join(__dirname, '..', 'preload.js'),
     icon: applicationIconPath(root),
     deadlineMs: 15_000,
     onClose: (event) => {
@@ -86,10 +103,12 @@ export async function startDesktop() {
       void launcher?.hide();
     },
   });
+  writeSmokeReport('starting', 'window-factory-ready');
   const launcher = createDesktopLauncher({
     userData: runtime.userDataPath,
     profiles,
     startupProfile: requestedProfile || (app.isPackaged ? managedProfile.profileName : undefined),
+    onPhase: (phase) => writeSmokeReport('starting', phase),
     deadlineMs: 15_000,
     probe: (url) => probeLoopback(url, 15_000),
     windowFactory,
@@ -108,6 +127,7 @@ export async function startDesktop() {
     pnpmEnv: { ELECTRON_RUN_AS_NODE: '1' },
     catalog: catalog.entries,
   });
+  writeSmokeReport('starting', 'launcher-ready');
   runtime.setSecondInstanceHandler(() => launcher.show());
   const requestExit = async (reason: string): Promise<void> => {
     if (quitting) return;
@@ -127,6 +147,7 @@ export async function startDesktop() {
   process.once('SIGTERM', () => void requestExit('SIGTERM'));
   process.once('SIGINT', () => void requestExit('SIGINT'));
   reportDevelopmentPhase('启动 deepseek-harness Host 并等待 renderer 健康握手');
+  writeSmokeReport('starting', 'generation-starting');
   const generation = await launcher.start();
   process.stdout.write(`DSH Forge Desktop 已就绪（profile: ${generation.profile}）\n`);
   writeSmokeReport('passed', 'generation-ready');

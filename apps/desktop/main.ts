@@ -94,6 +94,7 @@ interface LauncherOptions {
   readonly profiles: readonly DesktopProfile[];
   /** 显式启动或打包应用绑定的 profile，优先于持久化恢复状态。 */
   readonly startupProfile?: string;
+  readonly onPhase?: (phase: string) => void;
   readonly host: { start(options: HostStartOptions): Promise<HostInstance> };
   readonly windowFactory: WindowFactory;
   probe(url: string): Promise<void>;
@@ -563,6 +564,7 @@ export function createDesktopLauncher({
   userData,
   profiles,
   startupProfile,
+  onPhase,
   host,
   windowFactory,
   probe,
@@ -587,6 +589,7 @@ export function createDesktopLauncher({
     healthDeadlineMs: deadlineMs,
     hooks: {
       async prepare(generation) {
+        onPhase?.('generation-host-starting');
         const profile = profiles.find((candidate) => candidate.name === generation.profile);
         if (!profile) fail(`profile 不存在: ${generation.profile}`, 'PROFILE_UNSELECTABLE');
         const capability = createDesktopHostCapability({
@@ -606,6 +609,7 @@ export function createDesktopLauncher({
       },
       async hostReady(generation) {
         await generationStates.get(generation)?.host.entriesSettled();
+        onPhase?.('generation-host-ready');
       },
       async webReady(generation) {
         const state = generationStates.get(generation);
@@ -613,6 +617,7 @@ export function createDesktopLauncher({
         const url = await state.host.url();
         await probe(url);
         state.url = url;
+        onPhase?.('generation-web-ready');
       },
       async windowReady(generation) {
         const state = generationStates.get(generation);
@@ -625,16 +630,19 @@ export function createDesktopLauncher({
         });
         if (!windowRef.sandbox || !windowRef.contextIsolation || windowRef.nodeIntegration)
           fail('BrowserWindow 安全配置无效', 'RENDERER_SANDBOX');
+        onPhase?.('generation-window-ready');
       },
       async rendererReady() {
         if (!windowRef) fail('BrowserWindow 尚未创建', 'GENERATION_CONFIG');
         await windowRef.waitForBootReport();
+        onPhase?.('generation-renderer-ready');
       },
       async interactionReady(generation) {
         const state = generationStates.get(generation);
         if (!state || !windowRef) fail('generation window 状态缺失', 'GENERATION_CONFIG');
         await state.host.registerInteractiveCommands();
         windowRef.show();
+        onPhase?.('generation-interaction-ready');
       },
       async hideWindow() {
         windowRef?.hide();

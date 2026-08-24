@@ -141,10 +141,16 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain('to: \'dsh-forge/APP-ICON-LICENSE.txt\'');
     expect(electronMainSource).toContain('startDesktop()');
     expect(electronMainSource).toContain("writeSmokeReport('failed', 'startup'");
+    expect(smokeSource).toContain('result.status !== 0 || result.signal || result.error');
     expect(desktopBootstrapSource).toContain('packagedResourcePath(\'dsh-forge\', filename)');
     expect(desktopBootstrapSource).toContain('icon: applicationIconPath(root)');
+    expect(desktopBootstrapSource).toContain("preload: path.join(__dirname, '..', 'preload.js')");
+    expect(desktopBootstrapSource).toContain("writeSmokeReport('starting', 'catalog-loading')");
+    expect(desktopBootstrapSource).toContain("writeSmokeReport('starting', 'profile-materialization-starting')");
     expect(desktopBootstrapSource).toContain("writeSmokeReport('failed', 'single-instance'");
+    expect(desktopMainSource).toContain("onPhase?.('generation-renderer-ready')");
     expect(smokeBootstrapSource).toContain('export function scheduleSmokeExit(');
+    expect(smokeBootstrapSource).toContain('lastPhase: previousPhase');
     expect(smokeSource).toContain('reportExists: fs.existsSync(report)');
     expect(smokeSource).toContain('smokeReport: readSmokeReport(electronReport)');
     expect(packagingSource).toContain('desktopName: distribution.branding.productName');

@@ -126,7 +126,9 @@ function main(): void {
       },
     });
     const processDetails = smokeProcessDetails(executable, electronReport, result);
-    if (result.status !== 0) {
+    // spawnSync 超时可能同时返回 status=0 和 error=ETIMEDOUT；只检查退出码
+    // 会把被强制终止的 Electron 进程误判为成功。
+    if (result.status !== 0 || result.signal || result.error) {
       const processError = result.error ? `${errorCode(result.error) || 'spawn-error'}: ${errorMessage(result.error)}` : null;
       throw new Error(`安装包 smoke 失败: ${JSON.stringify({ ...processDetails, processError, smokeReport: readSmokeReport(electronReport) })}`);
     }
