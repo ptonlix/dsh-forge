@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { createPackage } from '@electron/asar';
 
 import {
   assertNoStartupInstall,
@@ -341,6 +342,31 @@ test('Windows 可执行文件使用同级 resources 作为 runtime 根', () => {
   assert.equal(paths?.profile, path.join(root, 'resources', 'dsh-forge', 'profile'));
   assert.equal(paths?.runtime, path.join(root, 'resources', 'dsh-forge', 'runtime', 'node_modules'));
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('package inspect 归一化 ASAR 的 Windows 路径分隔符', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-asar-paths-'));
+  const source = path.join(root, 'asar-source');
+  const archive = path.join(root, 'resources', 'app.asar');
+  const entries = [
+    'dist\\apps\\desktop\\electron-main.js',
+    'dist\\apps\\desktop\\preload.js',
+    'packages\\desktop-services-local\\dist\\index.js',
+    'packages\\desktop-services\\dist\\index.js',
+  ];
+  try {
+    fs.mkdirSync(source, { recursive: true });
+    for (const entry of entries) fs.writeFileSync(path.join(source, entry), 'entry');
+    await createPackage(source, archive);
+    const inspection = inspectPackage({
+      packageRoot: root,
+      targets: [{ os: 'darwin', architectures: ['arm64'] }],
+      signing: { signed: false },
+    });
+    assert.equal(inspection.failures.some((failure) => failure.code === 'ASAR_RUNTIME_ENTRY_MISSING'), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('平台目标同时覆盖 macOS 与 Windows，并拒绝非法 native 相对路径', () => {

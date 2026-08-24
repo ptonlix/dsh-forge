@@ -333,7 +333,11 @@ function inspectAsar(paths: RuntimePaths, failures: InspectionFailure[]): void {
   }
   let files;
   try {
-    files = new Set(asar.listPackage(paths.asar, { isPack: false }).map((file) => file.replace(/^\//, '')));
+    files = new Set(
+      asar
+        .listPackage(paths.asar, { isPack: false })
+        .map((file) => file.replaceAll('\\', '/').replace(/^\/+/, '')),
+    );
   } catch (error) {
     failures.push({ code: 'ASAR_INVALID', message: errorMessage(error) });
     return;
