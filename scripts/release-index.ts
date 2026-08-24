@@ -64,9 +64,18 @@ export function buildReleaseIndex({
   readonly version: string;
   readonly runId?: string | null;
 }): ReleaseIndex {
-  const directories = fs.readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+  const targetOrder = new Map(expectedTargets.map((target, index) => [target, index]));
+  const directories = fs
+    .readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .sort(
+      (left, right) =>
+        (targetOrder.get(left.name) ?? Number.MAX_SAFE_INTEGER) -
+        (targetOrder.get(right.name) ?? Number.MAX_SAFE_INTEGER),
+    );
   const found = new Map<string, ReleaseIndexTarget>();
   let inputDigest: string | null = null;
+  let inputDigestTarget: string | null = null;
   for (const entry of directories) {
     const target = entry.name;
     if (!expectedTargets.includes(target)) continue;
@@ -93,8 +102,13 @@ export function buildReleaseIndex({
     if (manifest.distribution && JSON.stringify(manifest.distribution) !== JSON.stringify(runtime.distribution))
       fail(`package evidence manifest 漂移: ${target}`);
     if (digest.length !== 64 || !/^[a-f0-9]+$/i.test(digest)) fail(`release artifact 缺少 inputDigest: ${target}`);
-    if (inputDigest && inputDigest !== digest) fail(`release artifact inputDigest 漂移: ${target}`);
+    if (inputDigest && inputDigest !== digest)
+      fail(
+        `release artifact inputDigest 漂移: ${target} ` +
+        JSON.stringify({ expectedTarget: inputDigestTarget, expectedDigest: inputDigest, actualDigest: digest }),
+      );
     inputDigest = digest;
+    inputDigestTarget = target;
     if (native.result !== 'passed' || smoke.healthy !== true) fail(`release artifact smoke/evidence 未通过: ${target}`);
     const runtimeTargets = Array.isArray(runtime.targets) ? runtime.targets : [];
     if (!runtimeTargets.some((item) => {

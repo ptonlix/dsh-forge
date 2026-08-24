@@ -223,6 +223,7 @@ function allowsVersion(range: string, version: string): boolean {
 
 function packageSource(directory: string, root: string, workspaceRoots: readonly string[]): PackageSource {
   const relative = path.relative(root, directory);
+  const normalizedRelative = relative.split(path.sep).join('/');
   const workspace =
     relative &&
     !relative.startsWith(`..${path.sep}`) &&
@@ -232,10 +233,10 @@ function packageSource(directory: string, root: string, workspaceRoots: readonly
       return child && !child.startsWith(`..${path.sep}`) && !path.isAbsolute(child);
     });
   return workspace
-    ? { kind: 'workspace', path: relative, integrity: `sha256-${sha256File(path.join(directory, 'package.json'))}` }
+    ? { kind: 'workspace', path: normalizedRelative, integrity: `sha256-${sha256File(path.join(directory, 'package.json'))}` }
     : {
       kind: 'installed',
-      path: relative || '.',
+      path: normalizedRelative || '.',
       integrity: `sha256-${sha256File(path.join(directory, 'package.json'))}`,
     };
 }

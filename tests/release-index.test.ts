@@ -59,7 +59,7 @@ test('release index 拒绝 input digest 漂移', () => {
       distribution: 'dsh-forge-official',
       version: '0.1.0',
       profile: 'dsh-forge-official',
-    }), /inputDigest 漂移/);
+    }), /inputDigest 漂移: win32-x64.*expectedTarget.*darwin-universal.*expectedDigest.*actualDigest/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

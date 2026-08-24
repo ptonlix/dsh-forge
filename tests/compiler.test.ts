@@ -35,9 +35,15 @@ test('发行版与官方 profile 能生成确定性上游 profile 产物', () =>
     compiled.profile.bundles,
   );
   assertResolvedManifest(compiled.resolved);
-  const input = compiled.resolved.input as { dependencyClosure?: unknown; sourceLockfileDigest?: unknown };
+  const input = compiled.resolved.input as {
+    dependencyClosure?: unknown;
+    sourceLockfileDigest?: unknown;
+    bundles: readonly { source: { path: string } }[];
+  };
   assert.equal(input.dependencyClosure, undefined);
   assert.match(String(input.sourceLockfileDigest), /^sha256-[a-f0-9]{64}$/);
+  for (const bundle of input.bundles as readonly { source: { path: string } }[])
+    assert.equal(bundle.source.path.includes('\\'), false);
   assert.ok(fs.existsSync(path.join(compiled.profileDir, 'cordis.yml')));
   assert.match(fs.readFileSync(path.join(compiled.profileDir, 'pnpm-lock.yaml'), 'utf8'), /lockfileVersion:/);
   const profilePackage = JSON.parse(fs.readFileSync(path.join(compiled.profileDir, 'package.json'), 'utf8')) as {
