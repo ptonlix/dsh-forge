@@ -42,10 +42,13 @@ describe('Desktop Release workflow', () => {
     expect(workflow.jobs.summary?.if).toContain("startsWith(github.ref, 'refs/tags/v')");
   });
 
-  it('保留三个原生目标并默认关闭生产 Release', () => {
+  it('保留三个原生目标并允许完整 tag 结果创建 Release', () => {
     const targets = workflow.jobs.package?.strategy?.matrix?.include?.map((item) => item.target);
     expect(targets).toEqual(['darwin-universal', 'win32-x64', 'linux-x64']);
-    expect(workflow.jobs.release?.if).toContain("vars.DSH_FORGE_PRODUCTION_RELEASE == 'true'");
+    expect(workflow.jobs.release?.if).not.toContain('DSH_FORGE_PRODUCTION_RELEASE');
+    expect(workflow.jobs.release?.if).toContain("needs.summary.result == 'success'");
+    expect(workflow.jobs.release?.if).toContain("needs.package.result == 'success'");
+    expect(source).not.toContain('environment: desktop-release');
     expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(workflow.jobs.release?.permissions).toEqual({ contents: 'write' });
   });

@@ -271,10 +271,9 @@ jobs:
           retention-days: 14
 
   release:
-    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.summary.result == 'success' && needs.package.result == 'success' && vars.DSH_FORGE_PRODUCTION_RELEASE == 'true' }}
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') && needs.summary.result == 'success' && needs.package.result == 'success' }}
     needs: [package, summary]
     runs-on: ubuntu-22.04
-    environment: desktop-release
     permissions:
       contents: write
     steps:

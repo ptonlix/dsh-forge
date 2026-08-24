@@ -713,7 +713,6 @@ export function releaseGate({
   packageInspection,
   catalogVerified,
   manifest,
-  updateConfigured,
   packageSmokes,
   evidence,
 }: {
@@ -722,7 +721,6 @@ export function releaseGate({
   packageInspection: { readonly valid?: boolean } | null;
   catalogVerified: { readonly valid?: boolean } | null;
   manifest: RuntimeManifest | null;
-  updateConfigured: boolean;
   packageSmokes: readonly PackageSmoke[];
   evidence: { readonly valid?: boolean } | null;
 }): { readonly publishable: true } {
@@ -754,8 +752,6 @@ export function releaseGate({
       const key = `${declared.os}-${architecture}`;
       if (!verifiedTargets.has(key)) failures.push(`声明目标缺少 native evidence: ${key}`);
     }
-  if (!manifest?.signing?.signed) failures.push('生产发布需要平台签名');
-  if (!updateConfigured) failures.push('生产发布需要更新信任根与 channel');
   if (failures.length) fail(`发布门禁拒绝: ${failures.join('；')}`, 'RELEASE_GATE', { failures });
   return { publishable: true };
 }

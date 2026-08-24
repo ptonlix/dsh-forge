@@ -118,7 +118,6 @@ export function main(command = process.argv[2], profileName = process.argv[3]): 
       packageInspection: inspection,
       catalogVerified: catalog,
       manifest: runtime,
-      updateConfigured: compiled.distribution.updates.enabled,
       packageSmokes: smokes,
       evidence,
     });

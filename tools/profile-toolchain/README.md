@@ -40,7 +40,7 @@ The implementation is [`src/cli/index.ts`](src/cli/index.ts). Profile commands u
 | `dump-config [profile]` | Run the real DSH loader and print a normalized configuration dump. |
 | `catalog:verify` | Check catalog schema, IDs, source facts, and review expiry. |
 | `package:inspect [profile]` | Inspect an Electron artifact's profile closure, dynamic imports, and native files. |
-| `release:gate [profile]` | Aggregate profile, package, catalog, SBOM, smoke, signing, and update evidence. |
+| `release:gate [profile]` | Aggregate profile, package, catalog, SBOM, native evidence, and smoke evidence. |
 | `docs:check` | Check document links, commands, examples, public scope, and bilingual pairs. |
 | `docs:pair --write [file]` | Record Git blob hashes for one or all public bilingual pairs. |
 
@@ -54,7 +54,7 @@ The composer assembles `profile bundle -> profile patch -> DSH Home patch -> lau
 
 The catalog is a static audit snapshot, not a runtime plugin marketplace. `installationConfirmation()` binds a catalog entry, target profile, exact version, source, integrity, allowed build scripts, and explicit confirmation. Startup installation is rejected. Plugin execution remains `trusted-in-process`; catalog checks are not process isolation.
 
-The release gate requires a verified profile and healthy config dump, package inspection, platform native evidence, smoke evidence, catalog, SBOM, license notices, signing, and update trust configuration. Unsigned local smoke is insufficient for a production channel.
+The release gate requires a verified profile and healthy config dump, package inspection, platform native evidence, smoke evidence, catalog, SBOM, and license notices. The current GitHub tag Release may publish an artifact explicitly marked `unsigned-smoke`; code signing, notarization, and the automatic update channel are deferred to a separate change.
 
 ## Verification
 

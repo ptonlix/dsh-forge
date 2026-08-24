@@ -17,8 +17,8 @@
 - 将每个矩阵目标的安装包、runtime manifest、package evidence、native verification
   和 smoke report 上传为独立 GitHub Actions artifact，并在同一工作流中汇总索引。
 - 对 tag 发布增加版本与 profile 身份检查；只有所有声明目标证据齐全且
-  `release:gate` 通过时才创建 GitHub Release。没有签名身份时只能保留 CI smoke artifact，
-  不得进入生产更新发布。
+  `release:gate` 通过时才创建 GitHub Release。当前 Release 允许发布明确标记为
+  `unsigned-smoke` 的安装包；代码签名、公证和自动更新 channel 留待独立变更。
 - 将官方 profile 使用的外部 bundle `dsh-better-sidebar` 的 catalog tier 与编译器契约对齐为
   `L1`，使 CI 的 profile resolve/verify 能在固定输入上运行；不改变 bundle 版本、来源或执行模式。
 - 将仓库工具链 Node 下限调整为 `>=22.13.0`，CI 固定使用 Node `22.14.0`，满足
@@ -48,5 +48,5 @@
 - 修改 `catalog/catalog.yml` 中现有外部 bundle 的 tier 事实，以满足官方 profile 的既有审计要求。
 - 可能更新 `docs/engineering/foundation-verification.md` 与发布参考，记录 CI 证据、平台
   覆盖和签名缺口。
-- GitHub Actions 需要仓库 `contents: write`（仅 tag Release job）以及平台签名/公证凭据
-  时才允许使用对应 secret；普通构建 job 不读取发布凭据。
+- GitHub Actions 需要仓库 `contents: write`（仅满足完整门禁的 tag Release job）；当前不读取
+  平台签名、公证或自动更新凭据，普通构建 job 也不读取发布凭据。

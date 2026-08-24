@@ -94,31 +94,30 @@ manifest 和最终包结构。
 - **WHEN** 任一交付目标没有 artifact、runtime manifest、native verification 或 smoke report
 - **THEN** 汇总任务失败且不得创建 GitHub Release
 
-### Requirement: tag Release 必须通过生产发布门禁
+### Requirement: tag Release 必须通过发布门禁
 
 仅 `v*` tag 触发的发布路径可以创建 GitHub Release；tag 版本 SHALL 等于
-`distribution.yml.version`，且所有目标的 `release:gate` 必须通过。unsigned smoke artifact
-可以用于 tag 构建和诊断，但不得被标记为生产更新包或绕过签名/公证要求。
+`distribution.yml.version`，且所有目标的 `release:gate` 必须通过。当前发布门禁 SHALL
+允许明确标记为 `unsigned-smoke` 的安装包；本变更不要求代码签名、公证或自动更新 channel。
 
 #### Scenario: 版本 tag 且门禁通过
 
-- **WHEN** tag 与 distribution version 一致、矩阵完整、平台签名/公证证据齐全且
-  `release:gate` 返回成功
+- **WHEN** tag 与 distribution version 一致、矩阵完整、安装包结构、native evidence、SBOM、
+  license 和真实 smoke 均通过且 `release:gate` 返回成功
 - **THEN** release job 使用最小 `contents: write` 权限创建一个不可覆盖的 GitHub Release，
-  附加安装包和汇总索引
+  附加安装包和汇总索引；安装包可以是 `unsigned-smoke`
 
-#### Scenario: unsigned 或版本不匹配
+#### Scenario: 门禁失败或版本不匹配
 
-- **WHEN** 任一目标仍是 `unsigned-smoke`、签名/公证缺失，或 tag 版本与 distribution version
-  不一致
-- **THEN** release job 失败，不创建生产 Release，并保留 CI artifact 供诊断
+- **WHEN** 任一目标缺少完整 evidence、真实 smoke 失败、`release:gate` 失败，或 tag 版本与
+  distribution version 不一致
+- **THEN** release job 失败，不创建 GitHub Release，并保留 CI artifact 供诊断
 
 ### Requirement: PR 和手动工作流不得取得发布写权限
 
 Pull request 和 `workflow_dispatch` 路径 SHALL 只使用 `contents: read`，不得读取发布 secrets，
 不得启动 package、summary 或 release job。只有 `v*` tag 可以生成 run-scoped desktop artifact；
-只有同时显式启用生产发布的受保护 tag release job 可以请求 `contents: write` 和平台签名相关
-secrets。
+只有 package、summary 和 `release:gate` 全部成功的 tag release job 可以请求 `contents: write`。
 
 #### Scenario: 外部 pull request
 
@@ -130,7 +129,7 @@ secrets。
 
 - **WHEN** 仓库收到与 `distribution.yml.version` 一致的 `v*` tag
 - **THEN** 工作流在 `validate` 通过后启动三个原生 package 任务和 summary，并将产物限定在
-  当前 run；未显式启用生产发布时 release job 保持跳过
+  当前 run；完整门禁通过后 release job 创建 GitHub Release
 
 ### Requirement: 跨平台工具入口必须独立于 pnpm shim
 

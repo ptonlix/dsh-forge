@@ -13,8 +13,8 @@
 
 ## 3. Tag 发布与文档
 
-- [x] 3.1 增加 tag 版本与 `distribution.yml.version` 校验，并让 release job 仅在完整矩阵和 `release:gate` 成功时创建 GitHub Release；验证 unsigned、版本不匹配和签名缺失均不会发布
-- [x] 3.2 更新工程验证记录和发布参考，说明 CI 目标、artifact 内容、unsigned smoke 限制、所需 secrets 和未覆盖平台；验证 `pnpm run docs:check` 与 `git diff --check`
+- [x] 3.1 增加 tag 版本与 `distribution.yml.version` 校验，并让 release job 仅在完整矩阵和 `release:gate` 成功时创建 GitHub Release；当前允许发布明确标记的 unsigned artifact，版本不匹配或门禁失败不会发布
+- [x] 3.2 更新工程验证记录和发布参考，说明 CI 目标、artifact 内容、unsigned Release 边界、后续签名/更新变更和未覆盖平台；验证 `pnpm run docs:check` 与 `git diff --check`
 - [x] 3.3 运行受影响的 package build、测试、`pnpm run boundaries:check`、OpenSpec 严格校验，并记录 universal macOS、Windows x64、Ubuntu Linux x64 及未执行的平台签名/公证结果
 
 ## 4. Tag-only 打包触发
@@ -35,3 +35,9 @@
 - [x] 7.1 统一解析真实 DSH、Electron 和 electron-builder 入口，移除对 pnpm `.bin` shim 的依赖
 - [x] 7.2 保留 spawnSync 启动错误、状态、signal 和截断输出，清理 ABI 子进程的 NODE_OPTIONS
 - [x] 7.3 将 electron-builder 超时提高到 15 分钟，补充入口解析与诊断回归测试
+
+## 8. 未签名 Tag Release
+
+- [x] 8.1 移除 `DSH_FORGE_PRODUCTION_RELEASE` 和受保护 environment 对 tag Release 的额外控制
+- [x] 8.2 移除 `release:gate` 对平台签名和更新信任配置的强制要求，保留安装包、证据和 smoke 门禁
+- [x] 8.3 增加 unsigned manifest 的 gate 回归测试，并同步 OpenSpec、设计文档和工程验证记录

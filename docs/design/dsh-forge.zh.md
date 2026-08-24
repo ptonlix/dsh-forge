@@ -49,7 +49,7 @@ Renderer 固定使用 Chromium sandbox、context isolation 并关闭 Node integr
 
 编译器校验 runtime 兼容性、bundle manifest、peer 依赖、静态 catalog、完整 Git commit、生命周期脚本授权和依赖闭包。输入摘要覆盖跨平台源输入和根锁文件的规范化 YAML 语义；按 runner 平台裁剪的实际依赖闭包仍保留在 resolved manifest 与 SBOM 证据中。组合器运行真实 DSH loader 生成 config dump；只有健康 dump 才能通过 verify 和打包。
 
-发布门禁还检查安装包布局、动态导入、native 文件、SBOM 与许可证通知、平台证据、smoke、签名和更新信任配置。本地 unsigned smoke 只能证明本地结构和启动行为，不能授权生产发布。
+发布门禁还检查安装包布局、动态导入、native 文件、SBOM 与许可证通知、平台证据和真实 smoke。当前 GitHub Tag Release 允许发布明确标记为 `unsigned-smoke` 的安装包；代码签名、公证和自动更新 channel 不属于当前流水线，后续单独实现。运行时更新若启用，仍必须遵守更新元数据的信任校验。
 
 ## Fork 契约
 

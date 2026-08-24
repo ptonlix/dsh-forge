@@ -40,7 +40,7 @@ pnpm run profile:verify -- developer
 | `dump-config [profile]` | 运行真实 DSH loader 并输出规范化 config dump。 |
 | `catalog:verify` | 检查 catalog schema、ID、来源事实和审核期限。 |
 | `package:inspect [profile]` | 检查 Electron 产物的 profile 闭包、动态导入和 native 文件。 |
-| `release:gate [profile]` | 汇总 profile、包、catalog、SBOM、smoke、签名和更新证据。 |
+| `release:gate [profile]` | 汇总 profile、包、catalog、SBOM、native evidence 和 smoke 证据。 |
 | `docs:check` | 检查文档链接、命令、示例、公开范围和双语配对。 |
 | `docs:pair --write [file]` | 为一个或全部公开双语配对记录 Git blob hash。 |
 
@@ -54,7 +54,7 @@ pnpm run profile:verify -- developer
 
 Catalog 是静态审核快照，不是运行时插件市场。`installationConfirmation()` 将 catalog 条目、目标 profile、精确版本、来源、integrity、允许构建脚本和明确确认绑定。启动期安装会被拒绝。插件执行模式仍是 `trusted-in-process`；catalog 检查不是进程隔离。
 
-发布门禁要求 profile 已验证、config dump 健康、安装包检查、平台 native evidence、smoke、catalog、SBOM、许可证通知、签名和更新信任配置全部满足。未签名本地 smoke 不足以进入生产 channel。
+发布门禁要求 profile 已验证、config dump 健康、安装包检查、平台 native evidence、smoke、catalog、SBOM 和许可证通知全部满足。当前 GitHub Tag Release 允许发布明确标记为 `unsigned-smoke` 的安装包；代码签名、公证和自动更新 channel 由后续独立变更处理。
 
 ## 验证
 

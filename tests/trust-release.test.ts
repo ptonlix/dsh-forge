@@ -143,7 +143,7 @@ test('更新拒绝错误信任根、摘要与降级', () => {
   fs.rmSync(path.dirname(artifact), { recursive: true, force: true });
 });
 
-test('运行时闭包检查原生文件，生产发布拒绝未签名 smoke', () => {
+test('运行时闭包检查原生文件，包检查仍可单独要求签名', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-package-'));
   fs.mkdirSync(path.join(dir, 'profile'));
   fs.writeFileSync(path.join(dir, 'package.json'), '{}');
@@ -174,7 +174,6 @@ test('运行时闭包检查原生文件，生产发布拒绝未签名 smoke', ()
         packageInspection: { valid: true },
         catalogVerified: { valid: true },
         manifest,
-        updateConfigured: true,
         packageSmokes: [],
         evidence: null,
       }),
@@ -286,7 +285,7 @@ test('发布门禁拒绝缺少声明目标 native evidence 的单平台 smoke', 
       { os: 'darwin', architectures: ['arm64', 'x64'] },
       { os: 'win32', architectures: ['x64'] },
     ],
-    signing: { signed: true },
+    signing: { signed: false },
   };
   assert.throws(
     () =>
@@ -296,7 +295,6 @@ test('发布门禁拒绝缺少声明目标 native evidence 的单平台 smoke', 
         packageInspection: { valid: true },
         catalogVerified: { valid: true },
         manifest,
-        updateConfigured: true,
         packageSmokes: [passingSmoke('darwin', 'arm64')],
         evidence: { valid: true },
       }),
@@ -312,7 +310,7 @@ test('发布门禁接受覆盖全部声明目标的独立 native evidence', () =
       { os: 'darwin', architectures: ['arm64', 'x64'] },
       { os: 'win32', architectures: ['x64'] },
     ],
-    signing: { signed: true },
+    signing: { signed: false },
   };
   assert.deepEqual(
     releaseGate({
@@ -321,7 +319,6 @@ test('发布门禁接受覆盖全部声明目标的独立 native evidence', () =
       packageInspection: { valid: true },
       catalogVerified: { valid: true },
       manifest,
-      updateConfigured: true,
       packageSmokes: [passingSmoke('darwin', 'arm64'), passingSmoke('darwin', 'x64'), passingSmoke('win32', 'x64')],
       evidence: { valid: true },
     }),

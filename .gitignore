@@ -3,6 +3,7 @@ artifacts/
 node_modules/
 .pnpm-store/
 dist/
+tmp/
 
 # Documentation-site build output
 website/.generated/

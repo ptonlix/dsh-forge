@@ -4,7 +4,7 @@
 `--dir` 构建，并把一个 profile 固定进安装包；`distribution.yml` 声明
 `darwin-arm64`、`darwin-x64`、`win32-x64`。`package:inspect`、`package:smoke` 和
 `release:gate` 读取同一 profile artifact 中的 manifest/evidence。仓库没有现成
-`.github/workflows`，也没有可把 unsigned 包当生产更新包的授权。
+`.github/workflows`，本变更只定义安装包 GitHub Release 出口，不实现自动更新 channel。
 
 ## Goals / Non-Goals
 
@@ -85,10 +85,9 @@ smoke 证据仍分别来自对应目标。GitHub artifact 只是传输介质，�
 
 工作流响应 `pull_request` 和 `workflow_dispatch` 时只运行 `validate`，不创建 package、summary
 或 Release job；只有 `push` 到 `v*` 才运行三平台 package 和 summary，且 tag 必须与
-`distribution.yml.version` 一致。生产 Release 还要求仓库变量
-`DSH_FORGE_PRODUCTION_RELEASE=true`，默认只保留 tag 对应的 run-scoped artifact。默认权限为
-`contents: read`；只有启用后的 release job 使用环境保护和 `contents: write`。不把 secrets
-暴露给 PR，签名相关环境变量只在受保护 release job 注入。
+`distribution.yml.version` 一致。默认权限为 `contents: read`；只有 package、summary 成功且
+完整 evidence 通过的 tag release job 使用 `contents: write`。当前不读取签名、公证或自动更新
+凭据，也不依赖仓库变量或受保护 environment。
 
 ### 6. 失败与重跑语义
 
@@ -113,8 +112,9 @@ stdout/stderr，既保留诊断又避免把环境或凭据无限写入日志。
 - [GitHub runner label 或镜像工具链变化] -> `pnpm 11.7.0` 要求 Node `>=22.13`，workflow
   固定 Node `22.14.0` 并在 job
   开始打印 runner、Electron、pnpm、profile 和 target；label 变化由验证失败暴露。
-- [macOS/Windows secret 不完整] -> unsigned smoke 仍可上传诊断 artifact；tag Release 在
-  `release:gate` 处明确失败，不创建生产 Release。
+- [macOS/Windows signing secret 未配置] -> 当前安装包保持 `unsigned-smoke` 标记，但只要结构、
+  native evidence、SBOM、license 和 smoke 门禁通过，tag Release 仍可发布；签名、公证和自动
+  更新 channel 由后续独立变更增加。
 - [安装包体积较大、artifact 保留时间有限] -> 上传压缩包和结构化 evidence，设置明确
   retention-days；Release 只附安装包和证据索引。
 - [builder 依赖网络或镜像不可用] -> 使用 lockfile/frozen install、Electron mirror
@@ -123,13 +123,13 @@ stdout/stderr，既保留诊断又避免把环境或凭据无限写入日志。
 ## Migration Plan
 
 1. 先合并 workflow、脚本参数和 CI fixture；pull request 和手动运行只验证代码与发行配置，
-   使用版本 tag 生成 unsigned artifact。
-2. 为仓库配置所需的 macOS/Windows 签名凭据和受保护 environment 后，使用版本 tag 验证
-   `release:gate` 与 GitHub Release 权限。
+   使用版本 tag 生成并发布 unsigned artifact。
+2. 后续若需要代码签名、公证或自动更新 channel，另起变更定义凭据、信任根、更新入口和
+   对应的 release gate，不在本变更中隐式启用。
 3. 若需要回滚，禁用 workflow 的 tag trigger 并保留本地 `package:desktop`；不删除既有
    profile artifact 或历史 GitHub Release。
 
 ## Open Questions
 
-无。平台矩阵、格式、触发和 unsigned/signed 边界已由当前 `distribution.yml`、发布门禁
-和本变更规格确定。
+无。平台矩阵、格式、触发和 unsigned Release 边界已由当前 `distribution.yml`、发布门禁
+和本变更规格确定；签名、公证和自动更新属于后续独立变更。

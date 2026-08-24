@@ -48,7 +48,7 @@ openspec validate "align-repository-with-distribution-design" --type change --st
 清理旧 `dist` 后的重新构建。Electron 目录产物的 `package:inspect` 和 `package:smoke` 均
 已在当前 macOS arm64 环境通过。
 
-当前没有 macOS 代码签名/公证身份或 Windows Authenticode 身份。`pnpm run package:signing -- darwin` 因缺少身份以退出码 2 结束，明确只允许 `unsigned-smoke`；`release:gate` 必须拒绝生产发布。
+当前没有 macOS 代码签名/公证身份或 Windows Authenticode 身份。`pnpm run package:signing -- darwin` 因缺少身份以退出码 2 结束，因此安装包明确标记为 `unsigned-smoke`；当前 Tag Release 允许发布这种安装包，后续签名支持另行定义。
 
 ## 文档站实施验证（2026-08-22）
 
@@ -74,8 +74,8 @@ compiler、composer、acceptance 和 profile selection 测试在该事实冲突�
 本次没有执行 GitHub Pages 实际部署、token/凭据验证、平台签名、公证、Authenticode 或生产发布 smoke；这些能力不属于本变更的授权范围。
 
 当前仍没有 macOS 代码签名/公证身份或 Windows Authenticode 身份；本次 Electron 产物明确标记为
-`unsigned-smoke`，不能作为生产发布证据。Windows 目标、macOS 签名/公证、native ABI 和
-更新发布链路仍需在对应平台构建机与平台身份上执行。
+`unsigned-smoke`，但可以作为当前 GitHub Tag Release 的安装包。Windows 目标、macOS
+签名/公证、native ABI 和自动更新发布链路仍需在对应平台构建机与独立需求中执行。
 
 ## 官方 profile 发行验证（2026-08-21）
 
@@ -112,16 +112,16 @@ manifest、SBOM 输入和许可证通知。
 `distribution.yml.version` 一致的 `v*` tag 才启动三平台 package 和 summary。summary 使用
 `pnpm run release:index` 检查三个目标是否齐全，并比较 distribution、version、profile、input
 digest 及文件 SHA-256；缺少或漂移的 evidence 会阻止后续 job。普通 job 只有
-`contents: read`，tag 打包只产生 run-scoped artifact。生产 Release 默认关闭；只有仓库变量
-`DSH_FORGE_PRODUCTION_RELEASE=true`、签名/公证证据齐全且 `release:gate` 通过时，受保护的
-release job 才会请求 `contents: write`。
+`contents: read`，tag 打包只产生 run-scoped artifact。只有 tag 对应的 package、summary 和
+`release:gate` 全部成功时，release job 才会请求 `contents: write` 并发布安装包；当前不依赖
+`DSH_FORGE_PRODUCTION_RELEASE`、受保护 environment 或签名/公证凭据。
 
 工作流固定使用 Node.js `22.14.0` 和 pnpm `11.7.0`。pnpm 11.7 的 engine 下限为 Node
 `>=22.13`，Node 20 缺少其使用的 `node:sqlite`，不能作为仓库安装或 CI runtime。
 
-当前仍未配置或执行代码签名、公证和 Windows Authenticode。unsigned smoke artifact 可以用于
-诊断和平台验证，但 `release:gate` 会拒绝未签名或缺少更新信任根的生产 Release。Linux 只承诺
-Ubuntu LTS x64；未覆盖 ARM Linux、其他发行版和跨平台交叉编译。
+当前仍未配置或执行代码签名、公证和 Windows Authenticode；unsigned smoke artifact 可以作为
+当前 GitHub Tag Release 的安装包发布，但不代表自动更新 channel 已启用。Linux 只承诺 Ubuntu
+LTS x64；未覆盖 ARM Linux、其他发行版和跨平台交叉编译。
 
 ### 跨平台打包入口诊断（2026-08-22）
 
