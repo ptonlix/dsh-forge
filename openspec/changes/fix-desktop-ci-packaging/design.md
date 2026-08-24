@@ -81,8 +81,9 @@ maintainer，FPM 会在应用目录已生成后拒绝生成 Debian 控制文件�
     electron-builder 26.15.7 源码锁定的 release 下载同一份 `7zip-win-x64.tar.gz`，校验固定 SHA-256，
     用 `tar.exe` 解包到本次 workspace 下带 run id 的受控目录，并以 Node `spawnSync` 运行 `7za.exe` 后才写入
     `ELECTRON_BUILDER_7ZIP_PATH`。`pnpm install` 后和每次 Builder 调用前还要重复记录并验证文件摘要、
-    cwd、Node 架构和启动错误，便于区分 runner 清理/隔离与 Builder 子进程上下文问题。Builder 不再自行下载
-    或解压工具；工作流也不缓存其工具目录。
+    cwd、Node 架构和启动错误，便于区分 runner 清理/隔离与 Builder 子进程上下文问题。Builder 运行时开启
+    `DEBUG=electron-builder` 记录传给 7za 的完整参数和 cwd。Builder 不再自行下载或解压工具；工作流也不缓存
+    其工具目录。
 18. Linux package smoke 会执行 `app.whenReady()`、创建受 sandbox 和 context isolation 约束的
     `BrowserWindow`，因此不能在无 `DISPLAY` 的 Ubuntu runner 直接启动。Linux workflow step 使用
     `xvfb-run --auto-servernum` 创建只供该命令使用的 Xvfb display，并关闭 TCP 监听；不以

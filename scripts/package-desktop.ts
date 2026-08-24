@@ -180,12 +180,12 @@ function writeBuilderConfig(configFile: string, input: BuilderConfigInput): void
  * 这里使用相同的 cwd 和环境提前验证，避免把文件隔离、加载器失败和 Builder
  * 自身错误混在同一个 ENOENT 中。
  */
-function preflightBuilder7za(root: string, environment: NodeJS.ProcessEnv): void {
+function preflightBuilder7za(cwd: string, environment: NodeJS.ProcessEnv): void {
   if (process.platform !== 'win32') return;
   const executable = environment.ELECTRON_BUILDER_7ZIP_PATH;
   const diagnostic: Record<string, unknown> = {
     executable: executable || null,
-    cwd: root,
+    cwd,
     node: process.version,
     nodeArch: process.arch,
     systemRoot: environment.SystemRoot || null,
@@ -210,7 +210,7 @@ function preflightBuilder7za(root: string, environment: NodeJS.ProcessEnv): void
   }
 
   const result = spawnSync(executable, ['i'], {
-    cwd: root,
+    cwd,
     encoding: 'utf8',
     env: environment,
     windowsHide: true,
@@ -747,10 +747,11 @@ function runBuilder(
   const builderEnv: NodeJS.ProcessEnv = {
     ...process.env,
     CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+    DEBUG: process.env.DEBUG || 'electron-builder',
     ELECTRON_MIRROR: process.env.ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/',
   };
   delete builderEnv.NODE_OPTIONS;
-  preflightBuilder7za(root, builderEnv);
+  preflightBuilder7za(prepackaged ? path.dirname(prepackaged) : root, builderEnv);
   const result = spawnSync(process.execPath, [builderCli, ...args], {
     cwd: root,
     encoding: 'utf8',
