@@ -202,6 +202,15 @@ describe('Desktop Release workflow', () => {
     expect(compilerSource).toContain('PROFILE_PNPM_TIMEOUT_MS = 15 * 60_000');
   });
 
+  it('summary job 在 release index 前构建 workspace toolchain dist', () => {
+    const summaryStart = source.indexOf('  summary:\n');
+    const summaryEnd = source.indexOf('\n  release:\n', summaryStart);
+    const summary = source.slice(summaryStart, summaryEnd);
+    expect(summary).toContain('pnpm install --frozen-lockfile');
+    expect(summary).toContain('pnpm run build:toolchain');
+    expect(summary.indexOf('pnpm run build:toolchain')).toBeLessThan(summary.indexOf('pnpm run release:index'));
+  });
+
   it('先在短路径注入 profile 闭包，再封装分发格式', () => {
     const mainSource = packagingSource.slice(packagingSource.indexOf('function main(): void'));
     const gitignore = readFileSync(join(process.cwd(), '.gitignore'), 'utf8');

@@ -247,6 +247,8 @@ jobs:
           path: release-artifacts
           merge-multiple: false
       - run: pnpm install --frozen-lockfile
+      - name: 构建 release index 所需的 profile toolchain
+        run: pnpm run build:toolchain
       - name: 校验矩阵结果并生成索引
         shell: bash
         run: |
