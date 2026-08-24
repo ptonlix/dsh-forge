@@ -82,6 +82,7 @@ export async function startDesktop() {
     profileTemplate: template,
     distributionId: distribution.id,
     sourceProfile,
+    onPhase: (phase) => writeSmokeReport('starting', phase),
   });
   writeSmokeReport('starting', 'profile-materialization-ready');
   writeSmokeReport('starting', 'profile-listing-starting');

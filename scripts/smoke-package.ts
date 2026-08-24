@@ -8,6 +8,8 @@ import { inspectPackage, sha256 } from '@dsh-forge/profile-toolchain/release';
 import { errorCode, errorMessage } from '@dsh-forge/profile-toolchain/types';
 import type { RuntimeManifest } from '@dsh-forge/profile-toolchain/types';
 
+const SMOKE_PROCESS_TIMEOUT_MS = 5 * 60_000;
+
 /** 对已构建 Electron 目录产物执行结构检查和真实 smoke 启动。 */
 
 /** branding.productName 与 electron-builder executableName 保持一致，不能按 Unix 执行位猜测入口。 */
@@ -56,6 +58,7 @@ function smokeProcessDetails(
   executable: string,
   report: string,
   result: SpawnSyncReturns<string>,
+  timeoutMs: number,
 ): Record<string, unknown> {
   return {
     executable,
@@ -71,7 +74,18 @@ function smokeProcessDetails(
     stderr: limitedOutput(result.stderr),
     report,
     reportExists: fs.existsSync(report),
+    timeoutMs,
   };
+}
+
+/** 将 smoke 临时根放到已解包应用所在磁盘，避免 Windows 跨盘复制大型 profile 闭包。 */
+function createSmokeRoot(application: string): string {
+  const parent = path.dirname(application);
+  try {
+    return fs.mkdtempSync(path.join(parent, '.dsh-forge-package-smoke-'));
+  } catch {
+    return fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-package-smoke-'));
+  }
 }
 
 function readSmokeReport(report: string): unknown {
@@ -109,13 +123,15 @@ function main(): void {
   const inspection = inspectPackage(runtime);
   if (!inspection.valid)
     throw new Error(`安装包结构检查失败: ${inspection.failures.map((item) => String(item.code)).join(', ')}`);
-  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-package-smoke-'));
+  const smokeRoot = createSmokeRoot(runtime.packageRoot || process.cwd());
+  const userData = path.join(smokeRoot, 'user-data');
+  fs.mkdirSync(userData, { recursive: true, mode: 0o700 });
   try {
     const electronReport = path.join(userData, 'electron-runtime.json');
     const executable = applicationExecutable(runtime.packageRoot || '', distribution.branding.productName);
     const result = spawnSync(executable, ['--dsh-forge-smoke'], {
       encoding: 'utf8',
-      timeout: 30_000,
+      timeout: SMOKE_PROCESS_TIMEOUT_MS,
       // smoke 不得读取或修改开发者的默认 ~/.dsh；profile 物化、Host 加载和
       // native addon 验证都必须发生在同一个可清理的临时根目录中。
       env: {
@@ -125,7 +141,7 @@ function main(): void {
         DSH_HOME: path.join(userData, 'dsh-home'),
       },
     });
-    const processDetails = smokeProcessDetails(executable, electronReport, result);
+    const processDetails = smokeProcessDetails(executable, electronReport, result, SMOKE_PROCESS_TIMEOUT_MS);
     // spawnSync 超时可能同时返回 status=0 和 error=ETIMEDOUT；只检查退出码
     // 会把被强制终止的 Electron 进程误判为成功。
     if (result.status !== 0 || result.signal || result.error) {
@@ -173,7 +189,7 @@ function main(): void {
     });
     process.stdout.write(`${JSON.stringify(report)}\n`);
   } finally {
-    fs.rmSync(userData, { recursive: true, force: true });
+    fs.rmSync(smokeRoot, { recursive: true, force: true });
   }
 }
 

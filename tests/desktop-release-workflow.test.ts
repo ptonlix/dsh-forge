@@ -153,6 +153,9 @@ describe('Desktop Release workflow', () => {
     expect(smokeBootstrapSource).toContain('lastPhase: previousPhase');
     expect(smokeSource).toContain('reportExists: fs.existsSync(report)');
     expect(smokeSource).toContain('smokeReport: readSmokeReport(electronReport)');
+    expect(smokeSource).toContain('const SMOKE_PROCESS_TIMEOUT_MS = 5 * 60_000');
+    expect(smokeSource).toContain('function createSmokeRoot(application: string)');
+    expect(smokeSource).toContain("path.join(parent, '.dsh-forge-package-smoke-')");
     expect(packagingSource).toContain('desktopName: distribution.branding.productName');
     expect(packagingSource).toContain('artifactName: `${distribution.id}-${distribution.version}-\\${os}-\\${arch}.\\${ext}`');
     expect(packagingSource).toContain('syncDesktopName: true');

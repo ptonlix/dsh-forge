@@ -246,16 +246,20 @@ export function ensureManagedProfile({
   dshHome,
   distributionId,
   sourceProfile,
+  onPhase,
 }: {
   readonly source: string;
   readonly dshHome: string;
   readonly distributionId: string;
   readonly sourceProfile: string;
+  readonly onPhase?: (phase: string) => void;
 }): ManagedProfileResult {
   const sourceDirectory = path.resolve(source);
   const home = path.resolve(dshHome);
   const profileName = profileNameFor(sourceProfile);
+  onPhase?.('profile-template-digest-starting');
   const template = directoryDigest(sourceDirectory);
+  onPhase?.('profile-template-digest-ready');
   const marker: ManagedProfileMarker = Object.freeze({
     schema: MANAGED_PROFILE_SCHEMA,
     distributionId,
@@ -273,7 +277,9 @@ export function ensureManagedProfile({
     const existing = readMarker(markerFile);
     if (existing?.distributionId !== distributionId || existing.sourceProfile !== sourceProfile)
       throw new Error(`拒绝覆盖不符合当前发行版受管契约的 profile: ${profileName}`);
+    onPhase?.('profile-destination-digest-starting');
     const current = directoryDigest(destination);
+    onPhase?.('profile-destination-digest-ready');
     if (current.templateDigest === template.templateDigest && fs.existsSync(path.join(destination, 'package.json'))) {
       if (
         existing.templateDigest !== template.templateDigest ||
@@ -286,17 +292,24 @@ export function ensureManagedProfile({
 
   fs.mkdirSync(profilesDirectory, { recursive: true, mode: 0o700 });
   const stage = path.join(profilesDirectory, `.${profileName}.${crypto.randomUUID()}.dsh-forge-stage`);
+  onPhase?.('profile-copy-starting');
   copyTemplate(sourceDirectory, stage, marker);
+  onPhase?.('profile-copy-ready');
   if (!destinationExists) {
+    onPhase?.('profile-commit-starting');
     fs.renameSync(stage, destination);
+    onPhase?.('profile-commit-ready');
     return Object.freeze({ directory: destination, profileName, installed: true, updated: false });
   }
 
   const backup = backupPath(home, profileName);
   fs.mkdirSync(path.dirname(backup), { recursive: true, mode: 0o700 });
+  onPhase?.('profile-backup-starting');
   fs.renameSync(destination, backup);
   try {
+    onPhase?.('profile-commit-starting');
     fs.renameSync(stage, destination);
+    onPhase?.('profile-commit-ready');
   } catch (error) {
     fs.renameSync(backup, destination);
     throw error;

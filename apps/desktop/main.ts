@@ -352,15 +352,17 @@ export function ensureDistributionProfile({
   profileTemplate,
   distributionId,
   sourceProfile,
+  onPhase,
 }: {
   readonly root: string;
   readonly dshHome: string;
   readonly profileTemplate: string | null;
   readonly distributionId: string;
   readonly sourceProfile: string;
+  readonly onPhase?: (phase: string) => void;
 }): { readonly directory: string; readonly profileName: string } {
   const source = profileTemplate || developmentProfileTemplate(root, sourceProfile);
-  return ensureManagedProfile({ source, dshHome, distributionId, sourceProfile });
+  return ensureManagedProfile({ source, dshHome, distributionId, sourceProfile, onPhase });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
