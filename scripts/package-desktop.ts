@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -172,6 +173,65 @@ function builderConfig({
 
 function writeBuilderConfig(configFile: string, input: BuilderConfigInput): void {
   fs.writeFileSync(configFile, `${JSON.stringify(builderConfig(input), null, 2)}\n`, { mode: 0o600 });
+}
+
+/**
+ * Windows 的 Builder 会在另一个 Node 进程中通过 execFile 启动 7za。
+ * 这里使用相同的 cwd 和环境提前验证，避免把文件隔离、加载器失败和 Builder
+ * 自身错误混在同一个 ENOENT 中。
+ */
+function preflightBuilder7za(root: string, environment: NodeJS.ProcessEnv): void {
+  if (process.platform !== 'win32') return;
+  const executable = environment.ELECTRON_BUILDER_7ZIP_PATH;
+  const diagnostic: Record<string, unknown> = {
+    executable: executable || null,
+    cwd: root,
+    node: process.version,
+    nodeArch: process.arch,
+    systemRoot: environment.SystemRoot || null,
+    configured: Boolean(executable),
+  };
+  if (!executable) {
+    process.stdout.write(`[electron-builder-7za-preflight] ${JSON.stringify(diagnostic)}\n`);
+    return;
+  }
+
+  try {
+    const stat = fs.statSync(executable);
+    diagnostic.exists = true;
+    diagnostic.isFile = stat.isFile();
+    diagnostic.size = stat.size;
+    diagnostic.sha256 = createHash('sha256').update(fs.readFileSync(executable)).digest('hex');
+  } catch (error: unknown) {
+    diagnostic.exists = false;
+    diagnostic.statError = errorMessage(error);
+    process.stdout.write(`[electron-builder-7za-preflight] ${JSON.stringify(diagnostic)}\n`);
+    fail(`Builder 7za 文件预检失败: ${errorMessage(error)}`, 'ELECTRON_BUILDER_7ZIP_PREFLIGHT_FAILED', diagnostic);
+  }
+
+  const result = spawnSync(executable, ['i'], {
+    cwd: root,
+    encoding: 'utf8',
+    env: environment,
+    windowsHide: true,
+  });
+  diagnostic.status = result.status;
+  diagnostic.signal = result.signal;
+  diagnostic.error = result.error
+    ? {
+      name: result.error.name,
+      message: result.error.message,
+      code: (result.error as NodeJS.ErrnoException).code || null,
+    }
+    : null;
+  process.stdout.write(`[electron-builder-7za-preflight] ${JSON.stringify(diagnostic)}\n`);
+  if (result.status !== 0 || result.error) {
+    fail(
+      `Builder 7za 启动预检失败: ${spawnFailureMessage(result, 'unknown error')}`,
+      'ELECTRON_BUILDER_7ZIP_PREFLIGHT_FAILED',
+      { ...diagnostic, ...spawnFailureDetails(result) },
+    );
+  }
 }
 
 const APP_RUNTIME_ROOTS = Object.freeze([
@@ -690,6 +750,7 @@ function runBuilder(
     ELECTRON_MIRROR: process.env.ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/',
   };
   delete builderEnv.NODE_OPTIONS;
+  preflightBuilder7za(root, builderEnv);
   const result = spawnSync(process.execPath, [builderCli, ...args], {
     cwd: root,
     encoding: 'utf8',

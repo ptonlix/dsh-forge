@@ -109,6 +109,7 @@ describe('Desktop Release workflow', () => {
     expect(source).toContain('desktop-${{ runner.os }}-${{ runner.arch }}-');
     expect(source).not.toContain('electron-builder/Cache');
     expect(source).toContain("if: ${{ matrix.target == 'win32-x64' }}");
+    expect(source).toContain("Join-Path $env:GITHUB_WORKSPACE '.ci-tools'");
     expect(source).toContain('releases/download/7zip@1.0.0/7zip-win-x64.tar.gz');
     expect(source).toContain('be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3');
     expect(source).toContain("Join-Path $toolRoot 'bin\\7za.exe'");
@@ -117,7 +118,11 @@ describe('Desktop Release workflow', () => {
     expect(source).toContain('--strip-components=1');
     expect(source).toContain("spawnSync(executable, ['i']");
     expect(source).toContain('ELECTRON_BUILDER_7ZIP_PATH=$sevenZip');
+    expect(source).toContain('安装后再次验证 Windows Builder 7za');
+    expect(source).toContain("stage: 'after-pnpm-install-node-probe'");
     expect(packagingSource).toContain('...process.env,\n    CSC_IDENTITY_AUTO_DISCOVERY: \'false\'');
+    expect(packagingSource).toContain('preflightBuilder7za(root, builderEnv);');
+    expect(packagingSource).toContain('[electron-builder-7za-preflight]');
     expect(packagingSource).toContain('NATIVE_REBUILD_TIMEOUT_MS = 15 * 60_000');
     expect(packagingSource).toContain('ELECTRON_BUILDER_TIMEOUT_MS = 45 * 60_000');
     expect(packagingSource).toContain('DEFAULT_ELECTRON_REBUILD_DIST_URL =');

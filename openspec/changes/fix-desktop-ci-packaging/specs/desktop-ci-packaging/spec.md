@@ -148,10 +148,12 @@ package 矩阵任务 SHALL 设置不少于 60 分钟的总超时预算。
 ### Requirement: Windows Builder 必须使用已验证的 7za
 
 Windows package job 在调用 electron-builder 前 SHALL 下载 electron-builder 26.15.7 声明的
-`7zip-win-x64.tar.gz`，校验其固定 SHA-256，并使用 `tar.exe` 解包至本次 runner 临时目录。workflow
-SHALL 通过 Node `spawnSync` 成功启动解包后的 `bin/7za.exe`，再将其绝对路径写入
-`ELECTRON_BUILDER_7ZIP_PATH`。工作流不得缓存 electron-builder 工具目录；下载、摘要、解包或
-Node 启动验证失败时，job SHALL 在调用 electron-builder 前以可操作错误失败。
+`7zip-win-x64.tar.gz`，校验其固定 SHA-256，并使用 `tar.exe` 解包至本次 workspace 下带 run id 的
+受控目录。workflow SHALL 通过 Node `spawnSync` 成功启动解包后的 `bin/7za.exe`，再将其绝对路径写入
+`ELECTRON_BUILDER_7ZIP_PATH`；`pnpm install` 后 SHALL 再次记录并验证该文件的摘要、cwd、Node 架构、
+`SystemRoot` 和启动结果。打包脚本在每次调用 electron-builder 前也 SHALL 使用相同 cwd 和环境执行
+一次 7za 预检，并记录文件摘要和启动错误。工作流不得缓存 electron-builder 工具目录；下载、摘要、
+解包或 Node 启动验证失败时，job SHALL 在调用 electron-builder 前以可操作错误失败。
 
 #### Scenario: ZIP/NSIS 不依赖临时 Builder 工具
 

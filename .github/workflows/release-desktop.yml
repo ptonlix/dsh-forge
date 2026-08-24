@@ -100,9 +100,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $sevenZipUrl = 'https://github.com/electron-userland/electron-builder-binaries/releases/download/7zip@1.0.0/7zip-win-x64.tar.gz'
           $sevenZipSha256 = 'be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3'
-          $toolRoot = Join-Path $env:RUNNER_TEMP "dsh-forge-7zip-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $toolParent = Join-Path $env:GITHUB_WORKSPACE '.ci-tools'
+          $toolRoot = Join-Path $toolParent "dsh-forge-7zip-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $archive = Join-Path $toolRoot '7zip-win-x64.tar.gz'
           $sevenZip = Join-Path $toolRoot 'bin\7za.exe'
+          New-Item -ItemType Directory -Path $toolParent -Force -ErrorAction Stop | Out-Null
           New-Item -ItemType Directory -Path $toolRoot -ErrorAction Stop | Out-Null
           Invoke-WebRequest -Uri $sevenZipUrl -OutFile $archive
           $actualSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -124,6 +126,16 @@ jobs:
           const { spawnSync } = require('node:child_process');
           const executable = process.argv[1];
           const result = spawnSync(executable, ['i'], { encoding: 'utf8', windowsHide: true });
+          process.stdout.write(JSON.stringify({
+            stage: 'prepare',
+            executable,
+            cwd: process.cwd(),
+            node: process.version,
+            nodeArch: process.arch,
+            systemRoot: process.env.SystemRoot || null,
+            status: result.status,
+            error: result.error ? { name: result.error.name, message: result.error.message, code: result.error.code || null } : null,
+          }) + '\n');
           if (result.error) throw result.error;
           if (result.status !== 0) {
             process.stderr.write(result.stderr || result.stdout || `7za exited with ${result.status}\n`);
@@ -135,6 +147,57 @@ jobs:
       - name: 打印构建身份
         run: node -p "JSON.stringify({platform:process.platform,arch:process.arch,target:'${{ matrix.target }}',profile:process.env.PROFILE,node:process.version})"
       - run: pnpm install --frozen-lockfile
+      - name: 安装后再次验证 Windows Builder 7za
+        if: ${{ matrix.target == 'win32-x64' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sevenZip = $env:ELECTRON_BUILDER_7ZIP_PATH
+          if ([string]::IsNullOrWhiteSpace($sevenZip)) {
+            throw '安装后未找到 ELECTRON_BUILDER_7ZIP_PATH'
+          }
+          $item = Get-Item -LiteralPath $sevenZip -ErrorAction Stop
+          $diagnostic = [ordered]@{
+            stage = 'after-pnpm-install'
+            executable = $sevenZip
+            cwd = (Get-Location).Path
+            exists = $true
+            isFile = $item.PSIsContainer -eq $false
+            size = $item.Length
+            sha256 = (Get-FileHash -LiteralPath $sevenZip -Algorithm SHA256).Hash.ToLowerInvariant()
+            node = node --version
+            processArch = $env:PROCESSOR_ARCHITECTURE
+            systemRoot = $env:SystemRoot
+            workspace = $env:GITHUB_WORKSPACE
+            runnerTemp = $env:RUNNER_TEMP
+          }
+          $diagnostic | ConvertTo-Json -Compress | Write-Output
+          $probe = @'
+          const { spawnSync } = require('node:child_process');
+          const executable = process.argv[1];
+          const result = spawnSync(executable, ['i'], {
+            cwd: process.cwd(),
+            encoding: 'utf8',
+            env: process.env,
+            windowsHide: true,
+          });
+          process.stdout.write(JSON.stringify({
+            stage: 'after-pnpm-install-node-probe',
+            executable,
+            cwd: process.cwd(),
+            node: process.version,
+            nodeArch: process.arch,
+            systemRoot: process.env.SystemRoot || null,
+            status: result.status,
+            error: result.error ? { name: result.error.name, message: result.error.message, code: result.error.code || null } : null,
+          }) + '\n');
+          if (result.error) throw result.error;
+          if (result.status !== 0) {
+            process.stderr.write(result.stderr || result.stdout || `7za exited with ${result.status}\n`);
+            process.exit(result.status || 1);
+          }
+          '@
+          node -e $probe -- $sevenZip
       # package:desktop 会在同一进程中完成一次 workspace build、profile resolve
       # 和 config dump；这里不重复执行这些步骤。
       - run: pnpm run package:desktop -- "${{ env.PROFILE }}" --target "${{ matrix.target }}" --formats "${{ matrix.formats }}"

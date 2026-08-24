@@ -232,10 +232,11 @@ electron-builder 缓存内的 `7za.exe`。下载进度表明未命中工具 arch
 目录只检查非空，不能确保预期可执行文件存在。随后将预装 `%ProgramFiles%\7-Zip\7z.exe` 提供给
 Builder，日志仍在 Node `execFile` 启动该文件时返回 `ENOENT`；PowerShell 成功自检不能证明该执行
 模型可用。workflow 现在下载 electron-builder 26.15.7 声明的 `7zip-win-x64.tar.gz`，用源码中的固定
-SHA-256 校验下载结果，再以 `tar.exe` 解包到本次 runner 临时目录，并通过 Node `spawnSync` 验证
-`bin/7za.exe`。只有探针成功才写入 `ELECTRON_BUILDER_7ZIP_PATH`，所以 ZIP 和 NSIS 不会触发
-Builder 的工具缓存下载。工作流仍不缓存 electron-builder 工具目录；Electron runtime 与 headers
-缓存保持不变。该修复仍须由下一次 Windows tag runner 实际生成 NSIS 和 ZIP 验收。
+SHA-256 校验下载结果，再以 `tar.exe` 解包到本次 workspace 下带 run id 的受控目录，并通过 Node
+`spawnSync` 验证 `bin/7za.exe`。`pnpm install` 后和每次 Builder 调用前都会重复记录文件摘要、cwd、
+Node 架构、`SystemRoot` 和启动结果；只有探针成功才继续调用 Builder。工作流仍不缓存
+electron-builder 工具目录；Electron runtime 与 headers 缓存保持不变。该修复仍须由下一次 Windows
+tag runner 实际生成 NSIS 和 ZIP 验收。
 
 ### Linux package smoke 显示服务器（2026-08-23）
 
