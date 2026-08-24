@@ -47,7 +47,7 @@ Renderer 固定使用 Chromium sandbox、context isolation 并关闭 Node integr
 
 ## 组合与发布
 
-编译器校验 runtime 兼容性、bundle manifest、peer 依赖、静态 catalog、完整 Git commit、生命周期脚本授权和依赖闭包，并在写出 profile 与发布证据前计算输入摘要。组合器运行真实 DSH loader 生成 config dump；只有健康 dump 才能通过 verify 和打包。
+编译器校验 runtime 兼容性、bundle manifest、peer 依赖、静态 catalog、完整 Git commit、生命周期脚本授权和依赖闭包。输入摘要覆盖跨平台源输入和根锁文件；按 runner 平台裁剪的实际依赖闭包仍保留在 resolved manifest 与 SBOM 证据中。组合器运行真实 DSH loader 生成 config dump；只有健康 dump 才能通过 verify 和打包。
 
 发布门禁还检查安装包布局、动态导入、native 文件、SBOM 与许可证通知、平台证据、smoke、签名和更新信任配置。本地 unsigned smoke 只能证明本地结构和启动行为，不能授权生产发布。
 

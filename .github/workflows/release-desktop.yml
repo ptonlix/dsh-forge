@@ -296,10 +296,13 @@ jobs:
           digest="$(node -e "const fs=require('fs'); const i=JSON.parse(fs.readFileSync('release-artifacts/release-index/release-index.json','utf8')); console.log(i.inputDigest)")"
           target_dir="artifacts/dsh-forge-official/${{ env.PROFILE }}/$digest"
           mkdir -p "$target_dir"
+          # release gate 在 Ubuntu runner 上重编译 profile，使用 Linux 目标的
+          # 实际闭包证据，避免与 macOS/Windows 的 optional native 选择混用。
+          cp "release-artifacts/linux-x64/resolved-manifest.json" "$target_dir/"
+          cp "release-artifacts/linux-x64/sbom.input.json" "$target_dir/"
+          cp "release-artifacts/linux-x64/THIRD-PARTY-NOTICES.txt" "$target_dir/"
           cp "release-artifacts/darwin-universal/runtime-manifest.json" "$target_dir/"
           cp "release-artifacts/darwin-universal/package-evidence.json" "$target_dir/"
-          cp "release-artifacts/darwin-universal/sbom.input.json" "$target_dir/"
-          cp "release-artifacts/darwin-universal/THIRD-PARTY-NOTICES.txt" "$target_dir/"
           for target in darwin-universal win32-x64 linux-x64; do
             cp "release-artifacts/$target/native-verification.$target.json" "$target_dir/"
             cp "release-artifacts/$target/package-smoke.$target.json" "$target_dir/"

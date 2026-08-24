@@ -42,7 +42,7 @@ Local provider、Electron runtime、启动器路径、profile 目录和原始 pn
 
 Descriptor 和 catalog 使用 `executionMode: 'trusted-in-process'`。审核、授权和 enforcement 事实彼此分开；`enforcement: unavailable` 表示公开 API 不是 Node 或 Electron 安全边界。
 
-`resolved-manifest.json` 记录 profile runtime、bundle、来源、integrity、许可证、脚本、`allowBuilds`、平台和输入摘要。`runtime-manifest.json` 还记录 Electron、Node、pnpm、native addon、构建目标、声明目标和签名事实。两种 manifest 都不能证明作者可信、许可证准确、签名有效或已执行代码安全。
+`resolved-manifest.json` 记录 profile runtime、bundle、来源、integrity、许可证、脚本、`allowBuilds`、实际平台依赖闭包和输入摘要。输入摘要覆盖跨平台源输入与根锁文件；按平台选择的 optional native 包属于证据，不改变摘要身份。`runtime-manifest.json` 还记录 Electron、Node、pnpm、native addon、构建目标、声明目标和签名事实。两种 manifest 都不能证明作者可信、许可证准确、签名有效或已执行代码安全。
 
 ## 验证
 

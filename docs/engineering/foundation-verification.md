@@ -162,6 +162,16 @@ native staging 只暂存 node-pty 的 `pty.node`/`spawn-helper` 并写入对应 
 重建后，electron-builder 设置 `npmRebuild: false` 并传入 `--publish never`，避免重复扫描
 profile 或因 Tag 隐式发布失败；Actions artifact 由独立 release job 处理。
 
+### 跨平台 input digest（2026-08-24）
+
+`inputDigest` 不再摘要当前 runner 已物化的 `dependencyClosure`。pnpm 会根据 OS/架构裁剪
+`sharp`、`koffi` 等 optional native 包，直接摘要 node_modules 会让 macOS、Windows 和
+Linux 的同一 profile 产生不同目录。现在摘要由 distribution、profile、bundle、构建授权和
+根 `pnpm-lock.yaml` 的 SHA-256 组成，因此三个目标共享同一 profile artifact 路径；各平台实际
+闭包仍写入对应的 `resolved-manifest.json`、SBOM 和许可证证据，profile verify 继续逐文件检查
+同一 runner 上的真实闭包和锁文件。Release gate 在 Ubuntu 汇总 runner 上复核 Linux 目标的
+resolved/SBOM/许可证证据，同时使用 macOS runtime manifest 和三个目标的 native/smoke evidence。
+
 跨平台 builder 不再从根 package 的 `@dsh-forge/core` 名称推导可执行文件名，而是统一使用
 `distribution.branding.productName`，Linux 的 `desktopName` 也使用该值。发行安装包文件名仅使用
 稳定的 `distribution.id`、版本、平台和架构，不重复 profile 名称。profile verify 的临时 pnpm 安装预算

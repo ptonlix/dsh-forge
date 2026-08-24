@@ -215,6 +215,14 @@ describe('Desktop Release workflow', () => {
     expect(summary.indexOf('pnpm run build:toolchain')).toBeLessThan(summary.indexOf('pnpm run release:index'));
   });
 
+  it('release gate 使用 Linux 目标的 profile 证据作为汇总 runner 基线', () => {
+    expect(source).toContain('release-artifacts/linux-x64/resolved-manifest.json');
+    expect(source).toContain('release-artifacts/linux-x64/sbom.input.json');
+    expect(source).toContain('release-artifacts/linux-x64/THIRD-PARTY-NOTICES.txt');
+    expect(source).toContain('release-artifacts/darwin-universal/runtime-manifest.json');
+    expect(source).toContain('release-artifacts/darwin-universal/package-evidence.json');
+  });
+
   it('先在短路径注入 profile 闭包，再封装分发格式', () => {
     const mainSource = packagingSource.slice(packagingSource.indexOf('function main(): void'));
     const gitignore = readFileSync(join(process.cwd(), '.gitignore'), 'utf8');

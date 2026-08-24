@@ -456,7 +456,7 @@ function inputSummary(
   profile: Profile,
   bundles: readonly Bundle[],
   profilePatch: readonly unknown[],
-  dependencyClosure: readonly DependencyClosureEntry[],
+  sourceLockfileDigest: string,
   allowBuilds: readonly string[],
   buildPolicy: Readonly<Record<string, boolean>>,
 ): unknown {
@@ -471,6 +471,9 @@ function inputSummary(
       updates: distribution.updates,
     },
     profile: { name: profile.name, runtime: profile.runtime, bundles: profile.bundles, patch: profilePatch },
+    // 依赖闭包的实际物化结果会按 runner 平台裁剪 optional native 包；根锁文件摘要
+    // 保留版本与来源事实，同时避免把当前机器的 node_modules 选择写进跨平台摘要。
+    sourceLockfileDigest,
     bundles: bundles.map((bundle) => ({
       name: bundle.name,
       version: bundle.version,
@@ -480,7 +483,6 @@ function inputSummary(
       peerDependencies: bundle.peerDependencies,
       scripts: bundle.scripts,
     })),
-    dependencyClosure,
     allowBuilds,
     buildPolicy,
   });
@@ -762,12 +764,14 @@ export function compileProfile({
     catalogEntries: catalog?.entries,
     requireCatalog: officialProfile,
   });
+  const rootLockfile = path.join(root, 'pnpm-lock.yaml');
+  if (!fs.existsSync(rootLockfile)) fail(`根 lockfile 不存在: ${rootLockfile}`, 'PROFILE_LOCK_SOURCE_MISSING');
   const input = inputSummary(
     distribution,
     profile,
     collected.bundles,
     profilePatch,
-    collected.dependencyClosure,
+    `sha256-${sha256File(rootLockfile)}`,
     collected.allowBuilds,
     collected.buildPolicy,
   );
