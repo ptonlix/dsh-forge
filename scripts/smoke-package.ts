@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { findLatestArtifact } from '@dsh-forge/profile-toolchain/compiler';
 import { parseDistribution, parseProfile } from '@dsh-forge/profile-toolchain/schema';
 import { inspectPackage, sha256 } from '@dsh-forge/profile-toolchain/release';
@@ -46,6 +46,43 @@ function runtimeFact(runtime: RuntimeManifest, name: string): string {
   return value;
 }
 
+function limitedOutput(value: string | null | undefined): string | null {
+  const output = value?.trim() || '';
+  if (!output) return null;
+  return output.length > 4_000 ? `${output.slice(0, 2_000)}\n...<truncated>...\n${output.slice(-2_000)}` : output;
+}
+
+function smokeProcessDetails(
+  executable: string,
+  report: string,
+  result: SpawnSyncReturns<string>,
+): Record<string, unknown> {
+  return {
+    executable,
+    cwd: process.cwd(),
+    platform: process.platform,
+    architecture: process.arch,
+    status: result.status,
+    signal: result.signal,
+    error: result.error
+      ? { name: result.error.name, message: result.error.message, code: errorCode(result.error) || null }
+      : null,
+    stdout: limitedOutput(result.stdout),
+    stderr: limitedOutput(result.stderr),
+    report,
+    reportExists: fs.existsSync(report),
+  };
+}
+
+function readSmokeReport(report: string): unknown {
+  if (!fs.existsSync(report)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(report, 'utf8')) as unknown;
+  } catch (error: unknown) {
+    return { invalid: errorMessage(error), raw: limitedOutput(fs.readFileSync(report, 'utf8')) };
+  }
+}
+
 function main(): void {
   const root = path.resolve(__dirname, '..');
   const distribution = parseDistribution(path.join(root, 'distribution.yml'), {
@@ -88,15 +125,16 @@ function main(): void {
         DSH_HOME: path.join(userData, 'dsh-home'),
       },
     });
+    const processDetails = smokeProcessDetails(executable, electronReport, result);
     if (result.status !== 0) {
-      const processError = result.error
-        ? `${errorCode(result.error) || 'spawn-error'}: ${errorMessage(result.error)}`
-        : null;
-      const output = (result.stderr || result.stdout || processError || result.signal || 'unknown error').trim();
-      throw new Error(`安装包 smoke 失败: ${output}`);
+      const processError = result.error ? `${errorCode(result.error) || 'spawn-error'}: ${errorMessage(result.error)}` : null;
+      throw new Error(`安装包 smoke 失败: ${JSON.stringify({ ...processDetails, processError, smokeReport: readSmokeReport(electronReport) })}`);
     }
-    if (!fs.existsSync(electronReport)) throw new Error('安装包 smoke 未写入 Electron runtime 报告');
+    if (!fs.existsSync(electronReport))
+      throw new Error(`安装包 smoke 未写入 Electron runtime 报告: ${JSON.stringify(processDetails)}`);
     const processRuntime = JSON.parse(fs.readFileSync(electronReport, 'utf8')) as Record<string, unknown>;
+    if (processRuntime.status !== 'passed')
+      throw new Error(`安装包 smoke 启动未完成: ${JSON.stringify({ ...processDetails, smokeReport: processRuntime })}`);
     const electron = runtimeFact(runtime, 'electron');
     const electronAbi = runtimeFact(runtime, 'electronAbi');
     if (

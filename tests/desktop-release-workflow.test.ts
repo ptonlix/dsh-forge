@@ -27,6 +27,8 @@ const smokeSource = readFileSync(join(process.cwd(), 'scripts', 'smoke-package.t
 const compilerSource = readFileSync(join(process.cwd(), 'tools', 'profile-toolchain', 'src', 'compiler', 'index.ts'), 'utf8');
 const releaseSource = readFileSync(join(process.cwd(), 'tools', 'profile-toolchain', 'src', 'release', 'index.ts'), 'utf8');
 const electronMainSource = readFileSync(join(process.cwd(), 'apps', 'desktop', 'electron-main.ts'), 'utf8');
+const desktopBootstrapSource = readFileSync(join(process.cwd(), 'apps', 'desktop', 'bootstrap', 'start-desktop.ts'), 'utf8');
+const smokeBootstrapSource = readFileSync(join(process.cwd(), 'apps', 'desktop', 'bootstrap', 'smoke.ts'), 'utf8');
 const desktopMainSource = readFileSync(join(process.cwd(), 'apps', 'desktop', 'main.ts'), 'utf8');
 const workflow = parse(source) as DesktopReleaseWorkflow;
 
@@ -137,8 +139,14 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain('to: \'dsh-forge/app-icon.png\'');
     expect(packagingSource).toContain('to: \'dsh-forge/app-icon-mac.png\'');
     expect(packagingSource).toContain('to: \'dsh-forge/APP-ICON-LICENSE.txt\'');
-    expect(electronMainSource).toContain('packagedResourcePath(\'dsh-forge\', filename)');
-    expect(electronMainSource).toContain('icon: applicationIconPath(root)');
+    expect(electronMainSource).toContain('startDesktop()');
+    expect(electronMainSource).toContain("writeSmokeReport('failed', 'startup'");
+    expect(desktopBootstrapSource).toContain('packagedResourcePath(\'dsh-forge\', filename)');
+    expect(desktopBootstrapSource).toContain('icon: applicationIconPath(root)');
+    expect(desktopBootstrapSource).toContain("writeSmokeReport('failed', 'single-instance'");
+    expect(smokeBootstrapSource).toContain('export function scheduleSmokeExit(');
+    expect(smokeSource).toContain('reportExists: fs.existsSync(report)');
+    expect(smokeSource).toContain('smokeReport: readSmokeReport(electronReport)');
     expect(packagingSource).toContain('desktopName: distribution.branding.productName');
     expect(packagingSource).toContain('artifactName: `${distribution.id}-${distribution.version}-\\${os}-\\${arch}.\\${ext}`');
     expect(packagingSource).toContain('syncDesktopName: true');
@@ -172,7 +180,7 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain('const profileRuntimeExclusions = profileRuntimePackages.map');
     expect(packagingSource).toContain('...profileRuntimeExclusions');
     expect(packagingSource).toContain('.filter((name) => !(APP_RUNTIME_ROOTS as readonly string[]).includes(name))');
-    expect(electronMainSource).toContain("packagedResourcePath('dsh-forge', 'launcher-fallback')");
+    expect(desktopBootstrapSource).toContain("packagedResourcePath('dsh-forge', 'launcher-fallback')");
     expect(desktopMainSource).toContain('launcherFallbackRoot?: string');
     expect(desktopMainSource).toContain('assertPackageIdentity(destination, packageName);');
     expect(desktopMainSource).toContain('fs.cpSync(source, destination, { recursive: true, dereference: true })');
