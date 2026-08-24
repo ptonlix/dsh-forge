@@ -734,8 +734,8 @@ function runBuilder(
   // 根据 git tag 隐式访问 GitHub Release 并在 package job 中失败。
   const args = ['--config', configFile, '--publish', 'never'];
   if (prepackaged) {
-    if (!fs.existsSync(prepackaged))
-      fail(`已解包 Electron 应用不存在: ${prepackaged}`, 'PACKAGE_ARTIFACT_MISSING');
+    if (!fs.existsSync(prepackaged) || !fs.statSync(prepackaged).isDirectory())
+      fail(`已解包 Electron 应用目录不存在: ${prepackaged}`, 'PACKAGE_ARTIFACT_MISSING');
     args.push('--prepackaged', path.resolve(prepackaged));
   }
   const builderFormats = formats.length ? formats : ['dir'];
@@ -747,11 +747,10 @@ function runBuilder(
   const builderEnv: NodeJS.ProcessEnv = {
     ...process.env,
     CSC_IDENTITY_AUTO_DISCOVERY: 'false',
-    DEBUG: process.env.DEBUG || 'electron-builder',
     ELECTRON_MIRROR: process.env.ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/',
   };
   delete builderEnv.NODE_OPTIONS;
-  preflightBuilder7za(prepackaged ? path.dirname(prepackaged) : root, builderEnv);
+  preflightBuilder7za(prepackaged || root, builderEnv);
   const result = spawnSync(process.execPath, [builderCli, ...args], {
     cwd: root,
     encoding: 'utf8',
@@ -782,7 +781,12 @@ function findApplication(outputDir: string, executableName: string): string {
     const directory = queue.shift()!;
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const candidate = path.join(directory, entry.name);
-      if ((expected && entry.name === expected) || (process.platform === 'linux' && entry.isDirectory() && entry.name.includes('linux-unpacked'))) return candidate;
+      if (expected && entry.name === expected) {
+        // Windows 的 --prepackaged 输入和 runtime.packageRoot 都必须是 win-unpacked 目录；
+        // 可执行文件只用于 smoke 和动态导入检查。
+        return process.platform === 'win32' ? directory : candidate;
+      }
+      if (process.platform === 'linux' && entry.isDirectory() && entry.name.includes('linux-unpacked')) return candidate;
       if (entry.isDirectory()) queue.push(candidate);
     }
   }
@@ -837,7 +841,7 @@ function copyPackagedProfileClosure(
   const resourceRoot = process.platform === 'darwin'
     ? path.join(application, 'Contents', 'Resources')
     : process.platform === 'win32'
-      ? path.join(path.dirname(application), 'resources')
+      ? path.join(application, 'resources')
       : path.join(application, 'resources');
   const profile = path.join(resourceRoot, 'dsh-forge', 'profile');
   if (!fs.existsSync(path.join(profile, 'package.json')))

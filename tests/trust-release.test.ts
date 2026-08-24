@@ -333,8 +333,11 @@ test('Windows 可执行文件使用同级 resources 作为 runtime 根', () => {
   const executable = path.join(root, 'DSH Forge.exe');
   fs.writeFileSync(executable, '');
   const paths = runtimePaths(executable, 'win32');
+  const directoryPaths = runtimePaths(root, 'win32');
   assert.equal(paths?.application, root);
+  assert.equal(directoryPaths?.application, root);
   assert.equal(paths?.resources, path.join(root, 'resources'));
+  assert.equal(directoryPaths?.resources, path.join(root, 'resources'));
   assert.equal(paths?.profile, path.join(root, 'resources', 'dsh-forge', 'profile'));
   assert.equal(paths?.runtime, path.join(root, 'resources', 'dsh-forge', 'runtime', 'node_modules'));
   fs.rmSync(root, { recursive: true, force: true });

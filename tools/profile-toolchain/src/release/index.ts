@@ -119,8 +119,9 @@ export function runtimePaths(packageRoot: string | null | undefined, platform = 
       runtime: path.join(resources, 'dsh-forge', 'runtime', 'node_modules'),
     };
   }
-  if (platform === 'win32' && packageRoot.toLowerCase().endsWith('.exe')) {
-    const application = path.dirname(packageRoot);
+  if (platform === 'win32') {
+    // 新 manifest 以 win-unpacked 目录作为 packageRoot；旧 manifest 可能仍记录 exe。
+    const application = packageRoot.toLowerCase().endsWith('.exe') ? path.dirname(packageRoot) : packageRoot;
     const resources = path.join(application, 'resources');
     return {
       application,

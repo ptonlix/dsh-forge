@@ -121,8 +121,10 @@ describe('Desktop Release workflow', () => {
     expect(source).toContain('安装后再次验证 Windows Builder 7za');
     expect(source).toContain("stage: 'after-pnpm-install-node-probe'");
     expect(packagingSource).toContain('...process.env,\n    CSC_IDENTITY_AUTO_DISCOVERY: \'false\'');
-    expect(packagingSource).toContain("DEBUG: process.env.DEBUG || 'electron-builder'");
-    expect(packagingSource).toContain('preflightBuilder7za(prepackaged ? path.dirname(prepackaged) : root, builderEnv);');
+    expect(packagingSource).toContain('preflightBuilder7za(prepackaged || root, builderEnv);');
+    expect(packagingSource).toContain('已解包 Electron 应用目录不存在');
+    expect(packagingSource).toContain("return process.platform === 'win32' ? directory : candidate;");
+    expect(packagingSource).toContain("? path.join(application, 'resources')");
     expect(packagingSource).toContain('[electron-builder-7za-preflight]');
     expect(packagingSource).toContain('NATIVE_REBUILD_TIMEOUT_MS = 15 * 60_000');
     expect(packagingSource).toContain('ELECTRON_BUILDER_TIMEOUT_MS = 45 * 60_000');
