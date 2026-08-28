@@ -147,7 +147,7 @@ test('bundle 缺少 patch 与浮动 Git 来源被拒绝', () => {
 test('profile 不得持久化 launcher 所有的 desktop layer', () => {
   const fixture = tempFile(
     'profile.yml',
-    'schema: dsh-forge/profile@1\nname: desktop\nruntime:\n  dshPackageFamily: "@deepseek-ai/dsh"\n  dshVersion: 0.1.0-rc.8\n  cordisVersion: 4.0.1\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: ">=20.0.0"\nbundles: ["@dsh-forge/desktop-layer"]\n',
+    'schema: dsh-forge/profile@1\nname: desktop\nruntime:\n  dshPackageFamily: "@deepseek-ai/dsh"\n  dshVersion: 0.1.1-rc.2\n  cordisVersion: 4.0.1\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: ">=20.0.0"\nbundles: ["@dsh-forge/desktop-layer"]\n',
   );
   throwsCode(() => parseProfile(fixture.file), 'DESKTOP_LAYER_OWNERSHIP');
   fs.rmSync(fixture.dir, { recursive: true, force: true });
@@ -172,9 +172,18 @@ test('发行版身份投影不可变，并校验更新信任根输入', () => {
 test('解析器拒绝非法 profile 名', () => {
   const invalid = tempFile(
     'profile.yml',
-    'schema: dsh-forge/profile@1\nname: INVALID\nruntime:\n  dshPackageFamily: "@deepseek-ai/dsh"\n  dshVersion: 0.1.0-rc.8\n  cordisVersion: 4.0.1\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: ">=20.0.0"\nbundles: ["@fixture/dsh-base"]\n',
+    'schema: dsh-forge/profile@1\nname: INVALID\nruntime:\n  dshPackageFamily: "@deepseek-ai/dsh"\n  dshVersion: 0.1.1-rc.2\n  cordisVersion: 4.0.1\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: ">=20.0.0"\nbundles: ["@fixture/dsh-base"]\n',
   );
   throwsCode(() => parseProfile(invalid.file), 'SCHEMA_IDENTIFIER');
+  fs.rmSync(invalid.dir, { recursive: true, force: true });
+});
+
+test('解析器拒绝旧 DSH runtime 版本', () => {
+  const invalid = tempFile(
+    'profile.yml',
+    'schema: dsh-forge/profile@1\nname: developer\nruntime:\n  dshPackageFamily: "@deepseek-ai/dsh"\n  dshVersion: 0.1.0-rc.8\n  cordisVersion: 4.0.1\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: ">=20.0.0"\nbundles: ["@fixture/dsh-base"]\n',
+  );
+  throwsCode(() => parseProfile(invalid.file), 'RUNTIME_MATRIX_DRIFT');
   fs.rmSync(invalid.dir, { recursive: true, force: true });
 });
 
@@ -210,6 +219,8 @@ test('依赖闭包要求显式 allowBuilds，并拒绝重复 peer', () => {
   fs.writeFileSync(path.join(temp, 'pnpm-workspace.yaml'), "allowBuilds:\n  '@fixture/a': true\n");
   assert.equal(collectBundles(profile, temp, { fixtureRoot }).allowBuilds.includes('@fixture/a'), true);
   writeBundle('a', '^1.0.0', true);
+  writeBundle('compatible', '^1.1.0', false);
+  assert.doesNotThrow(() => collectBundles({ ...profile, bundles: ['@fixture/a', '@fixture/compatible'] }, temp, { fixtureRoot }));
   writeBundle('b', '^2.0.0', false);
   assert.throws(
     () => collectBundles({ ...profile, bundles: ['@fixture/a', '@fixture/b'] }, temp, { fixtureRoot }),

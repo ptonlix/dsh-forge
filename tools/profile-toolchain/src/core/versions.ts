@@ -2,7 +2,7 @@
 /** 发行版允许的上游运行时组合；变更必须重新生成并验证 profile artifact。 */
 export const RUNTIME_MATRIX = Object.freeze({
   dshPackageFamily: '@deepseek-ai/dsh',
-  dshVersion: '0.1.0-rc.8',
+  dshVersion: '0.1.1-rc.2',
   cordisPackage: '@deepseek-ai/cordis',
   cordisVersion: '4.0.1',
   electronVersion: '43.4.0',

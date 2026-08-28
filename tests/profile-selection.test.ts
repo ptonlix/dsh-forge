@@ -33,7 +33,7 @@ describe('profile 命令选择', () => {
     const file = path.join(directory, 'profile.yml');
     fs.writeFileSync(
       file,
-      "schema: invalid\nname: developer\nruntime:\n  dshPackageFamily: '@deepseek-ai/dsh'\n  dshVersion: 0.1.0-rc.8\n  cordisVersion: 4.0.1\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: '>=20.0.0'\nbundles: ['@deepseek-ai/dsh-base']\n",
+      "schema: invalid\nname: developer\nruntime:\n  dshPackageFamily: '@deepseek-ai/dsh'\n  dshVersion: 0.1.1-rc.2\n  cordisVersion: 4.0.1\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: '>=20.0.0'\nbundles: ['@deepseek-ai/dsh-base']\n",
       { mode: 0o600 },
     );
     try {

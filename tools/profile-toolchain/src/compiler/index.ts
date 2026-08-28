@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { satisfies } from 'semver';
+import { intersects, satisfies } from 'semver';
 import {
   parseBundleManifest,
   parseDistribution,
@@ -227,6 +227,15 @@ function allowsVersion(range: string, version: string): boolean {
   return satisfies(version, range, { includePrerelease: true, loose: false });
 }
 
+/** 两个 peer 范围只要存在共同可安装版本即可共存；不相交范围仍必须拒绝。 */
+function compatiblePeerRanges(previous: string, current: string): boolean {
+  try {
+    return intersects(previous, current, { includePrerelease: true, loose: false });
+  } catch {
+    return false;
+  }
+}
+
 /** 只保留源输入身份；已安装包的虚拟 store 路径不是可复现的源事实。 */
 function inputPackageSource(source: PackageSource): Record<string, string> {
   return source.kind === 'workspace'
@@ -416,11 +425,7 @@ export function collectBundles(
       if (
         previous &&
         previous !== range &&
-        !(
-          peer === '@deepseek-ai/cordis' &&
-          allowsVersion(previous, profile.runtime.cordisVersion) &&
-          allowsVersion(range, profile.runtime.cordisVersion)
-        )
+        !compatiblePeerRanges(previous, range)
       ) {
         fail(`重复 peer 版本冲突: ${peer}`, 'PEER_DUPLICATE', { peer, previous, range });
       }
