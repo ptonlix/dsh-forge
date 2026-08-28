@@ -94,6 +94,16 @@ test('catalog 是静态审计快照且明确 trusted-in-process 非隔离语义'
     'schemastery',
     'ws',
   ]);
+  const dreamSkin = catalog.entries.find((entry) => entry.packageName === 'dsh-dream-skin');
+  assert.deepEqual(dreamSkin?.dependencies, []);
+  assert.deepEqual(dreamSkin?.scripts, []);
+  assert.deepEqual(dreamSkin?.capabilities, [
+    'browser-storage',
+    'user-selected-file-read',
+    'dsh-home-file-write',
+    'loopback-http-route',
+    'theme-registration',
+  ]);
   assert.throws(
     () => verifyCatalog(changed, { now: Date.parse('2027-12-31') }),
     (error: unknown) => error instanceof ForgeError && error.code === 'CATALOG_AUDIT_EXPIRED',

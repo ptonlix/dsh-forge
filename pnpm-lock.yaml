@@ -41,6 +41,9 @@ importers:
       dsh-better-sidebar:
         specifier: 0.14.0
         version: 0.14.0(fb91442256f0b9d14220b4fc49d30b8c)
+      dsh-dream-skin:
+        specifier: 8.28.0
+        version: 8.28.0(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-client-locale@0.1.1-rc.2(cd01f802de94973bbb778cfbe8724958))(@deepseek-ai/dsh-client-runtime@0.1.1-rc.2(50d0b5c1f2613a2c0507b5958572afbc))(@deepseek-ai/dsh-client-ui-settings-general@0.1.1-rc.2(fb22dad32b8ac32b67908e73d877f366))(@deepseek-ai/dsh-client-ui-settings@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-api-remotes@0.1.1-rc.2(a96598a4bd65142d64bc4096d42e5329))(@deepseek-ai/dsh-client-connection@0.1.1-rc.2)(@deepseek-ai/dsh-client-runtime@0.1.1-rc.2(50d0b5c1f2613a2c0507b5958572afbc))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-settings@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/schemastery@3.18.1)))(@deepseek-ai/dsh-client-ui-theme@0.1.1-rc.2(95f2736e59ca1e25baf1b127b260bdf9))(react@18.3.1)
       pnpm:
         specifier: 11.7.0
         version: 11.7.0
@@ -4809,6 +4812,18 @@ packages:
     peerDependenciesMeta:
       cordis:
         optional: true
+
+  dsh-dream-skin@8.28.0:
+    resolution: {integrity: sha512-1Nmnp3nXDI9xw7XiVTN82wyRFe4mc4oVhoG23VobXFiSHrN1nzRgWjWJX+fNzm+9/r389eygAv1jrsC0Sbes0g==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@deepseek-ai/cordis': ^4.0.1
+      '@deepseek-ai/dsh-client-locale': ^0.1.0-rc.6
+      '@deepseek-ai/dsh-client-runtime': ^0.1.0-rc.6
+      '@deepseek-ai/dsh-client-ui-settings': ^0.1.0-rc.6
+      '@deepseek-ai/dsh-client-ui-settings-general': ^0.1.0-rc.6
+      '@deepseek-ai/dsh-client-ui-theme': ^0.1.0-rc.6
+      react: ^18.2.0
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -11934,6 +11949,16 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  dsh-dream-skin@8.28.0(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-client-locale@0.1.1-rc.2(cd01f802de94973bbb778cfbe8724958))(@deepseek-ai/dsh-client-runtime@0.1.1-rc.2(50d0b5c1f2613a2c0507b5958572afbc))(@deepseek-ai/dsh-client-ui-settings-general@0.1.1-rc.2(fb22dad32b8ac32b67908e73d877f366))(@deepseek-ai/dsh-client-ui-settings@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-api-remotes@0.1.1-rc.2(a96598a4bd65142d64bc4096d42e5329))(@deepseek-ai/dsh-client-connection@0.1.1-rc.2)(@deepseek-ai/dsh-client-runtime@0.1.1-rc.2(50d0b5c1f2613a2c0507b5958572afbc))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-settings@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/schemastery@3.18.1)))(@deepseek-ai/dsh-client-ui-theme@0.1.1-rc.2(95f2736e59ca1e25baf1b127b260bdf9))(react@18.3.1):
+    dependencies:
+      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-client-locale': 0.1.1-rc.2(cd01f802de94973bbb778cfbe8724958)
+      '@deepseek-ai/dsh-client-runtime': 0.1.1-rc.2(50d0b5c1f2613a2c0507b5958572afbc)
+      '@deepseek-ai/dsh-client-ui-settings': 0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-api-remotes@0.1.1-rc.2(a96598a4bd65142d64bc4096d42e5329))(@deepseek-ai/dsh-client-connection@0.1.1-rc.2)(@deepseek-ai/dsh-client-runtime@0.1.1-rc.2(50d0b5c1f2613a2c0507b5958572afbc))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-settings@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/schemastery@3.18.1))
+      '@deepseek-ai/dsh-client-ui-settings-general': 0.1.1-rc.2(fb22dad32b8ac32b67908e73d877f366)
+      '@deepseek-ai/dsh-client-ui-theme': 0.1.1-rc.2(95f2736e59ca1e25baf1b127b260bdf9)
+      react: 18.3.1
 
   dunder-proto@1.0.1:
     dependencies:

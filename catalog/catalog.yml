@@ -73,3 +73,27 @@ entries:
     grant: static-official-profile
     audit: manual-source-and-capability-review
     enforcement: unavailable
+  - schema: dsh-forge/catalog@1
+    id: dsh-dream-skin
+    tier: L1
+    packageName: dsh-dream-skin
+    version: 8.28.0
+    source:
+      kind: npm
+      registry: https://registry.npmjs.org
+      tarball: https://registry.npmjs.org/dsh-dream-skin/-/dsh-dream-skin-8.28.0.tgz
+      package: dsh-dream-skin
+    integrity: sha512-1Nmnp3nXDI9xw7XiVTN82wyRFe4mc4oVhoG23VobXFiSHrN1nzRgWjWJX+fNzm+9/r389eygAv1jrsC0Sbes0g==
+    license: MIT
+    maintainer: lllaaa
+    dependencies: []
+    scripts: []
+    capabilities: [browser-storage, user-selected-file-read, dsh-home-file-write, loopback-http-route, theme-registration]
+    verifiedOn: [darwin-arm64]
+    verifiedAt: 2026-08-28
+    executionMode: trusted-in-process
+    hostSupport: [dsh-web-rc.2, desktop-protocol-1]
+    pluginRequest: [webServer, webRuntime, theme, slots, locale]
+    grant: static-official-profile
+    audit: manual-source-and-lifecycle-review
+    enforcement: unavailable

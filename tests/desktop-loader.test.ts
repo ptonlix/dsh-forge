@@ -116,9 +116,11 @@ test(
       try {
         await host.entriesSettled();
         assert.equal(bundles.filter((bundle) => bundle === 'dsh-better-sidebar').length, 1);
+        assert.equal(bundles.filter((bundle) => bundle === 'dsh-dream-skin').length, 1);
         assert.equal(bundles.includes('@dsh-forge/desktop-layer'), false);
         const dependencies = path.join(managed.directory, 'node_modules');
         assert.equal(fs.existsSync(path.join(dependencies, 'dsh-better-sidebar', 'package.json')), true);
+        assert.equal(fs.existsSync(path.join(dependencies, 'dsh-dream-skin', 'package.json')), true);
         assert.equal(fs.existsSync(path.join(dependencies, '@deepseek-ai', 'dsh-llm', 'package.json')), true);
         assert.equal(fs.existsSync(path.join(dependencies, '@dsh-forge', 'desktop-layer', 'package.json')), true);
         assert.equal(fs.lstatSync(path.join(dependencies, '@deepseek-ai', 'dsh-llm')).isDirectory(), true);

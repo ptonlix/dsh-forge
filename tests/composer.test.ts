@@ -22,6 +22,7 @@ test('真实 DSH dump 按 bundle 顺序临时注入 desktop layer', () => {
     '@deepseek-ai/dsh-web-app',
     '@dsh-forge/desktop-layer',
     'dsh-better-sidebar',
+    'dsh-dream-skin',
   ]);
   assert.equal(
     dump.entries.some(
@@ -30,6 +31,10 @@ test('真实 DSH dump 按 bundle 顺序临时注入 desktop layer', () => {
     true,
   );
   assert.equal(compiled.profile.bundles.includes('@dsh-forge/desktop-layer'), false);
+  assert.equal(
+    dump.entries.filter((entry) => entry.id === 'dream-skin' && entry.name === 'dsh-dream-skin').length,
+    1,
+  );
 });
 
 test('真实 patch 诊断未匹配行，完整 config 覆盖遵从上游 Loader', () => {

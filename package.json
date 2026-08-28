@@ -22,6 +22,7 @@
     "@dsh-forge/desktop-services-local": "workspace:*",
     "@dsh-forge/profile-toolchain": "workspace:*",
     "dsh-better-sidebar": "0.14.0",
+    "dsh-dream-skin": "8.28.0",
     "pnpm": "11.7.0",
     "yaml": "2.9.0"
   },

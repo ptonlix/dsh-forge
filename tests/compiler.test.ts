@@ -52,9 +52,14 @@ test('发行版与官方 profile 能生成确定性上游 profile 产物', () =>
     assert.match(bundle.source.integrity, /^sha256-[a-f0-9]{64}$/);
   }
   const sidebarInput = input.bundles.find((bundle) => bundle.source && bundle.source.kind === 'installed' && bundle.name === 'dsh-better-sidebar');
+  const dreamSkinInput = input.bundles.find((bundle) => bundle.source && bundle.source.kind === 'installed' && bundle.name === 'dsh-dream-skin');
   assert.equal(
     sidebarInput?.source.integrity,
     `sha256-${digest(JSON.parse(fs.readFileSync(path.join(root, 'node_modules/dsh-better-sidebar/package.json'), 'utf8')) as unknown)}`,
+  );
+  assert.equal(
+    dreamSkinInput?.source.integrity,
+    `sha256-${digest(JSON.parse(fs.readFileSync(path.join(root, 'node_modules/dsh-dream-skin/package.json'), 'utf8')) as unknown)}`,
   );
   assert.ok(fs.existsSync(path.join(compiled.profileDir, 'cordis.yml')));
   assert.match(fs.readFileSync(path.join(compiled.profileDir, 'pnpm-lock.yaml'), 'utf8'), /lockfileVersion:/);
@@ -62,7 +67,9 @@ test('发行版与官方 profile 能生成确定性上游 profile 产物', () =>
     dependencies: Record<string, string>;
   };
   assert.equal(profilePackage.dependencies['dsh-better-sidebar'], '0.14.0');
+  assert.equal(profilePackage.dependencies['dsh-dream-skin'], '8.28.0');
   assert.ok(fs.existsSync(path.join(compiled.profileDir, 'node_modules', 'dsh-better-sidebar', 'package.json')));
+  assert.ok(fs.existsSync(path.join(compiled.profileDir, 'node_modules', 'dsh-dream-skin', 'package.json')));
   const workspace = fs.readFileSync(path.join(compiled.profileDir, 'pnpm-workspace.yaml'), 'utf8');
   assert.match(workspace, /node-pty: true/);
   assert.match(workspace, /"@google\/genai": false/);
@@ -74,6 +81,10 @@ test('发行版与官方 profile 能生成确定性上游 profile 产物', () =>
     source?: { integrity?: string };
   } | undefined;
   assert.equal(external?.source?.integrity, lock.packages['dsh-better-sidebar@0.14.0']?.resolution?.integrity);
+  const dreamSkin = compiled.resolved.bundles.find((bundle) => bundle.name === 'dsh-dream-skin') as {
+    source?: { integrity?: string };
+  } | undefined;
+  assert.equal(dreamSkin?.source?.integrity, lock.packages['dsh-dream-skin@8.28.0']?.resolution?.integrity);
   assert.match(compiled.resolved.pnpmEvidence.materialized, /--offline --frozen-lockfile/);
   assert.equal(verifyProfile({ root }).verified, true);
 });
