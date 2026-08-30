@@ -308,7 +308,7 @@ describe('Desktop Release workflow', () => {
     expect(releaseIndexSource).toContain('release artifact macOS 未完成 Developer ID 签名与公证');
   });
 
-  it('Apple secrets 只由 tag macOS package 步骤读取，release job 不读取', () => {
+  it('Apple 配置只由 tag macOS package 步骤读取，release job 不读取', () => {
     const preparationStart = source.indexOf('      - name: 准备 macOS Developer ID 签名与公证凭据');
     const preparationEnd = source.indexOf('      - name: 打包已签名的 macOS 发行包', preparationStart);
     const preparation = source.slice(preparationStart, preparationEnd);
@@ -317,9 +317,12 @@ describe('Desktop Release workflow', () => {
     const release = source.slice(source.lastIndexOf('\n  release:\n'));
     expect(preparation).toContain("matrix.target == 'darwin-universal'");
     expect(preparation).toContain("startsWith(github.ref, 'refs/tags/v')");
-    for (const secret of [
+    for (const variable of [
       'APPLE_API_ISSUER',
       'APPLE_API_KEY_ID',
+    ])
+      expect(preparation).toContain(`vars.${variable}`);
+    for (const secret of [
       'MACOS_CERTIFICATE_P12_BASE64',
       'MACOS_CERTIFICATE_PASSWORD',
       'MACOS_NOTARY_API_KEY_P8_BASE64',
@@ -328,6 +331,7 @@ describe('Desktop Release workflow', () => {
     expect(preparation).toContain('APPLE_API_ISSUER=$APPLE_API_ISSUER');
     expect(preparation).toContain('APPLE_API_KEY_ID=$APPLE_API_KEY_ID');
     expect(macosPackage).not.toContain('secrets.');
+    expect(release).not.toContain('vars.APPLE_');
     expect(release).not.toContain('secrets.APPLE_');
     expect(release).not.toContain('secrets.MACOS_');
     expect(source).toContain("if: ${{ matrix.target != 'darwin-universal' }}");

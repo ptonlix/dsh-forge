@@ -1,27 +1,28 @@
 ## ADDED Requirements
 
-### Requirement: tag macOS package 必须使用受控 Apple secrets 签名和公证最终应用
+### Requirement: tag macOS package 必须使用受控 Apple 配置签名和公证最终应用
 
 仅在 tag 触发的 `darwin-universal` GitHub Actions package job 中，工作流 SHALL 要求
-`APPLE_API_ISSUER`、`APPLE_API_KEY_ID`、`MACOS_CERTIFICATE_P12_BASE64`、
-`MACOS_CERTIFICATE_PASSWORD` 和 `MACOS_NOTARY_API_KEY_P8_BASE64` 均非空。它 MUST 在
+普通 Variables 中的 `APPLE_API_ISSUER`、`APPLE_API_KEY_ID` 以及 Secrets 中的
+`MACOS_CERTIFICATE_P12_BASE64`、`MACOS_CERTIFICATE_PASSWORD` 和
+`MACOS_NOTARY_API_KEY_P8_BASE64` 均非空。它 MUST 在
 `$RUNNER_TEMP` 解码 P12/P8、以随机临时密码建立 keychain、导入 P12 并仅把必要路径和标识传给
 打包进程。P12 必须提供唯一可用的 Developer ID Application identity。
 
 任何 pull request、普通分支手动运行、Windows/Linux package job 和 release job MUST 不读取、引用
-或输出这些 secrets。工作流不得将 base64 内容、P12/P8 内容、证书密码、Apple API key 或临时
+或输出这些签名配置。工作流不得将 base64 内容、P12/P8 内容、证书密码、Apple API key 或临时
 keychain 归档或写入日志。无论成功或失败，临时 keychain、P12、P8 与 notarization ZIP MUST 在 job
 结束时清理。
 
-#### Scenario: tag macOS job 使用完整秘密集
+#### Scenario: tag macOS job 使用完整配置集
 
-- **WHEN** `v*` tag 的 universal macOS package job 启动，且五个 Apple secrets 都可用
+- **WHEN** `v*` tag 的 universal macOS package job 启动，且两个 Variables 与三个 Secrets 都可用
 - **THEN** job 创建仅供本次运行使用的临时凭据，并启用 `DSH_FORGE_MACOS_SIGNING=1` 的最终应用
   签名和公证流程
 
-#### Scenario: secrets 缺失或证书身份不合格
+#### Scenario: 配置缺失或证书身份不合格
 
-- **WHEN** 任一 secret 缺失、P12 无法导入，或 keychain 没有唯一 Developer ID Application identity
+- **WHEN** 任一 Variable 或 Secret 缺失、P12 无法导入，或 keychain 没有唯一 Developer ID Application identity
 - **THEN** macOS package job 在生成可发布 artifact 前失败，summary 和 release 均不得继续，且日志
   不得包含秘密值
 

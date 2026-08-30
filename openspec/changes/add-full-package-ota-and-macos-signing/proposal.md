@@ -53,5 +53,5 @@
   `apps/desktop/`、`.github/workflows/release-desktop.yml` 和相关 release/runtime 测试。
 - 修改私有 provider README、发行架构/工程验证文档以及 GitHub Release OpenSpec 的当前 unsigned
   描述，使其与实际行为一致。
-- macOS production Release 依赖上述五个 GitHub Actions secrets，且 P12 必须包含可用于公证的
+- macOS production Release 依赖上述两个 GitHub Actions Variables 和三个 Secrets，且 P12 必须包含可用于公证的
   `Developer ID Application` 身份。

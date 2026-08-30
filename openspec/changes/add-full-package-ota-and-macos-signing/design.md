@@ -18,7 +18,7 @@ AppImage，因为它是可以由应用原子替换的单文件分发格式。当
 - 在 Windows、macOS 和 Ubuntu 22.04+ AppImage 的已安装桌面应用中提供可拒绝的、完整安装包 OTA。
 - 让相同 SemVer 的重建包可通过单调递增 build 被识别为更新。
 - 在最终 profile 闭包进入 macOS `.app` 后完成签名、公证与 stapling，并只发布已验证的包。
-- 让 GitHub Actions secrets 仅在受信任 tag 的 macOS package job 中以受限临时文件形式存在。
+- 让 GitHub Actions 签名材料仅在受信任 tag 的 macOS package job 中以受限临时文件形式存在。
 
 **Non-goals:**
 
@@ -127,14 +127,14 @@ DMG/ZIP。
 
 ### 5. GitHub Actions 临时凭据与发布门禁
 
-仅 tag 触发的 macOS package matrix entry 可读取这五个 secrets。工作流在 `$RUNNER_TEMP` 创建
+仅 tag 触发的 macOS package matrix entry 可读取这两个 Variables 和三个 Secrets。工作流在 `$RUNNER_TEMP` 创建
 随机命名的 P12、`.p8` 和临时 keychain，以最小权限导入 P12；P8 设为 owner-only。之后只向打包
 进程传递临时文件路径、密码和 Apple API 标识，绝不输出秘密值或其 base64 内容。`always()` cleanup
 必须锁定/删除临时 keychain、P12、P8 和 notarization ZIP。
 
 tag macOS job 在构建前检查五个值均非空。缺任一值、P12 没有唯一可用 identity、notary 认证失败、
 签名验证失败或 cleanup 失败都会让该 job 失败，因此 summary 和 release 也失败。PR、普通分支
-`workflow_dispatch` 与非 macOS 矩阵任务不得引用这些 secrets。Release job 仍只拥有发布所需的
+`workflow_dispatch` 与非 macOS 矩阵任务不得引用这些签名配置。Release job 仍只拥有发布所需的
 `contents: write`，不接触 Apple credentials。
 
 ## Risks / Trade-offs
@@ -150,13 +150,13 @@ tag macOS job 在构建前检查五个值均非空。缺任一值、P12 没有�
 - [Ubuntu AppImage 没有可写启动位置] -> `APPIMAGE` 缺失、不是常规文件、无写权限或 `/etc/os-release`
   不是 Ubuntu 22.04+ 时不提供 OTA；不提供替代 Linux 安装包。
 - [本机无法完成公证] -> 本地验证可以覆盖纯逻辑和签名模式配置；Developer ID、公证、stapling 真实
-  证据只由带 secrets 的 GitHub macOS runner 产生。
+  证据只由配置完整签名材料的 GitHub macOS runner 产生。
 
 ## Migration Plan
 
-1. 合并并运行新的版本/build、OTA 和签名流程测试；未配置 Apple secrets 的本地和 PR 检查不进入
+1. 合并并运行新的版本/build、OTA 和签名流程测试；未配置 Apple 签名材料的本地和 PR 检查不进入
    signing 模式。
-2. 在 GitHub 仓库配置五个 secrets，P12 使用 Developer ID Application 证书，API key 具有 Notary
+2. 在 GitHub 仓库配置两个 Variables 和三个 Secrets，P12 使用 Developer ID Application 证书，API key 具有 Notary
    服务权限。
 3. 将 `distribution.yml.version` 与 annotated `v*` tag 对齐，增加 `dshForgeBuild`，确认 GitHub
    Release 工作流会生成三个固定名称的安装包资产后，再触发 tag Release。

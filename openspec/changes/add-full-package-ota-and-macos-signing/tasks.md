@@ -22,9 +22,10 @@
 
 - [x] 3.1 重构 macOS 打包顺序，在最终 profile 闭包注入后启用显式 signing 模式，完成 Developer ID
   signing、notarytool、stapling 和 `codesign`/`spctl`/`stapler` 验证；将已签名状态写入 runtime manifest。
-- [x] 3.2 更新 GitHub Actions macOS tag matrix：安全解码五个指定 secrets、建立临时 keychain、注入
+- [x] 3.2 更新 GitHub Actions macOS tag matrix：读取两个 Variables 和三个指定 Secrets，安全解码三个
+  敏感 Secrets、建立临时 keychain、注入
   受限环境、确保 `always()` 清理；缺失凭据、身份异常或公证失败必须阻断 Release。
-- [x] 3.3 扩展 release workflow、打包和 manifest 测试，覆盖 secrets 不泄露、PR/非 macOS 不读取 secrets、
+- [x] 3.3 扩展 release workflow、打包和 manifest 测试，覆盖签名材料不泄露、PR/非 macOS 不读取签名配置、
   最终签名顺序、失败阻断和 unsigned 本地模式。
 
 ## 4. 发布清单和验证

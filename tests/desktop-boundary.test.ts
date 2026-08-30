@@ -39,3 +39,11 @@ test('desktop layer 是唯一 bundle provider 所有者，默认 profile 只持�
       assert.equal(manifest.dependencies?.['@dsh-forge/desktop-services-local'], undefined);
   }
 });
+
+test('desktop layer 的客户端打包脚本使用跨平台 banner 引号', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'packages/bundles/desktop-layer/package.json'), 'utf8')) as {
+    readonly scripts?: { readonly bundle?: string };
+  };
+  assert.match(manifest.scripts?.bundle ?? '', /--banner:js="\/\* eslint-disable no-var \*\//);
+  assert.doesNotMatch(manifest.scripts?.bundle ?? '', /--banner:js='\/\* eslint-disable no-var \*\//);
+});

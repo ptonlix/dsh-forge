@@ -125,22 +125,23 @@ tag，再显式读取正文并通过 `--notes-file` 传入；网页已存在的 
 工作流固定使用 Node.js `22.14.0` 和 pnpm `11.7.0`。pnpm 11.7 的 engine 下限为 Node
 `>=22.13`，Node 20 缺少其使用的 `node:sqlite`，不能作为仓库安装或 CI runtime。
 
-tag 的 `darwin-universal` package job 要求
-`APPLE_API_ISSUER`、`APPLE_API_KEY_ID`、`MACOS_CERTIFICATE_P12_BASE64`、
-`MACOS_CERTIFICATE_PASSWORD` 和 `MACOS_NOTARY_API_KEY_P8_BASE64`。工作流只在该 macOS tag
-任务中于 `$RUNNER_TEMP` 创建 P12、P8 与临时 keychain；profile 闭包注入后，打包脚本以
+tag 的 `darwin-universal` package job 要求普通 Variables 中的
+`APPLE_API_ISSUER`、`APPLE_API_KEY_ID`，以及 Secrets 中的
+`MACOS_CERTIFICATE_P12_BASE64`、`MACOS_CERTIFICATE_PASSWORD` 和
+`MACOS_NOTARY_API_KEY_P8_BASE64`。工作流只在该 macOS tag 任务中于 `$RUNNER_TEMP` 创建 P12、P8
+与临时 keychain；profile 闭包注入后，打包脚本以
 Developer ID 签名最终 `.app`，提交 `notarytool`，执行 stapling，并在生成 DMG/ZIP 前运行
 `codesign`、`spctl`、`stapler` 验证。缺少凭据、identity 不唯一、签名、公证、验证或清理失败都会
 阻断 package、summary 和 Release。release index 同时拒绝缺少
 `macos-developer-id-notarized` runtime manifest 的 macOS artifact。Windows 和 Linux 仍不读取
-Apple secrets，并保持 `unsigned-smoke`；Windows Authenticode 不属于本变更。
+Apple 签名配置，并保持 `unsigned-smoke`；Windows Authenticode 不属于本变更。
 
 tag Release 还生成固定名 `version.json`，其中 Windows、macOS 和 Ubuntu AppImage 的完整安装包
 URL 由发布脚本做 HTTPS 与扩展名配置校验后写入。运行时仅对 Windows、macOS 和 Ubuntu 22.04+
 可写 AppImage 提供经确认的完整包 OTA；Linux 不发行其他安装包，也不支持静默升级。
 该清单和安装包没有摘要、签名或信任根校验；发布工作流会把三个平台安装包上传到同一 GitHub Release 的固定资产名，发布者仍需确认清单版本/build 与 Release tag 一致。
 
-本工作区尚未在带 Apple secrets 的 GitHub macOS runner 执行真实 Developer ID 签名、公证、stapling
+本工作区尚未在配置完整 Apple 签名材料的 GitHub macOS runner 执行真实 Developer ID 签名、公证、stapling
 或最终 DMG/ZIP smoke；相应证据必须由下一次符合条件的 tag job 产生。Linux 仍只承诺 Ubuntu LTS
 x64；未覆盖 ARM Linux、其他发行版和跨平台交叉编译。
 
