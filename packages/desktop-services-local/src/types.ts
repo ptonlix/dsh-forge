@@ -10,6 +10,24 @@ export interface GenerationLike {
   readonly closed: boolean;
 }
 
+/** 升级管理页可读取的主进程快照；绝不向 Host 或 renderer 泄露安装包位置。 */
+export interface UpgradeManagerStatus {
+  readonly version: string;
+  readonly build: number | null;
+  readonly support: 'supported' | 'unsupported';
+  readonly phase: 'idle' | 'checking' | 'available' | 'current' | 'preparing' | 'error' | 'unsupported';
+  readonly lastCheckedAt: string | null;
+  readonly available: Readonly<{ readonly version: string; readonly build: number }> | null;
+  readonly errorCode: string | null;
+}
+
+/** 仅 desktop layer 的 Remote gateway 使用的私有主进程能力。 */
+export interface UpgradeManagerCapability {
+  status(): UpgradeManagerStatus;
+  check(): Promise<UpgradeManagerStatus>;
+  startUpgrade(): Promise<UpgradeManagerStatus>;
+}
+
 /** provider 用于持久化 profile 选择的最小 launcher 接口。 */
 export interface ProfileManager {
   select(profile: string): Promise<GenerationLike>;
@@ -49,6 +67,7 @@ export interface DesktopHostCapability extends ProfileMutationHooks {
   readonly transactionDir?: string;
   readonly spawn?: SpawnFunction;
   readonly initializeProfile?: (profileDir: string) => void;
+  readonly upgradeManager: UpgradeManagerCapability;
 }
 
 export interface ProtectedProfileSnapshot {

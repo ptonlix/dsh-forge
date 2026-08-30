@@ -84,6 +84,7 @@ provider 或第三方代码反向修改 launcher 状态。
 | `transactionDir` | 否 | WAL 目录；默认是 `<profileDir>/.recovery`。 |
 | `spawn` | 否 | 测试或宿主提供的进程树启动器；生产默认使用受管 `spawnTree`。 |
 | `initializeProfile` | 否 | 启动 package operation 前初始化 profile 的 hook。 |
+| `upgradeManager` | 否 | 当前 generation 的升级协调器；未注入时为不可用快照，仅由 desktop layer 使用。 |
 
 `createDesktopHostCapability()` 只负责冻结和转交事实，不验证 catalog 业务正确性，也不
 改变 generation；profile、来源和平台验证由 launcher 与 profile-toolchain 在更早阶段完成。
@@ -97,6 +98,7 @@ provider 在同一个 Cordis generation 内发布：
 - `desktopProfiles`：由 `DesktopProfilesProvider` 持有 generation、manager 和只读 profile 摘要；
 - `desktopPnpm`：由 `DesktopPnpmProvider` 持有 profile 目录、catalog、进程 lease 和恢复状态；
 - `desktopServices`：协议 `1`、执行模式 `trusted-in-process` 及三个 service 名称的冻结 descriptor。
+- `upgradeManager`：私有 Typert Remote gateway，仅暴露 `status`、`check`、`startUpgrade` 三个无参数方法。
 
 fiber 卸载时，provider 先将 package service 标记为关闭，取消受管进程树，等待当前
 operation 的 `done` 完整结算，再移除 service。已关闭 generation 的旧引用不能访问或
@@ -194,6 +196,30 @@ tool、session event 或模型可见文本。若上层插件将 package 输出�
 
 无直接影响；任何模型请求前缀变化都由上层消费方负责。
 
+## 完整安装包 OTA
+
+`./launcher` 还仅向 `apps/desktop` 提供 `createFullPackageUpdater()`。它读取固定的 GitHub
+Release 资产
+`https://github.com/ptonlix/dsh-forge/releases/latest/download/version.json`，严格校验完整的
+`windows`、`macos`、`ubuntu` 条目，先比较精确 SemVer 再比较正整数 `build`，并在用户确认后将
+完整安装包下载到 `<userData>/dsh-forge/ota` 下的唯一受控文件名。应用传入
+`app.getVersion()` 和随包 `package.json` 的 `dshForgeBuild`；本地 build 缺失或无效只会拒绝检查，
+不会改变当前 generation。
+
+Windows 使用 `.exe`，macOS 使用 `.dmg`。Linux 仅在 `/etc/os-release` 为 Ubuntu 22.04 及以上，
+且 `APPIMAGE` 是可写的绝对常规文件时使用 AppImage 条目。更新器不显示 Electron UI、不退出进程，
+也不执行安装器；`apps/desktop` 持有原生确认，并在用户确认且下载文件已关闭后交给平台 helper。
+
+generation 就绪后，`apps/desktop` 创建的 `UpgradeCoordinator` 会静默检查一次，并在每次结算后
+12 小时再检查；检查不会弹出确认或下载。`@dsh-forge/desktop-layer` 通过固定的
+`upgradeManager/status`、`upgradeManager/check` 和 `upgradeManager/startUpgrade` 无参数 Typert
+Remote 注册“升级管理”设置页。页面只显示版本、build、检查时间、状态和可用版本；“立即升级”会在
+主进程重新检查仍有更新后才显示原生确认。generation 释放时会取消检查/下载并清理调度器。
+
+这不是公开 desktop service 或第三方扩展 API。清单和完整安装包刻意不校验摘要、清单签名或运行时
+信任根；本流程仅依赖 HTTPS、用户确认以及 macOS 系统签名/公证。下载取消、失败或 generation 关闭时，
+会删除未完成的暂存文件。
+
 ## 已知限制与暂缓事项
 
 - **私有 provider，不是扩展点**：第三方 bundle 不能依赖本包；其 API 只服务 launcher 和 desktop layer。
@@ -202,6 +228,8 @@ tool、session event 或模型可见文本。若上层插件将 package 输出�
 - **不回滚 node_modules**：失败恢复只覆盖声明文件和 lockfile，node_modules 状态必须通过下一 generation 验证或人工检查确认。
 - **不提供跨版本迁移**：WAL、receipt 和恢复记录使用当前 schema；格式变化需要独立迁移设计。
 - **执行模式不是隔离边界**：`trusted-in-process` 下的 Node 插件仍与 Host 共用进程权限。
+- **不校验安装包完整性**：完整安装包 OTA 只校验 HTTPS URL 形状，不校验安装包摘要或签名清单。
+- **Linux 仅支持 AppImage**：发行版只生成 Ubuntu AppImage；非 Ubuntu Linux、不可写 `APPIMAGE` 和其他分发方式不支持 OTA。
 
 ## 维护验证
 
@@ -218,4 +246,6 @@ pnpm run test:desktop-services-consumer
 ```
 
 真实加载、service teardown、generation 失效、WAL、来源漂移、健康失败和受管进程取消
-覆盖在 `tests/desktop-loader.test.ts` 与 `tests/runtime-services.test.ts`。
+覆盖在 `tests/desktop-loader.test.ts` 与 `tests/runtime-services.test.ts`。OTA 版本、暂存下载、
+取消、平台条件与 helper 回滚覆盖在 `tests/full-package-ota.test.ts` 和
+`tests/desktop-upgrade-helper.test.ts`。

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -47,7 +47,7 @@ interface NativeRebuildResult {
 }
 
 type DesktopTargetName = 'darwin-universal' | 'win32-x64' | 'linux-x64';
-type PackageFormat = 'dir' | 'dmg' | 'zip' | 'nsis' | 'AppImage' | 'deb';
+type PackageFormat = 'dir' | 'dmg' | 'zip' | 'nsis' | 'AppImage';
 
 const DEFAULT_ELECTRON_REBUILD_DIST_URL = 'https://www.electronjs.org/headers';
 const NATIVE_REBUILD_TIMEOUT_MS = 15 * 60_000;
@@ -76,6 +76,14 @@ function prepareDesktopWorkDirectory(root: string, targetName: DesktopTargetName
 
 function rootDirectory(): string {
   return path.resolve(__dirname, '..');
+}
+
+/** 打包应用与 OTA 清单必须使用同一个单调递增的本地 build 事实。 */
+export function readDshForgeBuild(manifest: Record<string, unknown>): number {
+  const build = manifest.dshForgeBuild;
+  if (typeof build !== 'number' || !Number.isSafeInteger(build) || build < 1)
+    fail('根 package.json 的 dshForgeBuild 必须是正安全整数', 'PACKAGE_BUILD_INVALID');
+  return build;
 }
 
 /** 生成 electron-builder 配置，明确 runtime、profile、catalog 和审计证据的位置。 */
@@ -156,9 +164,6 @@ function builderConfig({
       target: formats,
       icon: 'app-icon.png',
       category: 'Utility',
-      // FPM 生成 deb 控制文件需要维护者；发行身份由 distribution 统一提供。
-      maintainer: distribution.branding.publisher,
-      vendor: distribution.branding.publisher,
       // desktopName 是 app package.json metadata，Linux 配置仅负责同步该名称。
       syncDesktopName: true,
     };
@@ -337,9 +342,11 @@ function createDesktopAppStaging(root: string, compiled: CompiledProfile, distri
   }
 
   const rootPackage = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')) as Record<string, unknown>;
+  const dshForgeBuild = readDshForgeBuild(rootPackage);
   const stagedPackage: Record<string, unknown> = {
     name: rootPackage.name,
     version: rootPackage.version,
+    dshForgeBuild,
     private: true,
     type: rootPackage.type,
     main: rootPackage.main,
@@ -362,7 +369,12 @@ function createDesktopAppStaging(root: string, compiled: CompiledProfile, distri
   fs.writeFileSync(path.join(fallbackRoot, 'package.json'), '{"name":"dsh-forge-launcher-fallback","private":true,"type":"module"}\n', {
     mode: 0o600,
   });
-  for (const packageName of ['@dsh-forge/desktop-layer', '@dsh-forge/desktop-services-local']) {
+  for (const packageName of [
+    '@dsh-forge/desktop-layer',
+    '@dsh-forge/desktop-services-local',
+    '@dsh-forge/desktop-services',
+    '@dsh-forge/profile-toolchain',
+  ]) {
     const source = path.join(staging, 'node_modules', ...packageName.split('/'));
     const destination = path.join(fallbackRoot, 'node_modules', ...packageName.split('/'));
     if (!fs.existsSync(source)) fail(`应用 staging 缺少 launcher fallback 包: ${packageName}`, 'PACKAGE_APP_CLOSURE_MISSING');
@@ -430,7 +442,7 @@ function parseOptions(argv: readonly string[], distribution: Distribution): Pack
       const value = argv[++index];
       if (!value) fail('打包 formats 不能为空', 'PACKAGE_FORMAT_INVALID');
       const parsed = value.split(',').map((item) => item.trim()).filter(Boolean) as PackageFormat[];
-      if (!parsed.length || parsed.some((item) => !['dir', 'dmg', 'zip', 'nsis', 'AppImage', 'deb'].includes(item)))
+      if (!parsed.length || parsed.some((item) => !['dir', 'dmg', 'zip', 'nsis', 'AppImage'].includes(item)))
         fail(`打包 formats 无效: ${value}`, 'PACKAGE_FORMAT_INVALID');
       formats = [...new Set(parsed)];
     } else if (argument !== '--') positional.push(argument);
@@ -441,7 +453,7 @@ function parseOptions(argv: readonly string[], distribution: Distribution): Pack
       ? ['dmg', 'zip']
       : selected === 'win32-x64'
         ? ['nsis', 'zip']
-        : ['AppImage', 'deb']
+        : ['AppImage']
     : ['dir'];
   if (formats && formats.includes('dir') && formats.length > 1)
     fail('formats 不能同时包含 dir 与安装包格式', 'PACKAGE_FORMAT_INVALID');
@@ -829,6 +841,153 @@ function assertUniversalApplication(application: string): void {
     fail(`macOS universal 应用缺少 arm64/x64 切片: ${architectures.join(',')}`, 'PACKAGE_UNIVERSAL_ARCHITECTURE');
 }
 
+interface MacosSigningConfiguration {
+  readonly identity: string;
+  readonly keychain: string;
+  readonly entitlements: string;
+  readonly issuer: string;
+  readonly keyId: string;
+  readonly apiKey: string;
+  readonly temporaryDirectory: string;
+}
+
+function macosSigningConfiguration(): MacosSigningConfiguration | null {
+  const enabled = process.env.DSH_FORGE_MACOS_SIGNING;
+  if (!enabled) return null;
+  if (enabled !== '1') fail('DSH_FORGE_MACOS_SIGNING 只能为 1', 'MACOS_SIGNING_CONFIG');
+  if (process.platform !== 'darwin') fail('macOS 签名模式只能在 macOS runner 启用', 'MACOS_SIGNING_PLATFORM');
+  const required = [
+    'DSH_FORGE_MACOS_SIGNING_IDENTITY',
+    'DSH_FORGE_MACOS_SIGNING_KEYCHAIN',
+    'APPLE_API_ISSUER',
+    'APPLE_API_KEY_ID',
+    'DSH_FORGE_MACOS_NOTARY_KEY_PATH',
+    'DSH_FORGE_MACOS_SIGNING_TEMP_DIR',
+  ] as const;
+  const values = Object.fromEntries(required.map((name) => [name, process.env[name]])) as Record<
+    (typeof required)[number],
+    string | undefined
+  >;
+  for (const name of required) if (!values[name]) fail(`macOS 签名缺少 ${name}`, 'MACOS_SIGNING_CONFIG');
+  const apiKey = path.resolve(values.DSH_FORGE_MACOS_NOTARY_KEY_PATH!);
+  const temporaryDirectory = path.resolve(values.DSH_FORGE_MACOS_SIGNING_TEMP_DIR!);
+  const entitlements = path.join(rootDirectory(), 'build', 'entitlements.mac.plist');
+  if (!fs.existsSync(apiKey) || !fs.statSync(apiKey).isFile()) fail('macOS 公证 API key 文件无效', 'MACOS_SIGNING_CONFIG');
+  if (!fs.existsSync(temporaryDirectory) || !fs.statSync(temporaryDirectory).isDirectory())
+    fail('macOS 签名临时目录无效', 'MACOS_SIGNING_CONFIG');
+  if (!fs.existsSync(entitlements) || !fs.statSync(entitlements).isFile())
+    fail('macOS hardened runtime entitlement 文件无效', 'MACOS_SIGNING_CONFIG');
+  return Object.freeze({
+    identity: values.DSH_FORGE_MACOS_SIGNING_IDENTITY!,
+    keychain: path.resolve(values.DSH_FORGE_MACOS_SIGNING_KEYCHAIN!),
+    entitlements,
+    issuer: values.APPLE_API_ISSUER!,
+    keyId: values.APPLE_API_KEY_ID!,
+    apiKey,
+    temporaryDirectory,
+  });
+}
+
+function runMacosSigningCommand(command: string, args: readonly string[], code: string): string {
+  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 15 * 60_000 });
+  if (result.error || result.status !== 0)
+    fail(`macOS 签名命令失败: ${command}`, code, { command, status: result.status, signal: result.signal });
+  return result.stdout || '';
+}
+
+function assertDeveloperIdIdentity(configuration: MacosSigningConfiguration): void {
+  const output = runMacosSigningCommand(
+    'security',
+    ['find-identity', '-v', '-p', 'codesigning', configuration.keychain],
+    'MACOS_SIGNING_IDENTITY',
+  );
+  const identities = output
+    .split(/\r?\n/)
+    .filter((line) => line.includes('Developer ID Application:'));
+  if (identities.length !== 1 || !identities[0]!.includes(configuration.identity))
+    fail('P12 必须提供唯一的 Developer ID Application identity', 'MACOS_SIGNING_IDENTITY');
+}
+
+function isMachOFile(file: string): boolean {
+  const result = spawnSync('file', ['-b', file], { encoding: 'utf8', timeout: 30_000 });
+  if (result.error || result.status !== 0)
+    fail('无法识别 macOS 签名目标', 'MACOS_CODESIGN_DISCOVERY', { status: result.status, signal: result.signal });
+  return /\bMach-O\b/.test(result.stdout || '');
+}
+
+function macosSigningTargets(application: string): string[] {
+  const targets: string[] = [];
+  const walk = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const candidate = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        walk(candidate);
+        if (/\.(?:app|appex|bundle|framework|xpc)$/.test(entry.name)) targets.push(candidate);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (isMachOFile(candidate)) targets.push(candidate);
+    }
+  };
+  walk(path.join(application, 'Contents'));
+  return [...new Set(targets)].sort((left, right) => right.split(path.sep).length - left.split(path.sep).length);
+}
+
+function macosCodesignArguments(configuration: MacosSigningConfiguration, target: string): string[] {
+  return [
+    '--force', '--sign', configuration.identity, '--options', 'runtime', '--timestamp', '--keychain', configuration.keychain,
+    '--entitlements', configuration.entitlements, target,
+  ];
+}
+
+function notarizationAccepted(output: string): boolean {
+  try {
+    const result = JSON.parse(output) as { status?: unknown };
+    return result.status === 'Accepted';
+  } catch {
+    return false;
+  }
+}
+
+/** profile 闭包注入后才对最终 macOS app 签名、公证并 staple。 */
+function signMacosApplication(application: string): boolean {
+  const configuration = macosSigningConfiguration();
+  if (!configuration) return false;
+  assertDeveloperIdIdentity(configuration);
+  for (const target of macosSigningTargets(application)) {
+    runMacosSigningCommand(
+      'codesign',
+      macosCodesignArguments(configuration, target),
+      'MACOS_CODESIGN_FAILED',
+    );
+  }
+  runMacosSigningCommand(
+    'codesign',
+    macosCodesignArguments(configuration, application),
+    'MACOS_CODESIGN_FAILED',
+  );
+  const notarizationArchive = path.join(configuration.temporaryDirectory, `notarization-${randomUUID()}.zip`);
+  try {
+    runMacosSigningCommand('ditto', ['-c', '-k', '--keepParent', application, notarizationArchive], 'MACOS_NOTARIZATION_FAILED');
+    const notary = runMacosSigningCommand(
+      'xcrun',
+      [
+        'notarytool', 'submit', notarizationArchive, '--key', configuration.apiKey, '--key-id', configuration.keyId,
+        '--issuer', configuration.issuer, '--wait', '--output-format', 'json',
+      ],
+      'MACOS_NOTARIZATION_FAILED',
+    );
+    if (!notarizationAccepted(notary)) fail('macOS 公证未被 Apple 接受', 'MACOS_NOTARIZATION_FAILED');
+    runMacosSigningCommand('xcrun', ['stapler', 'staple', application], 'MACOS_STAPLE_FAILED');
+    runMacosSigningCommand('codesign', ['--verify', '--deep', '--strict', application], 'MACOS_SIGNING_VERIFY_FAILED');
+    runMacosSigningCommand('spctl', ['--assess', '--type', 'execute', application], 'MACOS_SIGNING_VERIFY_FAILED');
+    runMacosSigningCommand('xcrun', ['stapler', 'validate', application], 'MACOS_SIGNING_VERIFY_FAILED');
+    return true;
+  } finally {
+    fs.rmSync(notarizationArchive, { force: true });
+  }
+}
+
 /** 在最终应用生成后只复制一次完整 profile node_modules 闭包。 */
 function copyPackagedProfileClosure(
   compiled: CompiledProfile,
@@ -888,7 +1047,12 @@ function copyPackagedProfileClosure(
   fs.cpSync(fallbackSource, fallbackDestination, { recursive: true, dereference: true });
   assertNoSymbolicLinks(fallbackDestination);
   const fallbackAnchor = path.join(fallbackDestination, 'package.json');
-  for (const packageName of ['@dsh-forge/desktop-layer', '@dsh-forge/desktop-services-local']) {
+  for (const packageName of [
+    '@dsh-forge/desktop-layer',
+    '@dsh-forge/desktop-services-local',
+    '@dsh-forge/desktop-services',
+    '@dsh-forge/profile-toolchain',
+  ]) {
     if (!packageDirectoryFromAnchor(fallbackAnchor, packageName))
       fail(`最终应用缺少 launcher fallback 包: ${packageName}`, 'PACKAGE_APP_CLOSURE_MISSING');
   }
@@ -947,10 +1111,14 @@ function main(): void {
   const application = findApplication(unpackedOutputDir, distribution.branding.productName);
   if (targetName === 'darwin-universal') assertUniversalApplication(application);
   const profileClosure = copyPackagedProfileClosure(compiled, appStagingDir, application);
+  if (process.env.DSH_FORGE_MACOS_SIGNING === '1' && targetName !== 'darwin-universal')
+    fail('macOS 签名模式只能构建最终 universal 应用', 'MACOS_SIGNING_TARGET');
+  const macosSigned = signMacosApplication(application);
   const runtime = createRuntimeManifest({
     resolved: compiled.resolved,
     packageRoot: application,
-    signed: false,
+    signed: macosSigned,
+    signingKind: macosSigned ? 'macos-developer-id-notarized' : undefined,
     targets: [
       { os: target.os, architectures: target.architectures, nativeFiles: [] },
     ],
@@ -992,9 +1160,11 @@ function main(): void {
   );
 }
 
-try {
-  main();
-} catch (error: unknown) {
-  process.stderr.write(`${errorCode(error) || 'ERROR'}: ${errorMessage(error)}\n`);
-  process.exitCode = 1;
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  try {
+    main();
+  } catch (error: unknown) {
+    process.stderr.write(`${errorCode(error) || 'ERROR'}: ${errorMessage(error)}\n`);
+    process.exitCode = 1;
+  }
 }

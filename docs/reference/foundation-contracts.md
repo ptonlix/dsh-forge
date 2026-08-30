@@ -6,11 +6,19 @@ This reference owns stable configuration and public desktop service facts. Distr
 
 ## Distribution and Profile
 
-`distribution.yml` is the only source of distribution identity. It must declare `schema`, `id`, `name`, `packageScope`, `applicationId`, `version`, `defaultProfile`, and one or more platform/architecture targets. When updates are enabled, `channel`, `metadataUrl`, and `trustRoot` are also required; an incomplete update declaration cannot enter production release.
+`distribution.yml` is the only source of distribution identity. It must declare `schema`, `id`, `name`, `packageScope`, `applicationId`, `version`, `defaultProfile`, and one or more platform/architecture targets. Existing `channel`, `metadataUrl`, and `trustRoot` fields apply only to update metadata with a trust root; full-package OTA does not read them from `distribution.yml`.
 
 `profiles/<name>/profile.yml` declares a fixed runtime version set and ordered `bundles`. The top-level `plugins` field is rejected. `@dsh-forge/desktop-layer` is injected by the launcher for one generation and must not appear in `bundles`. A sibling `cordis.patch.yml` is the final profile override.
 
 `profile:resolve` writes generated profile files, a profile lockfile, `resolved-manifest.json`, `sbom.input.json`, license notices, and a configuration dump under `artifacts/<distribution>/<profile>/<input-digest>/`. These files are resolution evidence. After any source, bundle, version, or build-script authorization change, run `profile:resolve` and `profile:verify` again.
+
+## Full-package OTA
+
+The root `package.json` field `dshForgeBuild` must be a positive safe integer. The packaging script copies it into the application's `package.json`; maintainers must increment it when rebuilding the same SemVer. Packaged apps read the fixed `https://github.com/ptonlix/dsh-forge/releases/latest/download/version.json`. Its JSON must contain exactly `windows`, `macos`, and `ubuntu`, each with exact SemVer `version`, positive safe integer `build`, and HTTPS `url` ending in `.exe`, `.dmg`, and `.AppImage` respectively. An update is available only when the remote version is greater, or the versions match and the remote build is greater.
+
+Windows and macOS use their respective entries. Linux releases only the Ubuntu AppImage, and uses its entry only on Ubuntu 22.04+ with a writable absolute regular `APPIMAGE`; other distributions and launch modes do not check or run OTA. Nothing downloads before confirmation. A confirmed package is written only to a controlled user-data staging directory, then an `apps/desktop/platform` helper runs after Electron exits. It deletes the full package only after a zero-exit Windows installer, successful macOS replacement and launch, or an atomic Ubuntu replacement and successful AppImage launch; Ubuntu restores the old AppImage if launch fails.
+
+The manifest and full packages have no digest, signature, or trust-root verification. HTTPS, user confirmation, and macOS system signing/notarization do not make this a generally auditable update trust channel; the release workflow uploads all three platform packages to fixed asset names in the same GitHub Release, and the publisher must still verify that the manifest version/build matches the release tag.
 
 ## Public Import
 

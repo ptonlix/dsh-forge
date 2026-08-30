@@ -18,8 +18,8 @@ Ubuntu 22.04 及以上 LTS 可运行的 `x64` 包。任务必须拒绝未在
 - **WHEN** 工作流以有效 profile 运行且 `distribution.yml` 声明 macOS `arm64/x64` 与
   Windows `x64` 以及 Linux `x64`
 - **THEN** Actions 产生三个可区分的矩阵任务，macOS 上传一个包含两个架构的
-  `universal.dmg`（以及对应 zip），Windows 只上传 x64 安装包和 zip，Linux 上传 x64
-  `AppImage` 和 `deb`；每个任务记录 runner、target、Electron ABI，并只上传自身交付目标
+  `universal.dmg`（以及对应 zip），Windows 只上传 x64 安装包和 zip，Linux 只上传 x64
+  `AppImage`；每个任务记录 runner、target、Electron ABI，并只上传自身交付目标
   的包和证据
 
 #### Scenario: runner 与声明目标不匹配
@@ -100,8 +100,10 @@ manifest 和最终包结构。
 
 由 `push` 事件、GitHub Release `published` 事件或从 `v*` Tag ref 手动运行触发的 `v*` tag
 发布路径可以创建或补充 GitHub Release；tag 版本 SHALL 等于
-`distribution.yml.version`，且所有目标的 `release:gate` 必须通过。当前发布门禁 SHALL
-允许明确标记为 `unsigned-smoke` 的安装包；本变更不要求代码签名、公证或自动更新 channel。
+`distribution.yml.version`，且所有目标的 `release:gate` 必须通过。后续
+`add-full-package-ota-and-macos-signing` 变更要求 macOS universal artifact 的 runtime manifest
+记录 `macos-developer-id-notarized`，否则汇总和 Release 必须失败；Windows 与 Linux 可以保持
+`unsigned-smoke`。
 
 #### Scenario: 版本 tag 且门禁通过
 
@@ -109,8 +111,8 @@ manifest 和最终包结构。
   license 和真实 smoke 均通过且 `release:gate` 返回成功
 - **THEN** release job 使用最小 `contents: write` 权限创建或补充 GitHub Release；push 或
   Tag ref 手动运行重新获取并校验 annotated tag，显式读取其正文作为发布公告，非 annotated
-  Tag 直接失败；Release 事件向已有 Release 上传安装包和汇总索引且不覆盖已有公告；安装包
-  可以是 `unsigned-smoke`
+  Tag 直接失败；Release 事件向已有 Release 上传安装包、汇总索引和固定名 `version.json` 且不覆盖
+  已有公告；macOS 安装包必须完成签名和公证，Windows 与 Linux 安装包可以是 `unsigned-smoke`
 
 #### Scenario: 门禁失败或版本不匹配
 

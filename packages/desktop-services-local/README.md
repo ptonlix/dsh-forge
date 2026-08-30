@@ -87,6 +87,7 @@ the provider, preventing the provider or third-party code from mutating launcher
 | `transactionDir` | No | WAL directory; defaults to `<profileDir>/.recovery`. |
 | `spawn` | No | Process-tree launcher supplied by tests or the host; production uses managed `spawnTree`. |
 | `initializeProfile` | No | Hook that initializes the profile before starting a package operation. |
+| `upgradeManager` | No | Generation-owned upgrade coordinator; an unavailable snapshot is used when omitted and only the desktop layer consumes it. |
 
 `createDesktopHostCapability()` only freezes and forwards facts. It does not validate catalog
 business correctness or change the generation; the launcher and profile-toolchain complete
@@ -101,6 +102,7 @@ The provider publishes these services within one Cordis generation:
 - `desktopProfiles`: `DesktopProfilesProvider` owns the generation, manager, and readonly profile summaries;
 - `desktopPnpm`: `DesktopPnpmProvider` owns the profile directory, catalog, process lease, and recovery state;
 - `desktopServices`: frozen descriptor with protocol `1`, execution mode `trusted-in-process`, and the three service names.
+- `upgradeManager`: private Typert Remote gateway exposing only the no-argument `status`, `check`, and `startUpgrade` methods.
 
 When the fiber unloads, the provider first marks the package service closed, cancels the managed
 process tree, waits for the current operation's `done` to settle completely, and then removes
@@ -201,6 +203,35 @@ the content source and token behavior separately.
 
 No direct impact; any change to a model request prefix is owned by the upper-level consumer.
 
+## Full-package OTA
+
+`./launcher` also exposes `createFullPackageUpdater()` to `apps/desktop` only. It reads the
+fixed GitHub Release asset
+`https://github.com/ptonlix/dsh-forge/releases/latest/download/version.json`, validates all
+`windows`, `macos`, and `ubuntu` entries, compares exact SemVer before the positive integer
+`build`, and downloads a confirmed full package into `<userData>/dsh-forge/ota` using a unique
+controlled filename. The app supplies `app.getVersion()` and the packaged `package.json` field
+`dshForgeBuild`; a missing or invalid local build rejects the check without changing the current
+generation.
+
+Windows uses `.exe`, macOS uses `.dmg`, and Linux is eligible only when `/etc/os-release` is
+Ubuntu 22.04 or later and `APPIMAGE` is a writable absolute regular file. The updater neither
+shows Electron UI nor exits the process or executes an installer. `apps/desktop` owns native
+confirmation and hands the closed staging file to its platform helper after confirmation.
+
+After a generation is ready, the `UpgradeCoordinator` created by `apps/desktop` performs one silent
+check and schedules the next check 12 hours after each settlement; checks never show confirmation or
+download. `@dsh-forge/desktop-layer` registers an "Upgrade management" Settings page through the
+fixed no-argument Typert Remote methods `upgradeManager/status`, `upgradeManager/check`, and
+`upgradeManager/startUpgrade`. The page displays the version, build, check time, state, and available
+version; "Upgrade now" causes native confirmation only after a fresh main-process check still finds
+an update. Releasing a generation cancels checks/downloads and clears the scheduler.
+
+This is not a public desktop service or a third-party extension API. The manifest and full
+packages intentionally have no digest, manifest signature, or runtime trust root verification;
+HTTPS, user confirmation, and macOS system signing/notarization are the only protections in this
+flow. A cancelled, failed, or closed-generation download removes its incomplete staging file.
+
 ## Known limitations and deferred work
 
 - **Private provider, not an extension point**: Third-party bundles cannot depend on this package; its API serves only the launcher and desktop layer.
@@ -209,6 +240,8 @@ No direct impact; any change to a model request prefix is owned by the upper-lev
 - **No `node_modules` rollback**: Failure recovery covers declarations and the lockfile only; the next generation or a manual check must verify the `node_modules` state.
 - **No cross-version migration**: WAL, receipt, and recovery records use the current schema; format changes require a separate migration design.
 - **Execution mode is not isolation**: Under `trusted-in-process`, Node plugins still share process permissions with the Host.
+- **No package integrity verification**: Full-package OTA validates URL shape and HTTPS but does not verify a package digest or a signed manifest.
+- **Linux scope is AppImage only**: The release produces only the Ubuntu AppImage. Non-Ubuntu Linux, non-writable `APPIMAGE`, and other distribution methods do not support OTA.
 
 ## Maintenance verification
 
@@ -226,4 +259,6 @@ pnpm run test:desktop-services-consumer
 
 Real loading, service teardown, generation invalidation, WAL, source drift, health failures, and
 managed process cancellation are covered by `tests/desktop-loader.test.ts` and
-`tests/runtime-services.test.ts`.
+`tests/runtime-services.test.ts`. OTA versioning, staging download, cancellation, platform
+eligibility, and helper rollback are covered by `tests/full-package-ota.test.ts` and
+`tests/desktop-upgrade-helper.test.ts`.

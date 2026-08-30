@@ -1,3 +1,5 @@
 - insert:
+    - id: dsh-forge-desktop-layer
+      name: '@dsh-forge/desktop-layer'
     - id: dsh-forge-desktop-services
       name: '@dsh-forge/desktop-services-local'

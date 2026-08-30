@@ -4,7 +4,12 @@ import * as path from 'node:path';
 
 const MANAGED_PROFILE_SCHEMA = 'dsh-forge/managed-profile@1';
 const MANAGED_PROFILE_MARKER = '.dsh-forge-profile.json';
-const LAUNCHER_FALLBACK_PACKAGES = new Set(['@dsh-forge/desktop-layer', '@dsh-forge/desktop-services-local']);
+const LAUNCHER_FALLBACK_PACKAGES = new Set([
+  '@dsh-forge/desktop-layer',
+  '@dsh-forge/desktop-services-local',
+  '@dsh-forge/desktop-services',
+  '@dsh-forge/profile-toolchain',
+]);
 
 interface ManagedProfileMarker {
   readonly schema: typeof MANAGED_PROFILE_SCHEMA;

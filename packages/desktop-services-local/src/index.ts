@@ -3,6 +3,7 @@ import { DESKTOP_SERVICES_PROTOCOL, desktopServiceNames, type DesktopServicesDes
 import { fail } from './errors.ts';
 import { DesktopPnpmProvider } from './packages.ts';
 import { DesktopProfilesProvider } from './profiles.ts';
+import { UpgradeManagerGateway } from './upgrade-manager-remote.ts';
 import type { DesktopHostCapability } from './types.ts';
 
 declare module '@deepseek-ai/cordis' {
@@ -17,6 +18,7 @@ function installDesktopServices(ctx: Context): void {
   if (!capability) fail('desktop launcher capability 不可用', 'SERVICE_CONFIG');
   const profiles = new DesktopProfilesProvider(capability.generation, capability.manager, capability.profiles);
   const pnpm = new DesktopPnpmProvider(capability);
+  new UpgradeManagerGateway(ctx);
   const descriptor: DesktopServicesDescriptor = Object.freeze({
     protocol: DESKTOP_SERVICES_PROTOCOL,
     executionMode: 'trusted-in-process',

@@ -13,6 +13,7 @@ function writeTarget(root: string, target: string, digest: string): void {
     distribution: { id: 'dsh-forge-official', version: '0.1.0' },
     profile: { name: 'dsh-forge-official' },
     targets: [{ os: universal ? 'darwin' : target.split('-')[0], architectures: universal ? ['arm64', 'x64'] : ['x64'] }],
+    signing: universal ? { signed: true, kind: 'macos-developer-id-notarized' } : { signed: false, kind: 'unsigned-smoke' },
   };
   fs.writeFileSync(path.join(directory, 'runtime-manifest.json'), JSON.stringify(runtime));
   fs.writeFileSync(path.join(directory, 'package-evidence.json'), JSON.stringify({ manifest: runtime }));
@@ -83,6 +84,32 @@ test('release index 拒绝目标 inspection 错位', () => {
         profile: 'dsh-forge-official',
       }),
       /inspect\/smoke\/evidence 未通过: win32-x64/,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('release index 拒绝未完成签名和公证的 macOS 产物', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-release-index-macos-signing-'));
+  try {
+    for (const target of ['darwin-universal', 'win32-x64', 'linux-x64']) writeTarget(root, target, 'a'.repeat(64));
+    const runtimeFile = path.join(root, 'darwin-universal', 'runtime-manifest.json');
+    const evidenceFile = path.join(root, 'darwin-universal', 'package-evidence.json');
+    const runtime = JSON.parse(fs.readFileSync(runtimeFile, 'utf8')) as Record<string, unknown>;
+    runtime.signing = { signed: false, kind: 'unsigned-smoke' };
+    fs.writeFileSync(runtimeFile, JSON.stringify(runtime));
+    fs.writeFileSync(evidenceFile, JSON.stringify({ manifest: runtime }));
+    assert.throws(
+      () =>
+        buildReleaseIndex({
+          root,
+          expectedTargets: ['darwin-universal', 'win32-x64', 'linux-x64'],
+          distribution: 'dsh-forge-official',
+          version: '0.1.0',
+          profile: 'dsh-forge-official',
+        }),
+      /macOS 未完成 Developer ID 签名与公证/,
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

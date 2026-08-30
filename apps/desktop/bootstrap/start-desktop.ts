@@ -3,10 +3,15 @@ import * as path from 'node:path';
 import { app } from 'electron';
 import { assertNoStartupInstall, loadStaticCatalog } from '@dsh-forge/profile-toolchain/trust';
 import { parseDistribution } from '@dsh-forge/profile-toolchain/schema';
+import {
+  createFullPackageUpdater,
+  readDshForgeBuild,
+} from '@dsh-forge/desktop-services-local/launcher';
 import { resolveDesktopDshHome } from '../runtime/dsh-home.ts';
 import { packagedProfileName, profileFromArguments, selectDesktopProfile } from '../runtime/profile-selection.ts';
 import { createElectronRuntime } from '../native-runtime.ts';
 import { createDesktopLauncher, ensureDistributionProfile, listProfiles, probeLoopback, startDshHost } from '../main.ts';
+import { UpgradeCoordinator } from '../platform/upgrade-coordinator.ts';
 import { scheduleSmokeExit, writeSmokeReport } from './smoke.ts';
 
 /** Electron 公共启动编排：应用就绪、profile、Host、窗口和 generation 必须顺序完成。 */
@@ -92,6 +97,17 @@ export async function startDesktop() {
   reportDevelopmentPhase(`使用 DSH Home: ${dshHome.source === 'default' ? '~/.dsh' : '$DSH_HOME'}`);
   reportDevelopmentPhase(`使用 profile: ${managedProfile.profileName}`);
   let quitting = false;
+  // launcher.start() 才会创建 coordinator；函数声明提前以便 coordinator 的闭包
+  // 复用同一条原生退出路径，而不会在启动阶段弹出确认框。
+  async function requestExit(reason: string): Promise<void> {
+    if (quitting) return;
+    quitting = true;
+    try {
+      await launcher.signal(reason);
+    } finally {
+      runtime.exit(0);
+    }
+  }
   const windowFactory = runtime.createWindowFactory({
     // start-desktop.js 位于 bootstrap 子目录，preload.js 与 electron-main.js
     // 同级；使用显式父目录避免拆分入口后指向 bootstrap/preload.js。
@@ -127,18 +143,24 @@ export async function startDesktop() {
     pnpmArgs: [path.join(runtimeRoot, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')],
     pnpmEnv: { ELECTRON_RUN_AS_NODE: '1' },
     catalog: catalog.entries,
+    createUpgradeManager: (generation) => {
+      const updater = createFullPackageUpdater({
+        generation,
+        userData: runtime.userDataPath,
+        appVersion: app.getVersion(),
+        packageJsonPath: path.join(root, 'package.json'),
+      });
+      return new UpgradeCoordinator({
+        updater,
+        version: app.getVersion(),
+        build: readDshForgeBuild(path.join(root, 'package.json')),
+        confirm: (update) => runtime.confirmFullPackageUpgrade(update),
+        requestExit: (reason) => requestExit(reason),
+      });
+    },
   });
   writeSmokeReport('starting', 'launcher-ready');
   runtime.setSecondInstanceHandler(() => launcher.show());
-  const requestExit = async (reason: string): Promise<void> => {
-    if (quitting) return;
-    quitting = true;
-    try {
-      await launcher.signal(reason);
-    } finally {
-      runtime.exit(0);
-    }
-  };
   app.on('activate', () => launcher?.show());
   app.on('before-quit', (event) => {
     if (quitting) return;

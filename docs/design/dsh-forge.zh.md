@@ -49,7 +49,9 @@ Renderer 固定使用 Chromium sandbox、context isolation 并关闭 Node integr
 
 编译器校验 runtime 兼容性、bundle manifest、peer 依赖、静态 catalog、完整 Git commit、生命周期脚本授权和依赖闭包。输入摘要覆盖跨平台源输入和根锁文件的规范化 YAML 语义；按 runner 平台裁剪的实际依赖闭包仍保留在 resolved manifest 与 SBOM 证据中。组合器运行真实 DSH loader 生成 config dump；只有健康 dump 才能通过 verify 和打包。
 
-发布门禁还检查安装包布局、动态导入、native 文件、SBOM 与许可证通知、平台证据和真实 smoke。当前 GitHub Tag Release 允许发布明确标记为 `unsigned-smoke` 的安装包；代码签名、公证和自动更新 channel 不属于当前流水线，后续单独实现。运行时更新若启用，仍必须遵守更新元数据的信任校验。
+发布门禁还检查安装包布局、动态导入、native 文件、SBOM 与许可证通知、平台证据和真实 smoke。tag 的 macOS universal 产物必须在 profile 闭包注入后完成 Developer ID 签名、Apple 公证、stapling 和本机验证；缺少凭据或任一步失败都会阻断汇总与 Release。未显式启用签名的本地、Windows 与 Linux 构建仍如实标记为 `unsigned-smoke`。Windows Authenticode 不属于当前流水线。
+
+完整安装包 OTA 由 `apps/desktop` 与私有的 `@dsh-forge/desktop-services-local/launcher` 协作实现。已打包应用从固定 GitHub Release `version.json` 读取 Windows、macOS 和 Ubuntu AppImage 条目，按 SemVer 优先、`build` 次级比较；generation 就绪后由 `UpgradeCoordinator` 静默检查并每 12 小时调度一次，只有设置页发起的重新检查仍有更新且用户确认后才下载完整包并有序退出，平台 helper 再执行安装或替换。升级状态通过 desktop layer 的固定 Typert Remote 投影，页面不接触 URL、路径或命令。Ubuntu 只发布并支持 Ubuntu 22.04+ 且可写 `APPIMAGE` 的 AppImage，其他 Linux 启动方式不受支持。该通道不校验安装包摘要、清单签名或信任根，不能称为通用可信更新通道。
 
 ## Fork 契约
 
@@ -67,4 +69,4 @@ pnpm run package:inspect -- dsh-forge-official
 pnpm run package:smoke -- dsh-forge-official
 ```
 
-本文不声称平台签名、公证或 GitHub Pages 已部署；这些事实分别属于工程验证记录和文档站构建输出。
+本文不声称真实 Apple 签名、公证、stapling 或 GitHub Pages 已执行；这些事实分别属于工程验证记录和文档站构建输出。

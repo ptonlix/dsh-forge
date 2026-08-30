@@ -4,7 +4,8 @@
 `--dir` 构建，并把一个 profile 固定进安装包；`distribution.yml` 声明
 `darwin-arm64`、`darwin-x64`、`win32-x64`。`package:inspect`、`package:smoke` 和
 `release:gate` 读取同一 profile artifact 中的 manifest/evidence。仓库没有现成
-`.github/workflows`，本变更只定义安装包 GitHub Release 出口，不实现自动更新 channel。
+`.github/workflows`。完整安装包 OTA 与 macOS 签名/公证由后续
+`add-full-package-ota-and-macos-signing` 变更实现。
 
 ## Goals / Non-Goals
 
@@ -22,8 +23,8 @@
 
 **Non-Goals:**
 
-- 不在本变更中实现 signing/notarization/Authenticode provider、更新元数据服务或运行时
-  更新客户端。
+- 不在本变更中实现 Windows Authenticode provider；macOS signing/notarization 与完整安装包
+  OTA 由后续 `add-full-package-ota-and-macos-signing` 变更实现。
 - 不允许发行包在运行时选择 profile，不新增在线插件下载或 GitHub Marketplace。
 - Linux 仅支持 Ubuntu 22.04 及以上 LTS 的 x64 运行环境，不承诺其他发行版或 ARM Linux。
 
@@ -39,8 +40,8 @@
 `node-pty` 等 native addon 必须用目标 Electron ABI 重建，runner label 作为 workflow 常量
 维护，平台淘汰时由一次变更更新矩阵。
 
-Linux 构建使用 Ubuntu 22.04 runner，生成 x64 `AppImage` 与 `deb`；包的运行时兼容边界
-记录为 Ubuntu 22.04 及以上 LTS，不承诺其他发行版或 ARM Linux。
+Linux 构建使用 Ubuntu 22.04 runner，仅生成 x64 `AppImage`；包的运行时兼容边界记录为
+Ubuntu 22.04 及以上 LTS，不承诺其他发行版或 ARM Linux。
 
 ### 2. 分离验证 job、构建 job 和汇总 job
 
@@ -62,7 +63,7 @@ dump、目标打包、inspect、smoke，并上传一个按目标命名的 artifa
 `--target darwin-universal|win32-x64|linux-x64` 与 `--formats <csv>` 参数。脚本必须拒绝参数目标与
 当前 runner、`distribution.yml` 不一致，并将实际架构集合写入 runtime manifest。CI 为
 macOS 生成 `dmg,zip`，产物名中的架构固定为 `universal`；Windows 生成 `nsis,zip`，架构固定
-为 `x64`；Linux 生成 `AppImage,deb`，架构固定为 `x64`。目录产物继续作为 inspect/smoke 的输入。安装包由同一次 builder 执行产生，命名
+为 `x64`；Linux 只生成 `AppImage`，架构固定为 `x64`。目录产物继续作为 inspect/smoke 的输入。安装包由同一次 builder 执行产生，命名
 沿用 `${distribution.id}-${profile}-${version}-${os}-${arch}.${ext}`。
 
 相比复制 MagicChat 的静态 `electron-builder.yml`，动态配置可以继续注入解引用 profile
@@ -89,8 +90,8 @@ Release gate 在 Ubuntu 汇总 runner 上使用 Linux 目标的 profile、manife
 summary 或 Release job；`push` 到 `v*`、GitHub Release `published` 事件，以及从 `v*` Tag ref
 手动运行 `workflow_dispatch` 均运行三平台 package 和 summary，且 tag 必须与
 `distribution.yml.version` 一致。默认权限为 `contents: read`；只有 package、summary 成功且
-完整 evidence 通过的 tag release job 使用 `contents: write`。当前不读取签名、公证或自动更新
-凭据，也不依赖仓库变量或受保护 environment。release job 使用完整 checkout 校验 Tag 仍指向
+完整 evidence 通过的 tag release job 使用 `contents: write`。后续变更只在 tag macOS package job
+读取签名和公证凭据，release job 不读取它们，也不依赖仓库变量或受保护 environment。release job 使用完整 checkout 校验 Tag 仍指向
 本次 workflow 的 `GITHUB_SHA`；push 或 Tag ref 手动运行时在 checkout 后重新获取并校验 annotated
 tag，显式读取其正文并作为 `--notes-file` 传给 GitHub CLI；非 annotated Tag 直接失败。Release
 事件触发时向已有 Release 上传附件，不覆盖已有公告。
@@ -118,9 +119,8 @@ stdout/stderr，既保留诊断又避免把环境或凭据无限写入日志。
 - [GitHub runner label 或镜像工具链变化] -> `pnpm 11.7.0` 要求 Node `>=22.13`，workflow
   固定 Node `22.14.0` 并在 job
   开始打印 runner、Electron、pnpm、profile 和 target；label 变化由验证失败暴露。
-- [macOS/Windows signing secret 未配置] -> 当前安装包保持 `unsigned-smoke` 标记，但只要结构、
-  native evidence、SBOM、license 和 smoke 门禁通过，tag Release 仍可发布；签名、公证和自动
-  更新 channel 由后续独立变更增加。
+- [macOS signing secret 未配置] -> 后续变更使 tag macOS package job 失败并阻断 Release；它不回退
+  发布 unsigned macOS 包。Windows Authenticode 与 Linux 平台签名仍不在此范围。
 - [安装包体积较大、artifact 保留时间有限] -> 上传压缩包和结构化 evidence，设置明确
   retention-days；Release 只附安装包和证据索引。
 - [builder 依赖网络或镜像不可用] -> 使用 lockfile/frozen install、Electron mirror
@@ -129,13 +129,13 @@ stdout/stderr，既保留诊断又避免把环境或凭据无限写入日志。
 ## Migration Plan
 
 1. 先合并 workflow、脚本参数和 CI fixture；pull request 和手动运行只验证代码与发行配置，
-   使用版本 tag 生成并发布 unsigned artifact。
-2. 后续若需要代码签名、公证或自动更新 channel，另起变更定义凭据、信任根、更新入口和
-   对应的 release gate，不在本变更中隐式启用。
+   使用版本 tag 生成 Windows/Linux `unsigned-smoke` 与 macOS release 输入。
+2. `add-full-package-ota-and-macos-signing` 为 tag macOS job 定义凭据、签名、公证、更新清单和
+   对应的 release gate。
 3. 若需要回滚，禁用 workflow 的 tag trigger 并保留本地 `package:desktop`；不删除既有
    profile artifact 或历史 GitHub Release。
 
 ## Open Questions
 
-无。平台矩阵、格式、触发和 unsigned Release 边界已由当前 `distribution.yml`、发布门禁
-和本变更规格确定；签名、公证和自动更新属于后续独立变更。
+无。平台矩阵、格式和触发由当前 `distribution.yml` 与本变更规格确定；签名、公证和完整安装包
+OTA 的当前行为由 `add-full-package-ota-and-macos-signing` 变更定义。

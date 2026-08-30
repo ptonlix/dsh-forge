@@ -276,6 +276,7 @@ export function createRuntimeManifest({
   resolved,
   packageRoot,
   signed = false,
+  signingKind,
   targets = [],
   declaredTargets = null,
   artifact = null,
@@ -285,6 +286,7 @@ export function createRuntimeManifest({
   resolved: ResolvedManifest;
   packageRoot: string | null;
   signed?: boolean;
+  signingKind?: string;
   targets: readonly RuntimeTarget[];
   declaredTargets?: readonly RuntimeTarget[] | null;
   artifact?: string | null;
@@ -321,7 +323,7 @@ export function createRuntimeManifest({
     packageRoot: paths?.application || null,
     artifact: artifact ? path.resolve(artifact) : null,
     nativeRebuild,
-    signing: { signed, kind: signed ? 'platform-identity' : 'unsigned-smoke' },
+    signing: { signed, kind: signed ? signingKind || 'platform-identity' : 'unsigned-smoke' },
   };
 }
 

@@ -6,11 +6,19 @@
 
 ## 发行版与 Profile
 
-`distribution.yml` 是发行版身份的唯一来源。它必须声明 `schema`、`id`、`name`、`packageScope`、`applicationId`、`version`、`defaultProfile` 和至少一个平台/架构目标。启用更新时还必须声明 `channel`、`metadataUrl` 和 `trustRoot`；不完整的更新声明不能进入生产发布。
+`distribution.yml` 是发行版身份的唯一来源。它必须声明 `schema`、`id`、`name`、`packageScope`、`applicationId`、`version`、`defaultProfile` 和至少一个平台/架构目标。已有的 `channel`、`metadataUrl` 和 `trustRoot` 仅属于带信任根的更新元数据配置；完整安装包 OTA 不从 `distribution.yml` 读取它们。
 
 `profiles/<name>/profile.yml` 声明固定 runtime 版本组和有序 `bundles`。顶层 `plugins` 字段会被拒绝。`@dsh-forge/desktop-layer` 由启动器为一个 generation 临时注入，不能出现在 `bundles` 中。同目录的 `cordis.patch.yml` 是最终 profile 覆盖层。
 
 `profile:resolve` 在 `artifacts/<distribution>/<profile>/<input-digest>/` 下写出生成 profile、profile lockfile、`resolved-manifest.json`、`sbom.input.json`、许可证通知和 config dump。这些文件是解析证据。源文件、bundle、版本或构建脚本授权改变后，必须重新运行 `profile:resolve` 和 `profile:verify`。
+
+## 完整安装包 OTA
+
+根 `package.json` 的 `dshForgeBuild` 必须是正安全整数。打包脚本把它复制到应用的 `package.json`；同一 SemVer 重新发布时，维护者必须递增该值。已打包应用固定读取 `https://github.com/ptonlix/dsh-forge/releases/latest/download/version.json`，该 JSON 必须恰好包含 `windows`、`macos`、`ubuntu` 三个条目；每个条目包含精确 SemVer `version`、正安全整数 `build` 和 HTTPS `url`，扩展名依次为 `.exe`、`.dmg`、`.AppImage`。远端版本更高，或版本相同且远端 build 更高时才提供升级。
+
+Windows 与 macOS 直接使用各自条目。Linux 只发布 Ubuntu AppImage，且必须同时满足 Ubuntu 22.04+、可写绝对常规文件 `APPIMAGE` 才使用该条目；其他发行版和其他启动方式不会检查或执行 OTA。确认前不下载；确认后的文件只写入用户数据目录受控暂存区，并由 `apps/desktop/platform` helper 在当前 Electron 退出后执行。Windows 安装器零退出、macOS 替换并启动新应用、Ubuntu 原子替换并成功启动新 AppImage 后才删除完整包；Ubuntu 启动失败必须恢复旧 AppImage。
+
+该清单和完整安装包没有摘要、签名或信任根校验。HTTPS、用户确认和 macOS 系统签名/公证不能替代可审计的通用更新信任通道；发布工作流会把三个平台安装包上传到同一 GitHub Release 的固定资产名，发布者仍需确认清单版本、build 与 Release tag 一致。
 
 ## 公开导入
 

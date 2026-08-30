@@ -26,6 +26,7 @@ const packagingSource = readFileSync(join(process.cwd(), 'scripts', 'package-des
 const smokeSource = readFileSync(join(process.cwd(), 'scripts', 'smoke-package.ts'), 'utf8');
 const compilerSource = readFileSync(join(process.cwd(), 'tools', 'profile-toolchain', 'src', 'compiler', 'index.ts'), 'utf8');
 const releaseSource = readFileSync(join(process.cwd(), 'tools', 'profile-toolchain', 'src', 'release', 'index.ts'), 'utf8');
+const releaseIndexSource = readFileSync(join(process.cwd(), 'scripts', 'release-index.ts'), 'utf8');
 const electronMainSource = readFileSync(join(process.cwd(), 'apps', 'desktop', 'electron-main.ts'), 'utf8');
 const desktopBootstrapSource = readFileSync(join(process.cwd(), 'apps', 'desktop', 'bootstrap', 'start-desktop.ts'), 'utf8');
 const smokeBootstrapSource = readFileSync(join(process.cwd(), 'apps', 'desktop', 'bootstrap', 'smoke.ts'), 'utf8');
@@ -60,6 +61,16 @@ describe('Desktop Release workflow', () => {
     expect(source).toContain('test "$tag_commit" = "$GITHUB_SHA"');
   });
 
+  it('Linux 只构建并发布 AppImage', () => {
+    const linux = workflow.jobs.package?.strategy?.matrix?.include?.find((item) => item.target === 'linux-x64');
+    expect(linux?.formats).toBe('AppImage');
+    expect(packagingSource).toContain("type PackageFormat = 'dir' | 'dmg' | 'zip' | 'nsis' | 'AppImage';");
+    expect(packagingSource).toContain(": ['AppImage']");
+    expect(packagingSource).not.toContain("'deb'");
+    expect(packagingSource).not.toContain('maintainer: distribution.branding.publisher');
+    expect(source).not.toContain("-name '*.deb'");
+  });
+
   it('跨平台命令不使用 PowerShell 的 PROFILE 自动变量', () => {
     expect(source).not.toContain('"$PROFILE"');
     expect(source).toContain('"${{ env.PROFILE }}"');
@@ -76,7 +87,7 @@ describe('Desktop Release workflow', () => {
     expect(packageManifest.engines?.node).toBe('>=22.13.0');
     expect(packageManifest.homepage).toBe('https://github.com/ptonlix/dsh-forge');
     expect(packageManifest.scripts?.typecheck).toBe(
-      'pnpm run build:desktop-services && tsc -p tsconfig.json --noEmit',
+      'pnpm run build:desktop-layer && pnpm run build:desktop-services && tsc -p tsconfig.json --noEmit',
     );
   });
 
@@ -169,8 +180,6 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain('desktopName: distribution.branding.productName');
     expect(packagingSource).toContain('artifactName: `${distribution.id}-${distribution.version}-\\${os}-\\${arch}.\\${ext}`');
     expect(packagingSource).toContain('syncDesktopName: true');
-    expect(packagingSource).toContain('maintainer: distribution.branding.publisher');
-    expect(packagingSource).toContain('vendor: distribution.branding.publisher');
     expect(packagingSource).toContain('homepage: rootPackage.homepage');
     expect(packagingSource).not.toContain('artifactName: `${distribution.id}-${resolved.profile.name}-');
     expect(packagingSource).toContain('MACOS_UNIVERSAL_X64_ARCH_FILES');
@@ -195,7 +204,9 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain("const fallbackSource = path.join(appStagingDir, 'launcher-fallback')");
     expect(packagingSource).toContain("const fallbackDestination = path.join(resourceRoot, 'dsh-forge', 'launcher-fallback')");
     expect(packagingSource).toContain("const fallbackRoot = path.join(staging, 'launcher-fallback')");
+    expect(packagingSource).toContain("'@dsh-forge/desktop-services'");
     expect(packagingSource).toContain("'@dsh-forge/desktop-services-local'");
+    expect(packagingSource).toContain("'@dsh-forge/profile-toolchain'");
     expect(packagingSource).toContain('const profileRuntimeExclusions = profileRuntimePackages.map');
     expect(packagingSource).toContain('...profileRuntimeExclusions');
     expect(packagingSource).toContain('.filter((name) => !(APP_RUNTIME_ROOTS as readonly string[]).includes(name))');
@@ -272,6 +283,69 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain('? `${executableName}.app`');
     expect(packagingSource).toContain('findApplication(unpackedOutputDir, distribution.branding.productName)');
     expect(releaseSource).toContain("const machArchitecture = architecture === 'x64' ? 'x86_64' : architecture");
+  });
+
+  it('macOS 只在 profile 闭包注入后签名、公证、staple 并拒绝未签名 Release', () => {
+    const mainSource = packagingSource.slice(packagingSource.indexOf('function main(): void'));
+    const closure = 'copyPackagedProfileClosure(compiled, appStagingDir, application)';
+    const signing = 'const macosSigned = signMacosApplication(application)';
+    const distributable = 'distributableBuild = runBuilder(';
+    expect(mainSource.indexOf(signing)).toBeGreaterThan(mainSource.indexOf(closure));
+    expect(mainSource.indexOf(distributable)).toBeGreaterThan(mainSource.indexOf(signing));
+    expect(packagingSource).toContain("'--force', '--sign', configuration.identity, '--options', 'runtime', '--timestamp'");
+    expect(packagingSource).toContain("'--keychain', configuration.keychain");
+    expect(packagingSource).toContain("'--entitlements', configuration.entitlements");
+    expect(packagingSource).toContain("'notarytool', 'submit'");
+    expect(packagingSource).toContain("['stapler', 'staple', application]");
+    expect(packagingSource).toContain("'codesign', ['--verify', '--deep', '--strict'");
+    expect(packagingSource).toContain("'spctl', ['--assess', '--type', 'execute'");
+    expect(packagingSource).toContain("['stapler', 'validate', application]");
+    expect(releaseSource).toContain("signingKind || 'platform-identity'");
+    expect(source).toContain('MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}');
+    expect(source).toContain('MACOS_NOTARY_API_KEY_P8_BASE64: ${{ secrets.MACOS_NOTARY_API_KEY_P8_BASE64 }}');
+    expect(source).toContain('DSH_FORGE_MACOS_SIGNING=1');
+    expect(source).toContain('清理 macOS 签名与公证临时材料');
+    expect(releaseIndexSource).toContain('release artifact macOS 未完成 Developer ID 签名与公证');
+  });
+
+  it('Apple secrets 只由 tag macOS package 步骤读取，release job 不读取', () => {
+    const preparationStart = source.indexOf('      - name: 准备 macOS Developer ID 签名与公证凭据');
+    const preparationEnd = source.indexOf('      - name: 打包已签名的 macOS 发行包', preparationStart);
+    const preparation = source.slice(preparationStart, preparationEnd);
+    const packageEnd = source.indexOf('      - name: 打包 Windows 或 Linux 发行包', preparationEnd);
+    const macosPackage = source.slice(preparationEnd, packageEnd);
+    const release = source.slice(source.lastIndexOf('\n  release:\n'));
+    expect(preparation).toContain("matrix.target == 'darwin-universal'");
+    expect(preparation).toContain("startsWith(github.ref, 'refs/tags/v')");
+    for (const secret of [
+      'APPLE_API_ISSUER',
+      'APPLE_API_KEY_ID',
+      'MACOS_CERTIFICATE_P12_BASE64',
+      'MACOS_CERTIFICATE_PASSWORD',
+      'MACOS_NOTARY_API_KEY_P8_BASE64',
+    ])
+      expect(preparation).toContain(`secrets.${secret}`);
+    expect(preparation).toContain('APPLE_API_ISSUER=$APPLE_API_ISSUER');
+    expect(preparation).toContain('APPLE_API_KEY_ID=$APPLE_API_KEY_ID');
+    expect(macosPackage).not.toContain('secrets.');
+    expect(release).not.toContain('secrets.APPLE_');
+    expect(release).not.toContain('secrets.MACOS_');
+    expect(source).toContain("if: ${{ matrix.target != 'darwin-universal' }}");
+  });
+
+  it('Release 生成并上传固定名称的 version.json', () => {
+    expect(source).toContain('pnpm run release:version-manifest -- --output "$RUNNER_TEMP/version.json"');
+    expect(source).toContain('release-artifacts/release-index/release-index.json "$RUNNER_TEMP/version.json" --clobber');
+    expect(source).toContain('release-artifacts/release-index/release-index.json "$RUNNER_TEMP/version.json" \\');
+  });
+
+  it('为 OTA 生成稳定的 GitHub Release 资产地址', () => {
+    expect(source).toContain('dsh-forge-windows.exe');
+    expect(source).toContain('dsh-forge-macos.dmg');
+    expect(source).toContain('dsh-forge-ubuntu.AppImage');
+    expect(source).toContain('test "${#windows_installers[@]}" -eq 1');
+    expect(source).toContain('test "${#macos_installers[@]}" -eq 1');
+    expect(source).toContain('test "${#ubuntu_installers[@]}" -eq 1');
   });
 
   it('Linux 动态导入与 smoke 按应用名称启动主程序', () => {

@@ -48,7 +48,7 @@ openspec validate "align-repository-with-distribution-design" --type change --st
 清理旧 `dist` 后的重新构建。Electron 目录产物的 `package:inspect` 和 `package:smoke` 均
 已在当前 macOS arm64 环境通过。
 
-当前没有 macOS 代码签名/公证身份或 Windows Authenticode 身份。`pnpm run package:signing -- darwin` 因缺少身份以退出码 2 结束，因此安装包明确标记为 `unsigned-smoke`；当前 Tag Release 允许发布这种安装包，后续签名支持另行定义。
+在该次 2026-08-19 验证中没有 macOS 代码签名/公证身份或 Windows Authenticode 身份。`pnpm run package:signing -- darwin` 因缺少身份以退出码 2 结束，因此当时的安装包标记为 `unsigned-smoke`；后续 tag macOS 签名要求见本记录的 GitHub Desktop Release CI 章节。
 
 ## 文档站实施验证（2026-08-22）
 
@@ -73,9 +73,9 @@ compiler、composer、acceptance 和 profile selection 测试在该事实冲突�
 
 本次没有执行 GitHub Pages 实际部署、token/凭据验证、平台签名、公证、Authenticode 或生产发布 smoke；这些能力不属于本变更的授权范围。
 
-当前仍没有 macOS 代码签名/公证身份或 Windows Authenticode 身份；本次 Electron 产物明确标记为
-`unsigned-smoke`，但可以作为当前 GitHub Tag Release 的安装包。Windows 目标、macOS
-签名/公证、native ABI 和自动更新发布链路仍需在对应平台构建机与独立需求中执行。
+该次文档站变更没有配置 macOS 代码签名/公证身份或 Windows Authenticode 身份；本次 Electron
+产物明确标记为 `unsigned-smoke`。后续 tag macOS 签名/公证与完整安装包 OTA 要求见本记录的
+GitHub Desktop Release CI 章节；Windows 目标、native ABI 和真实发布链路仍需由对应平台构建机验证。
 
 ## 官方 profile 发行验证（2026-08-21）
 
@@ -103,7 +103,7 @@ evidence 均保存在对应 profile artifact 中，记录所有最终 `.node` �
 `add-github-desktop-release-ci` 引入 `.github/workflows/release-desktop.yml`，使用三个原生
 runner 目标：`macos-14` 构建一个同时包含 `arm64/x64` 的 `darwin-universal`，`windows-2022`
 构建 `win32-x64`，`ubuntu-22.04` 构建面向 Ubuntu 22.04 及以上 LTS 的 `linux-x64`。对应输出为
-`universal.dmg`/zip、Windows x64 `nsis`/zip 和 Linux x64 `AppImage`/deb；每个目标还上传
+`universal.dmg`/zip、Windows x64 `nsis`/zip 和 Linux x64 `AppImage`；每个目标还上传
 `runtime-manifest.json`、`package-evidence.json`、`package-inspection.<target>.json`、native
 verification、smoke report、resolved manifest、SBOM 输入和许可证通知。`package-inspection` 在
 目标 runner 上执行，release runner 不重新打开其它平台的 `.app` 或 `.exe`。
@@ -120,14 +120,29 @@ digest 及文件 SHA-256；缺少或漂移的 evidence 会阻止后续 job。普
 `contents: write` 并发布安装包；新建 Release 时 workflow 在 checkout 后重新获取并校验 annotated
 tag，再显式读取正文并通过 `--notes-file` 传入；网页已存在的 Release 则只上传构建附件，不覆盖
 已有公告。非 annotated Tag 会直接失败，不会回退到 commit message。当前不依赖
-`DSH_FORGE_PRODUCTION_RELEASE`、受保护 environment 或签名/公证凭据。
+`DSH_FORGE_PRODUCTION_RELEASE` 或受保护 environment。
 
 工作流固定使用 Node.js `22.14.0` 和 pnpm `11.7.0`。pnpm 11.7 的 engine 下限为 Node
 `>=22.13`，Node 20 缺少其使用的 `node:sqlite`，不能作为仓库安装或 CI runtime。
 
-当前仍未配置或执行代码签名、公证和 Windows Authenticode；unsigned smoke artifact 可以作为
-当前 GitHub Tag Release 的安装包发布，但不代表自动更新 channel 已启用。Linux 只承诺 Ubuntu
-LTS x64；未覆盖 ARM Linux、其他发行版和跨平台交叉编译。
+tag 的 `darwin-universal` package job 要求
+`APPLE_API_ISSUER`、`APPLE_API_KEY_ID`、`MACOS_CERTIFICATE_P12_BASE64`、
+`MACOS_CERTIFICATE_PASSWORD` 和 `MACOS_NOTARY_API_KEY_P8_BASE64`。工作流只在该 macOS tag
+任务中于 `$RUNNER_TEMP` 创建 P12、P8 与临时 keychain；profile 闭包注入后，打包脚本以
+Developer ID 签名最终 `.app`，提交 `notarytool`，执行 stapling，并在生成 DMG/ZIP 前运行
+`codesign`、`spctl`、`stapler` 验证。缺少凭据、identity 不唯一、签名、公证、验证或清理失败都会
+阻断 package、summary 和 Release。release index 同时拒绝缺少
+`macos-developer-id-notarized` runtime manifest 的 macOS artifact。Windows 和 Linux 仍不读取
+Apple secrets，并保持 `unsigned-smoke`；Windows Authenticode 不属于本变更。
+
+tag Release 还生成固定名 `version.json`，其中 Windows、macOS 和 Ubuntu AppImage 的完整安装包
+URL 由发布脚本做 HTTPS 与扩展名配置校验后写入。运行时仅对 Windows、macOS 和 Ubuntu 22.04+
+可写 AppImage 提供经确认的完整包 OTA；Linux 不发行其他安装包，也不支持静默升级。
+该清单和安装包没有摘要、签名或信任根校验；发布工作流会把三个平台安装包上传到同一 GitHub Release 的固定资产名，发布者仍需确认清单版本/build 与 Release tag 一致。
+
+本工作区尚未在带 Apple secrets 的 GitHub macOS runner 执行真实 Developer ID 签名、公证、stapling
+或最终 DMG/ZIP smoke；相应证据必须由下一次符合条件的 tag job 产生。Linux 仍只承诺 Ubuntu LTS
+x64；未覆盖 ARM Linux、其他发行版和跨平台交叉编译。
 
 ### 跨平台打包入口诊断（2026-08-22）
 
@@ -212,8 +227,8 @@ profile，且在成功、失败或超时后清理临时目录。该修复不改�
 
 ### 短路径两阶段封装（2026-08-23）
 
-profile 闭包注入发生在 electron-builder 生成已解包应用之后；若此时才生成 NSIS、ZIP、DMG、
-AppImage 或 DEB，安装包不会遗漏 `dsh-forge/profile/node_modules`。脚本现先以 `dir` 目标在
+profile 闭包注入发生在 electron-builder 生成已解包应用之后；若此时才生成 NSIS、ZIP、DMG 或
+AppImage，安装包不会遗漏 `dsh-forge/profile/node_modules`。脚本现先以 `dir` 目标在
 仓库 `.desktop-work/<target>/unpacked` 中生成已解包应用，再在该短路径写入完整 profile 闭包、
 runtime manifest 和 package evidence，最后以 electron-builder `--prepackaged` 封装请求的
 分发格式。该目录对 Windows 的 ConPTY `OpenConsole.exe` 等深层 helper 保持在安全路径预算内，
@@ -236,13 +251,11 @@ smoke 都从 `distribution.branding.productName` 使用同一个名称定位 `DS
 验证。跨 job 汇总继续传递最终安装包、runtime manifest、package evidence 与平台 smoke
 evidence，不能将 `packageRoot` 视为另一台 runner 上可访问的路径。
 
-### Linux Debian FPM 元数据修复（2026-08-23）
+### Linux AppImage 发行范围（2026-08-28）
 
-Linux 应用目录已能生成时，`.deb` 的 FPM 阶段仍会要求项目 URL 和维护者。独立
-`desktop-deploy/package.json` 此前没有保留 `homepage`，根 package 也没有带邮箱的 author，
-因此 electron-builder 在控制文件生成前停止。根 package 现在声明项目主页，staging 保留该字段；
-Linux builder 从 `distribution.branding.publisher` 写入 `maintainer` 与 `vendor`，无需将个人邮箱
-伪造为发行维护者。该变更仍须通过下一次 Ubuntu runner 的 AppImage/deb 实际构建验证。
+Linux 发行格式收敛为 AppImage。`scripts/package-desktop.ts` 只接受 `AppImage`，Linux 默认格式和
+GitHub Actions matrix 均只请求该格式，Release 附件筛选不再匹配 `.deb`。FPM 专用的
+`maintainer` 与 `vendor` 配置已移除；下一次 Ubuntu tag runner 只需生成 AppImage 并执行其 smoke。
 
 ### Windows Builder 7-Zip（2026-08-23）
 
@@ -263,7 +276,7 @@ Linux 的已打包应用会等待 Electron ready、创建 BrowserWindow 并等�
 的 Ubuntu runner 直接执行 smoke 时，Ozone X11 以 `Missing X server or $DISPLAY` 退出，这不是
 安装包或 renderer 失败。workflow 对 `linux-x64` 改用 `xvfb-run --auto-servernum` 启动 smoke，并为
 虚拟 X server 关闭 TCP 监听；macOS 和 Windows 仍直接使用各自原生显示会话。该修复保留 sandbox、
-context isolation 和真实窗口加载，仍须由下一次 Linux tag runner 产生 AppImage/DEB 与 smoke evidence
+context isolation 和真实窗口加载，仍须由下一次 Linux tag runner 产生 AppImage 与 smoke evidence
 验收。
 
 ### Linux launcher fallback（2026-08-23）

@@ -260,6 +260,12 @@ describe('发行版受管 profile', () => {
     const fallback = path.join(installed.directory, 'node_modules', '@dsh-forge');
     fs.mkdirSync(fallback, { recursive: true, mode: 0o700 });
     fs.symlinkSync(path.join(fallbackRoot, 'desktop-layer'), path.join(fallback, 'desktop-layer'), 'dir');
+    writeFile(path.join(fallback, 'desktop-services', 'package.json'), '{"name":"@dsh-forge/desktop-services"}\n');
+    writeFile(path.join(fallback, 'profile-toolchain', 'package.json'), '{"name":"@dsh-forge/profile-toolchain"}\n');
+    writeFile(
+      path.join(fallback, 'desktop-services-local', 'package.json'),
+      '{"name":"@dsh-forge/desktop-services-local"}\n',
+    );
 
     const repeated = ensureManagedProfile({
       source: template,

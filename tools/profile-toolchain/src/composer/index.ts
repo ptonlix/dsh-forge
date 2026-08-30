@@ -162,9 +162,13 @@ function verifyEntryPackages(entries: readonly ConfigEntry[], compiled: Compiled
     if (typeof entry.name !== 'string' || entry.name.startsWith('.')) continue;
     const segments = entry.name.split('/');
     const packageName = entry.name.startsWith('@') ? segments.slice(0, 2).join('/') : segments[0]!;
-    const launcherPackage =
-      packageName === '@dsh-forge/desktop-services-local' &&
-      fs.existsSync(path.join(compiled.root, 'packages', 'desktop-services-local', 'package.json'));
+    const launcherPackagePath =
+      packageName === DESKTOP_LAYER
+        ? path.join(compiled.root, 'packages', 'bundles', 'desktop-layer', 'package.json')
+        : packageName === '@dsh-forge/desktop-services-local'
+          ? path.join(compiled.root, 'packages', 'desktop-services-local', 'package.json')
+          : null;
+    const launcherPackage = launcherPackagePath !== null && fs.existsSync(launcherPackagePath);
     if (!resolvedPackages.has(packageName) && !launcherPackage)
       diagnostics.push({ code: 'ENTRY_PACKAGE_UNRESOLVED', id: entry.id || null, package: entry.name });
   }

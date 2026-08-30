@@ -9,7 +9,10 @@ import { fail } from '@dsh-forge/profile-toolchain/core/errors';
 import type { CatalogEntry } from '@dsh-forge/profile-toolchain/schema';
 import { createDesktopHostCapability } from '@dsh-forge/desktop-services-local/launcher';
 import type { DesktopProfileSummary } from '@dsh-forge/desktop-services';
-import type { DesktopHostCapability } from '@dsh-forge/desktop-services-local/launcher';
+import type {
+  DesktopHostCapability,
+  UpgradeManagerCapability,
+} from '@dsh-forge/desktop-services-local/launcher';
 import { GenerationManager } from './runtime/generation.ts';
 import { ensureManagedProfile } from './runtime/managed-profile.ts';
 import { ProfileStateStore } from './runtime/state-store.ts';
@@ -86,7 +89,14 @@ interface HostInstance {
 
 interface LauncherGenerationState {
   readonly host: HostInstance;
+  readonly upgradeManager?: UpgradeManagerLifecycle;
   url?: string;
+}
+
+/** generation 生命周期由 launcher 驱动，Remote 只看到 UpgradeManagerCapability。 */
+export interface UpgradeManagerLifecycle extends UpgradeManagerCapability {
+  start(): void;
+  dispose(): void;
 }
 
 interface LauncherOptions {
@@ -103,6 +113,7 @@ interface LauncherOptions {
   readonly pnpmArgs?: readonly string[];
   readonly pnpmEnv?: NodeJS.ProcessEnv;
   readonly catalog: readonly CatalogEntry[];
+  readonly createUpgradeManager?: (generation: GenerationLike) => UpgradeManagerLifecycle;
 }
 
 export interface HostStartOptions {
@@ -218,10 +229,41 @@ function linkFallbackPackage(
 }
 
 /**
+ * 将需要与 Host 共享协议模块的 fallback 物化到 profile 闭包。
+ *
+ * workspace 包通过符号链接加载时，Node 会按真实路径解析依赖，容易把
+ * `dsh-typert-protocol` 解析到 runtime 闭包，和 profile 内的 Host 网关形成
+ * 两份模块实例，私有 Remote marker 因此无法互相识别。物化包本身并排除
+ * `node_modules` 后，依赖会沿 profile 目录向上解析到唯一的 profile 副本。
+ */
+function materializeFallbackPackage(fallback: string, packageName: string, source: string): void {
+  assertPackageIdentity(source, packageName);
+  const destination = path.join(fallback, ...packageName.split('/'));
+  fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+  let stat: fs.Stats | null = null;
+  try {
+    stat = fs.lstatSync(destination);
+  } catch (error: unknown) {
+    if (!(error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT')) throw error;
+  }
+  if (stat?.isSymbolicLink()) fs.unlinkSync(destination);
+  else if (stat && !stat.isDirectory())
+    fail(`desktop fallback 被非目录路径占用: ${destination}`, 'DESKTOP_RUNTIME_FALLBACK_CONFLICT');
+  fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
+  fs.cpSync(source, destination, {
+    recursive: true,
+    dereference: true,
+    force: true,
+    filter: (entry) => path.basename(entry) !== 'node_modules',
+  });
+  assertPackageIdentity(destination, packageName);
+}
+
+/**
  * desktop layer 由 launcher 临时注入，不进入 profile bundle 列表。为让 profile
  * 锚点的 Loader 只从受控路径解析它，在当前 profile 闭包中创建到当前
- * runtime 的相对链接；fallback 只包含 launcher 注入层及其服务提供方，
- * 不得把 DSH runtime 或任意工作区包混入 profile 的持久闭包。
+ * runtime 的相对链接；fallback 只包含 launcher 注入层、桌面服务和其必要的工具链，
+ * 不得把 DSH runtime 或任意无关工作区包混入 profile 的持久闭包。
  */
 function ensureDesktopLayerFallback(
   profileDir: string,
@@ -235,11 +277,28 @@ function ensureDesktopLayerFallback(
   const runtimeAnchor = fallbackRoot ? path.join(fallbackRoot, 'package.json') : path.join(process.cwd(), 'package.json');
   if (!fs.existsSync(runtimeAnchor)) fail(`缺少桌面 runtime 锚点: ${runtimeAnchor}`, 'DESKTOP_RUNTIME_MISSING');
   const fallback = path.join(profileDir, 'node_modules');
+  // desktop-services 是 local provider 的公开契约依赖。它不需要作为 Loader
+  // entry 注入，但必须落在 profile 解析域内，否则物化后的 local provider
+  // 会在启动时无法解析该包。
+  const desktopServices = packageDirectoryFromAnchor(runtimeAnchor, '@dsh-forge/desktop-services');
+  if (!desktopServices) fail('desktop runtime 缺少 @dsh-forge/desktop-services', 'DESKTOP_RUNTIME_PACKAGE_MISSING');
+  materializeFallbackPackage(fallback, '@dsh-forge/desktop-services', desktopServices);
+  const profileToolchain = packageDirectoryFromAnchor(runtimeAnchor, '@dsh-forge/profile-toolchain');
+  if (!profileToolchain) fail('desktop runtime 缺少 @dsh-forge/profile-toolchain', 'DESKTOP_RUNTIME_PACKAGE_MISSING');
+  materializeFallbackPackage(fallback, '@dsh-forge/profile-toolchain', profileToolchain);
   for (const packageName of ['@dsh-forge/desktop-layer', '@dsh-forge/desktop-services-local']) {
     const source = packageDirectoryFromAnchor(runtimeAnchor, packageName);
     if (!source) fail(`desktop runtime 缺少 ${packageName}`, 'DESKTOP_RUNTIME_PACKAGE_MISSING');
     if (!launcherFallbackRoot) {
-      linkFallbackPackage(fallback, packageName, source, { allowMaterializedDependency: true });
+      if (packageName === '@dsh-forge/desktop-services-local') {
+        materializeFallbackPackage(fallback, packageName, source);
+      } else {
+        linkFallbackPackage(fallback, packageName, source, { allowMaterializedDependency: true });
+      }
+      continue;
+    }
+    if (packageName === '@dsh-forge/desktop-services-local') {
+      materializeFallbackPackage(fallback, packageName, source);
       continue;
     }
     const destination = path.join(fallback, ...packageName.split('/'));
@@ -575,6 +634,7 @@ export function createDesktopLauncher({
   pnpmArgs,
   pnpmEnv,
   catalog,
+  createUpgradeManager,
 }: LauncherOptions) {
   if (!userData || !host || !windowFactory || !probe) fail('桌面启动器缺少运行时提供方', 'LAUNCHER_CONFIG');
   let windowRef: RendererWindow | null = null;
@@ -594,6 +654,7 @@ export function createDesktopLauncher({
         onPhase?.('generation-host-starting');
         const profile = profiles.find((candidate) => candidate.name === generation.profile);
         if (!profile) fail(`profile 不存在: ${generation.profile}`, 'PROFILE_UNSELECTABLE');
+        const upgradeManager = createUpgradeManager?.(generation);
         const capability = createDesktopHostCapability({
           generation,
           manager,
@@ -605,9 +666,15 @@ export function createDesktopLauncher({
           pnpmEnv,
           reconcile: async () => {},
           verifyNextGeneration: async () => Boolean(generationStates.get(generation)?.host),
+          upgradeManager,
         });
-        const hostInstance = await host.start({ profile, generationId: generation.id, capability });
-        generationStates.set(generation, { host: hostInstance });
+        try {
+          const hostInstance = await host.start({ profile, generationId: generation.id, capability });
+          generationStates.set(generation, { host: hostInstance, upgradeManager });
+        } catch (error) {
+          upgradeManager?.dispose();
+          throw error;
+        }
       },
       async hostReady(generation) {
         await generationStates.get(generation)?.host.entriesSettled();
@@ -643,6 +710,7 @@ export function createDesktopLauncher({
         const state = generationStates.get(generation);
         if (!state || !windowRef) fail('generation window 状态缺失', 'GENERATION_CONFIG');
         await state.host.registerInteractiveCommands();
+        state.upgradeManager?.start();
         windowRef.show();
         onPhase?.('generation-interaction-ready');
       },
@@ -654,6 +722,7 @@ export function createDesktopLauncher({
         windowRef = null;
         const state = generationStates.get(generation);
         generationStates.delete(generation);
+        state?.upgradeManager?.dispose();
         await state?.host.dispose();
       },
     },

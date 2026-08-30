@@ -114,6 +114,12 @@ export function buildReleaseIndex({
     inputDigestTarget = target;
     if (inspection.valid !== true || inspection.target !== target || native.result !== 'passed' || smoke.healthy !== true)
       fail(`release artifact inspect/smoke/evidence 未通过: ${target}`);
+    const signing = runtime.signing as Record<string, unknown> | undefined;
+    if (
+      target === 'darwin-universal' &&
+      (signing?.signed !== true || signing.kind !== 'macos-developer-id-notarized')
+    )
+      fail('release artifact macOS 未完成 Developer ID 签名与公证');
     const runtimeTargets = Array.isArray(runtime.targets) ? runtime.targets : [];
     if (!runtimeTargets.some((item) => {
       if (!item || typeof item !== 'object') return false;

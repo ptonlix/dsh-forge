@@ -49,7 +49,9 @@ Closing a window hides it by default. Explicit exit, signals, generation failure
 
 The compiler resolves runtime compatibility, bundle manifests, peer dependencies, static catalog entries, exact Git commits, lifecycle-script authorization, and the dependency closure. The input digest covers the cross-platform source inputs and the normalized YAML semantics of the root lockfile; the platform-selected closure remains resolution evidence in the resolved manifest and SBOM. The composer runs the real DSH loader to produce a configuration dump; a healthy dump is required for verification and packaging.
 
-The release gate also checks package layout, dynamic imports, native files, SBOM and license notices, platform evidence, and real smoke results. The current GitHub tag Release may publish an artifact explicitly marked `unsigned-smoke`; code signing, notarization, and the automatic update channel are outside the current pipeline and will be implemented separately. If runtime updates are enabled later, their metadata trust checks still apply.
+The release gate also checks package layout, dynamic imports, native files, SBOM and license notices, platform evidence, and real smoke results. A tag's macOS universal artifact must complete Developer ID signing, Apple notarization, stapling, and local verification after profile closure injection; a missing credential or failed step blocks summary and Release. Local, Windows, and Linux builds without explicit signing remain truthfully marked `unsigned-smoke`. Windows Authenticode is outside the current pipeline.
+
+Full-package OTA is owned jointly by `apps/desktop` and the private `@dsh-forge/desktop-services-local/launcher`. A packaged app reads Windows, macOS, and Ubuntu AppImage entries from the fixed GitHub Release `version.json`, compares SemVer before `build`, and lets a generation-owned `UpgradeCoordinator` check silently at readiness and every 12 hours. Only a Settings-initiated fresh check that still finds an update and receives native confirmation downloads a full package and exits for helper preparation. Upgrade state is projected through the desktop layer's fixed Typert Remote; the page never receives a URL, path, or command. Ubuntu releases and upgrades only a writable Ubuntu 22.04+ AppImage; other Linux launch methods are unsupported. This channel intentionally has no package digest, manifest signature, or runtime trust-root verification and must not be described as a general trusted update channel.
 
 ## Fork Contract
 
@@ -67,4 +69,4 @@ pnpm run package:inspect -- dsh-forge-official
 pnpm run package:smoke -- dsh-forge-official
 ```
 
-The architecture document does not claim platform signing, notarization, or GitHub Pages deployment. Those facts belong to the engineering verification record and the documentation-site build output.
+The architecture document does not claim that real Apple signing, notarization, stapling, or GitHub Pages deployment has run. Those facts belong to the engineering verification record and the documentation-site build output.

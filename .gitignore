@@ -1,6 +1,7 @@
 artifacts/
 .desktop-work/
 node_modules/
+lib/
 .pnpm-store/
 dist/
 tmp/

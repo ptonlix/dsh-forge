@@ -1,6 +1,6 @@
 ## 1. 打包入口与证据契约
 
-- [x] 1.1 为 `scripts/package-desktop.ts` 增加 `darwin-universal|win32-x64|linux-x64` target 和 formats 参数、目标一致性校验、双架构 native rebuild 及可安装格式输出；验证现有 `pnpm run package:desktop -- dsh-forge-official` 默认行为保持不变，并生成 `universal.dmg`/zip、Windows x64 包及 Ubuntu x64 `AppImage`/`deb`
+- [x] 1.1 为 `scripts/package-desktop.ts` 增加 `darwin-universal|win32-x64|linux-x64` target 和 formats 参数、目标一致性校验、双架构 native rebuild 及可安装格式输出；验证现有 `pnpm run package:desktop -- dsh-forge-official` 默认行为保持不变，并生成 `universal.dmg`/zip、Windows x64 包及 Ubuntu x64 `AppImage`
 - [x] 1.2 为打包脚本补充 target/formats 的成功、未声明目标、runner 不匹配和格式错误测试；验证相关 Vitest/Node 测试覆盖失败语义
 - [x] 1.3 增加 CI 产物索引/manifest 汇总辅助逻辑，验证跨目标 profile、version、input digest 和 SHA-256 一致性检查会拒绝缺失或漂移 evidence
 
@@ -50,3 +50,7 @@
   上传最终安装包
 - [x] 9.3 将 package、summary、release 限定为 `push` 的 `v*` tag，使用 annotated tag 公告，
   并在发布前校验 Tag commit 与 `GITHUB_SHA` 一致
+
+## 10. Linux AppImage 发行范围
+
+- [x] 10.1 移除 Linux `.deb` 的打包格式、FPM 元数据、CI matrix 参数和 Release 附件筛选，并以回归测试固定 Linux 只发布 AppImage。
