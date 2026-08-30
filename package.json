@@ -1,6 +1,6 @@
 {
   "name": "@dsh-forge/core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "dshForgeBuild": 1,
   "private": true,
   "packageManager": "pnpm@11.7.0",
