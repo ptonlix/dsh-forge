@@ -223,9 +223,14 @@ After a generation is ready, the `UpgradeCoordinator` created by `apps/desktop` 
 check and schedules the next check 12 hours after each settlement; checks never show confirmation or
 download. `@dsh-forge/desktop-layer` registers an "Upgrade management" Settings page through the
 fixed no-argument Typert Remote methods `upgradeManager/status`, `upgradeManager/check`, and
-`upgradeManager/startUpgrade`. The page displays the version, build, check time, state, and available
-version; "Upgrade now" causes native confirmation only after a fresh main-process check still finds
-an update. Releasing a generation cancels checks/downloads and clears the scheduler.
+`upgradeManager/startUpgrade`, and renders a non-blocking orange badge on the Settings trigger when an
+update is available. The page displays the version, build, check time, state, and available version;
+"Upgrade now" causes native confirmation only after a fresh main-process check still finds an update.
+The trigger badge only leads users to that page and does not nest a direct upgrade control inside the
+outer Settings button. When the Settings panel is open, the "Upgrade management" navigation item also
+carries the same orange badge so the destination is identifiable. Releasing a generation cancels
+checks/downloads and clears the scheduler. The navigation item uses a distinct refresh/update icon
+instead of the generic Settings gear while preserving the shell's state colors and click behavior.
 
 This is not a public desktop service or a third-party extension API. The manifest and full
 packages intentionally have no digest, manifest signature, or runtime trust root verification;

@@ -1,4 +1,4 @@
 # 已确认中英文内容的 Git blob hash。修改任一侧后，必须同步对侧并重新生成。
 # pnpm run docs:pair --write docs/reference/foundation-contracts.md
-foundation-contracts.md: 0015c4c8779bb3bfeecafddf1cf0ef44985a8578
-foundation-contracts.zh.md: f21a172495b35599ff13f4b902efd69e05d282b9
+foundation-contracts.md: e82bdf6e44f62bce0b1f448eddf1eb4c4106b048
+foundation-contracts.zh.md: 2fe2c223baebad9bd3d251fe02e56adfdf21488a

@@ -213,8 +213,11 @@ Windows 使用 `.exe`，macOS 使用 `.dmg`。Linux 仅在 `/etc/os-release` 为
 generation 就绪后，`apps/desktop` 创建的 `UpgradeCoordinator` 会静默检查一次，并在每次结算后
 12 小时再检查；检查不会弹出确认或下载。`@dsh-forge/desktop-layer` 通过固定的
 `upgradeManager/status`、`upgradeManager/check` 和 `upgradeManager/startUpgrade` 无参数 Typert
-Remote 注册“升级管理”设置页。页面只显示版本、build、检查时间、状态和可用版本；“立即升级”会在
-主进程重新检查仍有更新后才显示原生确认。generation 释放时会取消检查/下载并清理调度器。
+Remote 注册“升级管理”设置页，并在设置入口发现可用版本时显示非阻塞的橙色提示。页面只显示版本、
+build、检查时间、状态和可用版本；“立即升级”会在主进程重新检查仍有更新后才显示原生确认。设置
+入口提示只引导用户进入该页面，不会在外层按钮中嵌套直接升级控件。设置面板打开后，“升级管理”
+导航项也会显示同一枚橙色提示，帮助用户定位目标页面。generation 释放时会取消检查/下载并清理调度器。
+该导航项还会使用独立的更新/刷新图标替代通用设置齿轮，同时保留设置外壳的状态颜色和点击行为。
 
 这不是公开 desktop service 或第三方扩展 API。清单和完整安装包刻意不校验摘要、清单签名或运行时
 信任根；本流程仅依赖 HTTPS、用户确认以及 macOS 系统签名/公证。下载取消、失败或 generation 关闭时，

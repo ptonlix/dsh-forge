@@ -4,6 +4,7 @@ import {
   type UpgradeStatus,
   type UpgradeVersion,
 } from './upgrade-remote-contract.js';
+import { shouldShowUpgradeBadge } from './upgrade-trigger-state.js';
 
 interface ReactRuntime {
   readonly Fragment: unknown;
@@ -16,6 +17,8 @@ interface ReactRuntime {
 interface PrimitiveExports {
   readonly Button: unknown;
   readonly StateDot: unknown;
+  readonly IconSettingsOutline14: unknown;
+  readonly IconSettingsOutline16: unknown;
 }
 
 interface UpgradeManagerApi {
@@ -29,21 +32,28 @@ interface RemoteRegistry {
   readonly upgradeManager?: UpgradeManagerApi;
 }
 
+interface SlotComponentProps {
+  readonly api?: UpgradeManagerApi;
+  readonly wide?: boolean;
+  readonly t?: (key: string) => string;
+}
+
+interface SlotRegistrationOptions {
+  readonly name: string;
+  readonly id?: string;
+  readonly order?: number;
+  readonly priority?: number;
+  readonly label?: () => string;
+  readonly locale?: string;
+  readonly inject?: () => { readonly api?: UpgradeManagerApi };
+}
+
 interface DesktopLayerContext {
   get<T>(key: string): T;
   effect(register: () => () => void, label: string): void;
   readonly slots: {
     inject(name: string, factory: () => unknown): void;
-    register(
-      options: {
-        readonly name: string;
-        readonly id: string;
-        readonly order: number;
-        readonly label: () => string;
-        readonly inject: () => { readonly api?: UpgradeManagerApi };
-      },
-      section: (props: UpgradeSectionProps) => unknown,
-    ): unknown;
+    register(options: SlotRegistrationOptions, component: (props: SlotComponentProps) => unknown): unknown;
   };
 }
 
@@ -63,10 +73,29 @@ interface StyleElement {
   textContent: string;
 }
 
+interface DomElementLike {
+  readonly textContent: string | null;
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+}
+
 interface DocumentLike {
   querySelector(selector: string): StyleElement | null;
+  querySelectorAll(selector: string): readonly DomElementLike[];
   createElement(tagName: string): StyleElement;
   readonly head: { appendChild(element: StyleElement): void };
+  readonly body: DomElementLike;
+}
+
+interface MutationObserverOptionsLike {
+  readonly childList: boolean;
+  readonly subtree: boolean;
+  readonly characterData: boolean;
+}
+
+interface MutationObserverLike {
+  observe(target: DomElementLike, options: MutationObserverOptionsLike): void;
+  disconnect(): void;
 }
 
 declare global {
@@ -77,13 +106,28 @@ declare global {
 
 declare const window: Window;
 declare const document: DocumentLike;
+declare const MutationObserver: new (callback: () => void) => MutationObserverLike;
 
 window.__ModuleLoader__.load({
   id: '@dsh-forge/desktop-layer',
   factory: (require) => {
     const module = { exports: {} };
     const React = require('react') as ReactRuntime;
-    const { Button, StateDot } = require('@deepseek-ai/dsh-client-ui-primitives') as PrimitiveExports;
+    const {
+      Button,
+      StateDot,
+      IconSettingsOutline14,
+      IconSettingsOutline16,
+    } = require('@deepseek-ai/dsh-client-ui-primitives') as PrimitiveExports;
+    const UPGRADE_NAV_ICON_MASK = [
+      'url("data:image/svg+xml,',
+      "%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' width='16'",
+      " height='16' viewBox='0 0 16 16' fill='none'%3E",
+      "%3Cpath d='M8 2a6 6 0 1 1-4.24 1.76L2 5.5",
+      "M2 2v3.5h3.5' fill='none' stroke='black' stroke-width='1.5'",
+      " stroke-linecap='round' stroke-linejoin='round'/%3E",
+      '%3C/svg%3E")',
+    ].join('');
     // 复用现有 Settings Row 的 spacing 和 theme token，选择器限定在升级页内容区。
     const upgradeSettingsCss = `
       [data-upgrade-settings] {
@@ -174,6 +218,47 @@ window.__ModuleLoader__.load({
         font-size: 13px;
         line-height: 20px;
       }
+      [data-upgrade-trigger] {
+        align-items: center;
+        display: inline-flex;
+        gap: 6px;
+        min-width: 0;
+      }
+      [data-upgrade-trigger-label] {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      [data-upgrade-trigger-badge] {
+        align-items: center;
+        display: inline-flex;
+        flex: none;
+      }
+      [data-dsh-forge-upgrade-nav] {
+        align-items: center;
+        gap: 6px;
+      }
+      [data-dsh-forge-upgrade-nav] > svg:first-child {
+        display: none;
+      }
+      [data-dsh-forge-upgrade-nav]::before {
+        background: currentColor;
+        content: '';
+        flex: none;
+        height: 16px;
+        width: 16px;
+        -webkit-mask: ${UPGRADE_NAV_ICON_MASK} center / contain no-repeat;
+        mask: ${UPGRADE_NAV_ICON_MASK} center / contain no-repeat;
+      }
+      [data-dsh-forge-upgrade-nav-badge]::after {
+        background: var(--dsw-alias-state-warning-primary, #f79009);
+        border-radius: 50%;
+        content: '';
+        display: inline-block;
+        flex: none;
+        height: 6px;
+        width: 6px;
+      }
       @media (max-width: 560px) {
         [data-upgrade-settings] [data-upgrade-row] {
           align-items: flex-start;
@@ -242,6 +327,90 @@ window.__ModuleLoader__.load({
       if (snapshot?.phase === 'unsupported') return { label: '不支持 OTA', state: 'warning' };
       if (snapshot?.phase === 'error') return { label: '检查更新失败', state: 'error' };
       return { label: '尚未检查', state: 'warning' };
+    }
+
+    const UPGRADE_TRIGGER_POLL_INTERVAL_MS = 30_000;
+    const UPGRADE_SETTINGS_LABEL = '升级管理';
+    const UPGRADE_NAV_MARKER = 'data-dsh-forge-upgrade-nav';
+    const UPGRADE_NAV_BADGE_MARKER = 'data-dsh-forge-upgrade-nav-badge';
+
+    function syncUpgradeNavigationBadge(visible: boolean): void {
+      if (typeof document === 'undefined') return;
+      const buttons = document.querySelectorAll('[role="dialog"] nav button');
+      for (const button of buttons) {
+        const matches = button.textContent?.trim() === UPGRADE_SETTINGS_LABEL;
+        if (!matches) {
+          button.removeAttribute(UPGRADE_NAV_MARKER);
+          button.removeAttribute(UPGRADE_NAV_BADGE_MARKER);
+          continue;
+        }
+        button.setAttribute(UPGRADE_NAV_MARKER, '');
+        if (visible) button.setAttribute(UPGRADE_NAV_BADGE_MARKER, '');
+        else button.removeAttribute(UPGRADE_NAV_BADGE_MARKER);
+      }
+    }
+
+    function clearUpgradeNavigationMarkers(): void {
+      if (typeof document === 'undefined') return;
+      const buttons = document.querySelectorAll('[role="dialog"] nav button');
+      for (const button of buttons) {
+        button.removeAttribute(UPGRADE_NAV_MARKER);
+        button.removeAttribute(UPGRADE_NAV_BADGE_MARKER);
+      }
+    }
+
+    function watchUpgradeNavigationBadge(visible: boolean): () => void {
+      syncUpgradeNavigationBadge(visible);
+      if (typeof document === 'undefined' || typeof MutationObserver === 'undefined')
+        return clearUpgradeNavigationMarkers;
+      const observer = new MutationObserver(() => syncUpgradeNavigationBadge(visible));
+      observer.observe(document.body, { childList: true, subtree: true, characterData: false });
+      return () => {
+        observer.disconnect();
+        clearUpgradeNavigationMarkers();
+      };
+    }
+
+    /** 设置入口只投影 available 状态；升级动作仍由设置页按钮负责。 */
+    function UpgradeSettingsTrigger(props: SlotComponentProps): unknown {
+      const [snapshot, setSnapshot] = React.useState<UpgradeStatus | null>(null);
+      const api = props.api;
+      React.useEffect(() => {
+        let active = true;
+        const refresh = async (): Promise<void> => {
+          if (!api) {
+            if (active) setSnapshot(null);
+            return;
+          }
+          try {
+            const result = await api.status();
+            if (active) setSnapshot(readResult(result));
+          } catch {
+            if (active) setSnapshot(null);
+          }
+        };
+        void refresh();
+        const timer = setInterval(() => void refresh(), UPGRADE_TRIGGER_POLL_INTERVAL_MS);
+        return () => {
+          active = false;
+          clearInterval(timer);
+        };
+      }, [api]);
+      const wide = props.wide === true;
+      const label = props.t?.('trigger') ?? '设置';
+      const available = shouldShowUpgradeBadge(snapshot);
+      React.useEffect(() => watchUpgradeNavigationBadge(available), [available]);
+      const Icon = wide ? IconSettingsOutline16 : IconSettingsOutline14;
+      return React.createElement('span', { 'data-upgrade-trigger': true },
+        React.createElement(Icon, { size: wide ? 16 : 18 }),
+        wide ? React.createElement('span', { 'data-upgrade-trigger-label': true }, label) : null,
+        available ? React.createElement('span', {
+          'data-upgrade-trigger-badge': true,
+          role: 'img',
+          'aria-label': '发现新版本',
+          title: '发现新版本',
+        }, React.createElement(StateDot, { state: 'warning', size: 6 })) : null,
+      );
     }
 
     function UpgradeSettingsSection({ api }: UpgradeSectionProps): unknown {
@@ -347,6 +516,16 @@ window.__ModuleLoader__.load({
         UpgradeSettingsSection,
         { ...props, api },
       );
+      const trigger = (props: SlotComponentProps): unknown => React.createElement(
+        UpgradeSettingsTrigger,
+        { ...props, api },
+      );
+      ctx.slots.inject('settings.trigger', () => ctx.slots.register({
+        name: 'settings.trigger',
+        priority: -10,
+        locale: 'settings',
+        inject: () => ({ api }),
+      }, trigger));
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section', id: 'dsh-forge-upgrade', order: 80,
         label: () => '升级管理',

@@ -20,6 +20,12 @@ Windows 与 macOS 直接使用各自条目。Linux 只发布 Ubuntu AppImage，�
 
 该清单和完整安装包没有摘要、签名或信任根校验。HTTPS、用户确认和 macOS 系统签名/公证不能替代可审计的通用更新信任通道；发布工作流会把三个平台安装包上传到同一 GitHub Release 的固定资产名，发布者仍需确认清单版本、build 与 Release tag 一致。
 
+generation 就绪后会静默检查更新；当状态为 `available` 时，设置入口显示非阻塞的橙色“发现新版本”提示。
+提示不会自动打开设置、弹出确认或下载，用户进入“升级管理”页后点击“立即升级”，由主进程重新检查并
+显示原生确认。入口提示通过现有 Remote 状态投影工作，不暴露更新 URL、暂存路径或命令。设置面板
+打开后，“升级管理”导航项会同步显示同一枚提示，帮助用户定位到升级页面。
+该导航项还使用独立的更新/刷新图标替代通用设置齿轮，同时保留设置外壳的状态颜色和点击行为。
+
 发布前可运行 `pnpm run release:prepare -- 0.2.0`。命令会校验并同步根 `distribution.yml` 的 `version`、根 `package.json` 的 `version` 与 `dshForgeBuild`：目标版本高于当前版本时将 build 重置为 `1`，同一版本重发时自动递增 build。两个版本源不一致、输入非法或版本降级会在写入前失败；命令不会创建 tag 或发布 Release。准备完成后提交变更并创建匹配的 annotated tag（例如 `v0.2.0`），CI 会继续校验 tag 与 `distribution.yml` 一致。
 
 ## 公开导入

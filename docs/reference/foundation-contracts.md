@@ -20,6 +20,15 @@ Windows and macOS use their respective entries. Linux releases only the Ubuntu A
 
 The manifest and full packages have no digest, signature, or trust-root verification. HTTPS, user confirmation, and macOS system signing/notarization do not make this a generally auditable update trust channel; the release workflow uploads all three platform packages to fixed asset names in the same GitHub Release, and the publisher must still verify that the manifest version/build matches the release tag.
 
+After a generation is ready it checks silently; when the state is `available`, the Settings trigger shows a
+non-blocking orange "new version available" badge. The badge does not open Settings automatically, show a
+confirmation dialog, or download anything. The user opens the "Upgrade management" page and clicks
+"Upgrade now", after which the main process rechecks and shows native confirmation. The trigger uses the
+existing Remote status projection and never exposes update URLs, staging paths, or commands. Once the
+Settings panel is open, the "Upgrade management" navigation item shows the same badge so the user can
+identify the destination. That navigation item also uses a distinct refresh/update icon instead of the
+generic Settings gear, while retaining the shell's state colors and click behavior.
+
 Before a release, run `pnpm run release:prepare -- 0.2.0`. The command validates and synchronizes the root `distribution.yml` `version`, root `package.json` `version`, and `dshForgeBuild`: a higher target version resets the build to `1`, while rebuilding the same version increments the build automatically. Mismatched version sources, invalid input, or lower versions fail before writing; the command does not create a tag or publish a Release. After preparation, commit the changes and create a matching annotated tag (for example, `v0.2.0`); CI continues to verify that the tag matches `distribution.yml`.
 
 ## Public Import
