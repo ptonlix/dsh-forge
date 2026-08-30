@@ -20,6 +20,8 @@ Windows 与 macOS 直接使用各自条目。Linux 只发布 Ubuntu AppImage，�
 
 该清单和完整安装包没有摘要、签名或信任根校验。HTTPS、用户确认和 macOS 系统签名/公证不能替代可审计的通用更新信任通道；发布工作流会把三个平台安装包上传到同一 GitHub Release 的固定资产名，发布者仍需确认清单版本、build 与 Release tag 一致。
 
+发布前可运行 `pnpm run release:prepare -- 0.2.0`。命令会校验并同步根 `distribution.yml` 的 `version`、根 `package.json` 的 `version` 与 `dshForgeBuild`：目标版本高于当前版本时将 build 重置为 `1`，同一版本重发时自动递增 build。两个版本源不一致、输入非法或版本降级会在写入前失败；命令不会创建 tag 或发布 Release。准备完成后提交变更并创建匹配的 annotated tag（例如 `v0.2.0`），CI 会继续校验 tag 与 `distribution.yml` 一致。
+
 ## 公开导入
 
 `@dsh-forge/desktop-services` 是唯一公开的桌面 import。它为 Cordis `Context` 声明 `desktopProfiles`、`desktopPnpm` 和 `desktopServices`；consumer 必须在使用前调用 `assertDesktopServicesProtocol()`。当前协议是 `1`。

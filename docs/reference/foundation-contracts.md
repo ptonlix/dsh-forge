@@ -20,6 +20,8 @@ Windows and macOS use their respective entries. Linux releases only the Ubuntu A
 
 The manifest and full packages have no digest, signature, or trust-root verification. HTTPS, user confirmation, and macOS system signing/notarization do not make this a generally auditable update trust channel; the release workflow uploads all three platform packages to fixed asset names in the same GitHub Release, and the publisher must still verify that the manifest version/build matches the release tag.
 
+Before a release, run `pnpm run release:prepare -- 0.2.0`. The command validates and synchronizes the root `distribution.yml` `version`, root `package.json` `version`, and `dshForgeBuild`: a higher target version resets the build to `1`, while rebuilding the same version increments the build automatically. Mismatched version sources, invalid input, or lower versions fail before writing; the command does not create a tag or publish a Release. After preparation, commit the changes and create a matching annotated tag (for example, `v0.2.0`); CI continues to verify that the tag matches `distribution.yml`.
+
 ## Public Import
 
 `@dsh-forge/desktop-services` is the only public desktop import. It augments Cordis `Context` with `desktopProfiles`, `desktopPnpm`, and `desktopServices`; consumers call `assertDesktopServicesProtocol()` before using the services. The current protocol is `1`.

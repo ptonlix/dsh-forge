@@ -1,6 +1,6 @@
 {
   "name": "@dsh-forge/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "dshForgeBuild": 1,
   "private": true,
   "packageManager": "pnpm@11.7.0",
@@ -54,6 +54,7 @@
     "catalog:verify": "tsx tools/profile-toolchain/src/cli/index.ts catalog:verify",
     "release:gate": "tsx tools/profile-toolchain/src/cli/index.ts release:gate",
     "release:index": "tsx scripts/release-index.ts",
+    "release:prepare": "tsx scripts/prepare-release.ts",
     "release:version-manifest": "tsx scripts/create-version-manifest.ts",
     "docs:check": "tsx tools/profile-toolchain/src/cli/index.ts docs:check",
     "docs:pair": "tsx tools/profile-toolchain/src/cli/index.ts docs:pair",
