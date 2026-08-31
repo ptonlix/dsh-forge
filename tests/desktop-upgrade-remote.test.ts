@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vm from 'node:vm';
-import { TYPERT_REMOTE } from '@dsh-forge/desktop-layer/remote';
+import { TYPERT_REMOTE, upgradeStatusSchema } from '@dsh-forge/desktop-layer/remote';
 
 interface RenderedElement {
   readonly type: unknown;
@@ -45,6 +45,20 @@ test('Host gateway 与 Client descriptor 暴露同一组无参数方法', () => 
     assert.equal(descriptor.result.typeSymbol, '@dsh-forge/desktop-layer#UpgradeManagerStatus');
     assert.equal(typeof descriptor.result.schema?.parse, 'function');
   }
+});
+
+test('升级 Remote 接受下载进度快照', () => {
+  const snapshot = {
+    version: '1.0.0',
+    build: 1,
+    support: 'supported' as const,
+    phase: 'downloading' as const,
+    lastCheckedAt: '2026-08-31T00:00:00.000Z',
+    available: { version: '1.1.0', build: 2 },
+    download: { receivedBytes: 50, totalBytes: 100, percent: 50 },
+    errorCode: null,
+  };
+  assert.deepEqual(upgradeStatusSchema.parse(snapshot), snapshot);
 });
 
 test('设置页通过 Remote 注册且不携带 Electron 或安装路径能力', () => {

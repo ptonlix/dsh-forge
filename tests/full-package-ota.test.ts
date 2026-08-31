@@ -290,6 +290,71 @@ test('完整安装包下载响应失败时删除暂存文件', async () => {
   }
 });
 
+test('完整安装包拒绝无法安全表示的响应长度，避免泄露无效进度', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-ota-invalid-length-'));
+  try {
+    const update = {
+      platform: 'windows' as const,
+      version: '1.0.0',
+      build: 8,
+      url: 'https://github.com/ptonlix/dsh-forge/releases/download/v1.0.0/dsh-forge-windows.exe',
+    };
+    const updater = createFullPackageUpdater(
+      fixtureOptions(directory, generation(), {
+        fetch: async () => new Response('full-installer', { headers: { 'content-length': '9007199254740992' } }),
+      }),
+    );
+    const progress: unknown[] = [];
+    await assert.rejects(
+      updater.download(update, { onProgress: (value) => progress.push(value) }),
+      (error: unknown) => error instanceof ForgeError && error.code === 'OTA_DOWNLOAD_FAILED',
+    );
+    assert.deepEqual(progress, []);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('完整安装包下载报告可计算百分比与未知长度进度', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-ota-progress-'));
+  try {
+    const update = {
+      platform: 'windows' as const,
+      version: '1.0.0',
+      build: 8,
+      url: 'https://github.com/ptonlix/dsh-forge/releases/download/v1.0.0/dsh-forge-windows.exe',
+    };
+    const measured = createFullPackageUpdater(
+      fixtureOptions(directory, generation(), {
+        fetch: async () => new Response('full-installer', { headers: { 'content-length': '14' } }),
+      }),
+    );
+    const measuredProgress: Array<{
+      readonly receivedBytes: number;
+      readonly totalBytes: number | null;
+      readonly percent: number | null;
+    }> = [];
+    const measuredFile = await measured.download(update, { onProgress: (progress) => measuredProgress.push(progress) });
+    assert.deepEqual(measuredProgress[0], { receivedBytes: 0, totalBytes: 14, percent: 0 });
+    assert.deepEqual(measuredProgress.at(-1), { receivedBytes: 14, totalBytes: 14, percent: 100 });
+    await measured.discard(measuredFile);
+
+    const unknown = createFullPackageUpdater(
+      fixtureOptions(directory, generation(), { fetch: async () => new Response('unknown-length') }),
+    );
+    const unknownProgress: Array<{
+      readonly receivedBytes: number;
+      readonly totalBytes: number | null;
+      readonly percent: number | null;
+    }> = [];
+    const unknownFile = await unknown.download(update, { onProgress: (progress) => unknownProgress.push(progress) });
+    assert.deepEqual(unknownProgress.at(-1), { receivedBytes: 14, totalBytes: null, percent: null });
+    await unknown.discard(unknownFile);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('确认后才下载到唯一暂存文件，下载失败、取消和 generation 关闭均会清理', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-ota-download-'));
   try {

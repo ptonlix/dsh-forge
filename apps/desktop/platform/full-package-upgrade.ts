@@ -6,6 +6,11 @@ import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import type { FullPackageUpdatePlatform } from '@dsh-forge/desktop-services-local/launcher';
+import {
+  restartReceiptArguments,
+  restartReceiptMatches,
+  type UpgradeRestartReceiptRequest,
+} from './upgrade-restart-receipt.ts';
 
 export interface FullPackageUpgradeRequest {
   readonly platform: FullPackageUpdatePlatform;
@@ -17,10 +22,12 @@ export interface FullPackageUpgradeRequest {
 }
 
 interface FullPackageUpgradeConfiguration {
-  readonly schema: 'dsh-forge/full-package-upgrade@1';
+  readonly schema: 'dsh-forge/full-package-upgrade@3';
   readonly platform: FullPackageUpdatePlatform;
   readonly stagedPackage: string;
   readonly electronPid: number;
+  readonly restartReceipt: UpgradeRestartReceiptRequest;
+  readonly windowsExecutable?: string;
   readonly macosApplication?: string;
   readonly appImagePath?: string;
 }
@@ -35,8 +42,9 @@ export interface UpgradeCommandResult {
 
 export interface UpgradeHelperDependencies {
   waitForParentExit(pid: number): Promise<void>;
+  waitForRestartReceipt(receipt: UpgradeRestartReceiptRequest): Promise<void>;
   run(command: string, args: readonly string[]): UpgradeCommandResult;
-  startApplication(executable: string): Promise<void>;
+  startApplication(executable: string, args: readonly string[]): Promise<void>;
   /** 复制 macOS bundle 时必须保留 framework 的符号链接、资源叉和 ACL。 */
   copyApplication(source: string, destination: string): Promise<void>;
   move(source: string, destination: string): Promise<void>;
@@ -47,7 +55,9 @@ export interface UpgradeHelperResult {
   readonly code: string | null;
 }
 
-const CONFIGURATION_SCHEMA = 'dsh-forge/full-package-upgrade@1';
+const CONFIGURATION_SCHEMA = 'dsh-forge/full-package-upgrade@3';
+const RESTART_RECEIPT_TIMEOUT_MS = 90_000;
+const WINDOWS_RESTART_RECEIPT_ATTEMPTS = 90;
 
 function fail(message: string): never {
   throw new Error(message);
@@ -66,6 +76,20 @@ function assertDescendant(root: string, candidate: string, label: string): strin
   const relative = path.relative(resolvedRoot, resolvedCandidate);
   if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) fail(`${label} 不在受控暂存目录内`);
   return resolvedCandidate;
+}
+
+function restartReceipt(stagingDirectory: string): UpgradeRestartReceiptRequest {
+  const receiptPath = path.join(path.resolve(stagingDirectory), `.restart-${randomUUID()}.restart.json`);
+  return Object.freeze({ receiptPath, token: randomUUID() });
+}
+
+function assertRestartReceipt(stagingDirectory: string, value: unknown): UpgradeRestartReceiptRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('helper 重启回执无效');
+  const record = value as Record<string, unknown>;
+  if (typeof record.receiptPath !== 'string' || typeof record.token !== 'string') fail('helper 重启回执无效');
+  if (!record.receiptPath.endsWith('.restart.json') || !/^[0-9a-f-]{36}$/i.test(record.token)) fail('helper 重启回执无效');
+  const receiptPath = assertDescendant(stagingDirectory, record.receiptPath, 'helper 重启回执');
+  return Object.freeze({ receiptPath, token: record.token });
 }
 
 function macosApplicationFromExecutable(executable: string): string {
@@ -104,8 +128,16 @@ export function createFullPackageUpgradeConfiguration(
     assertAbsoluteFile(request.stagedPackage, extensionFor(request.platform), '完整安装包'),
     '完整安装包',
   );
+  const restart = restartReceipt(request.stagingDirectory);
   if (request.platform === 'windows')
-    return Object.freeze({ schema: CONFIGURATION_SCHEMA, platform: 'windows', stagedPackage, electronPid: request.electronPid });
+    return Object.freeze({
+      schema: CONFIGURATION_SCHEMA,
+      platform: 'windows',
+      stagedPackage,
+      electronPid: request.electronPid,
+      windowsExecutable: assertAbsoluteFile(request.executablePath, '.exe', '当前 Windows 应用'),
+      restartReceipt: restart,
+    });
   if (request.platform === 'macos')
     return Object.freeze({
       schema: CONFIGURATION_SCHEMA,
@@ -113,6 +145,7 @@ export function createFullPackageUpgradeConfiguration(
       stagedPackage,
       electronPid: request.electronPid,
       macosApplication: macosApplicationFromExecutable(request.executablePath),
+      restartReceipt: restart,
     });
   return Object.freeze({
     schema: CONFIGURATION_SCHEMA,
@@ -120,6 +153,7 @@ export function createFullPackageUpgradeConfiguration(
     stagedPackage,
     electronPid: request.electronPid,
     appImagePath: appImagePath(request.appImagePath),
+    restartReceipt: restart,
   });
 }
 
@@ -127,15 +161,19 @@ function configurationFile(stagingDirectory: string): string {
   return path.join(path.resolve(stagingDirectory), `.upgrade-${randomUUID()}.json`);
 }
 
-function startDetachedHelper(executable: string, helperScript: string, configuration: string): Promise<ChildProcess> {
+function startDetachedProcess(
+  executable: string,
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv,
+): Promise<ChildProcess> {
   return new Promise((resolve, reject) => {
     let child: ChildProcess;
     try {
-      child = spawn(executable, [helperScript, '--run-full-package-upgrade', configuration], {
+      child = spawn(executable, args, {
         detached: true,
         stdio: 'ignore',
         windowsHide: true,
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        env: environment,
       });
     } catch (error) {
       reject(error);
@@ -150,30 +188,100 @@ function startDetachedHelper(executable: string, helperScript: string, configura
   });
 }
 
+function windowsCommandInterpreter(environment: NodeJS.ProcessEnv): string {
+  return environment.ComSpec || environment.COMSPEC || 'cmd.exe';
+}
+
+function escapeWindowsBatchValue(value: string): string {
+  return value.replaceAll('^', '^^').replaceAll('%', '%%');
+}
+
+function windowsUpgradeRunnerFile(stagingDirectory: string): string {
+  return path.join(path.resolve(stagingDirectory), `.upgrade-${randomUUID()}.cmd`);
+}
+
+function writeWindowsUpgradeRunner(configuration: FullPackageUpgradeConfiguration): string {
+  if (configuration.platform !== 'windows' || !configuration.windowsExecutable)
+    fail('Windows 升级 runner 配置无效');
+  const runner = windowsUpgradeRunnerFile(path.dirname(configuration.stagedPackage));
+  const restartArgs = restartReceiptArguments(
+    configuration.restartReceipt,
+    [configuration.stagedPackage, runner],
+  ).map((argument) => `"${escapeWindowsBatchValue(argument)}"`).join(' ');
+  const content = [
+    '@echo off',
+    'setlocal DisableDelayedExpansion',
+    'set "ELECTRON_RUN_AS_NODE="',
+    `set "PARENT_PID=${configuration.electronPid}"`,
+    `set "INSTALLER=${escapeWindowsBatchValue(configuration.stagedPackage)}"`,
+    `set "APPLICATION=${escapeWindowsBatchValue(configuration.windowsExecutable)}"`,
+    `set "RECEIPT=${escapeWindowsBatchValue(configuration.restartReceipt.receiptPath)}"`,
+    `set "RESTART_TOKEN=${configuration.restartReceipt.token}"`,
+    'set /a RECEIPT_ATTEMPTS=0',
+    ':wait_parent',
+    'tasklist /FI "PID eq %PARENT_PID%" /NH | findstr /I "%PARENT_PID%" >nul',
+    'if not errorlevel 1 (',
+    '  timeout /T 1 /NOBREAK >nul',
+    '  goto wait_parent',
+    ')',
+    'start "" /wait "%INSTALLER%"',
+    'if errorlevel 1 exit /b 1',
+    `start "" "%APPLICATION%" ${restartArgs}`,
+    ':wait_receipt',
+    'findstr /C:token "%RECEIPT%" >nul && findstr /C:%RESTART_TOKEN% "%RECEIPT%" >nul',
+    'if not errorlevel 1 exit /b 0',
+    'set /a RECEIPT_ATTEMPTS+=1',
+    `if %RECEIPT_ATTEMPTS% GEQ ${WINDOWS_RESTART_RECEIPT_ATTEMPTS} exit /b 1`,
+    'timeout /T 1 /NOBREAK >nul',
+    'goto wait_receipt',
+    '',
+  ].join('\r\n');
+  fs.writeFileSync(runner, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+  return runner;
+}
+
 /**
- * 先启动会等待当前 PID 的 Node helper，再允许调用方有序释放 generation 并退出。
- * helper 由当前包内的已编译模块执行，不能接受外部命令或 shell 字符串。
+ * Windows 使用受控批处理 runner，避免旧 Electron 映像在 NSIS 替换时持有应用文件。
+ * 其他平台使用当前包内已编译的 Node helper，均不接受 renderer 输入或外部命令。
  */
 export async function prepareFullPackageUpgrade(
   request: FullPackageUpgradeRequest,
   {
     executable = process.execPath,
     helperScript = __filename,
-    launch = startDetachedHelper,
+    launch = startDetachedProcess,
   }: {
     readonly executable?: string;
     readonly helperScript?: string;
-    readonly launch?: (executable: string, helperScript: string, configuration: string) => Promise<ChildProcess>;
+    readonly launch?: (
+      executable: string,
+      args: readonly string[],
+      environment: NodeJS.ProcessEnv,
+    ) => Promise<ChildProcess>;
   } = {},
 ): Promise<PreparedFullPackageUpgrade> {
   const configuration = createFullPackageUpgradeConfiguration(request);
-  const configurationPath = configurationFile(request.stagingDirectory);
-  fs.writeFileSync(configurationPath, `${JSON.stringify(configuration)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+  if (configuration.platform === 'windows') {
+    const runner = writeWindowsUpgradeRunner(configuration);
+    try {
+      await launch(windowsCommandInterpreter(process.env), ['/d', '/s', '/c', runner], restartEnvironment());
+      return Object.freeze({ configuration: runner });
+    } catch (error) {
+      await fsPromises.rm(runner, { force: true });
+      throw error;
+    }
+  }
+  let configurationPath: string | null = null;
   try {
-    await launch(executable, helperScript, configurationPath);
+    configurationPath = configurationFile(request.stagingDirectory);
+    fs.writeFileSync(configurationPath, `${JSON.stringify(configuration)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await launch(executable, [helperScript, '--run-full-package-upgrade', configurationPath], {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+    });
     return Object.freeze({ configuration: configurationPath });
   } catch (error) {
-    await fsPromises.rm(configurationPath, { force: true });
+    if (configurationPath) await fsPromises.rm(configurationPath, { force: true });
     throw error;
   }
 }
@@ -198,7 +306,19 @@ function readHelperConfiguration(configurationPath: string): FullPackageUpgradeC
     fail('helper 配置无效');
   const stagedPackage = assertAbsoluteFile(record.stagedPackage, extensionFor(platform), '完整安装包');
   if (!Number.isSafeInteger(record.electronPid) || record.electronPid < 1) fail('helper 配置 PID 无效');
-  if (platform === 'windows') return { schema: CONFIGURATION_SCHEMA, platform, stagedPackage, electronPid: record.electronPid };
+  const stagingDirectory = path.dirname(stagedPackage);
+  const receipt = assertRestartReceipt(stagingDirectory, record.restartReceipt);
+  if (platform === 'windows') {
+    if (typeof record.windowsExecutable !== 'string') fail('helper Windows 应用路径无效');
+    return {
+      schema: CONFIGURATION_SCHEMA,
+      platform,
+      stagedPackage,
+      electronPid: record.electronPid,
+      windowsExecutable: assertAbsoluteFile(record.windowsExecutable, '.exe', '当前 Windows 应用'),
+      restartReceipt: receipt,
+    };
+  }
   if (platform === 'macos') {
     if (
       typeof record.macosApplication !== 'string' ||
@@ -214,6 +334,7 @@ function readHelperConfiguration(configurationPath: string): FullPackageUpgradeC
       stagedPackage,
       electronPid: record.electronPid,
       macosApplication: record.macosApplication,
+      restartReceipt: receipt,
     };
   }
   if (typeof record.appImagePath !== 'string') fail('helper APPIMAGE 路径无效');
@@ -223,6 +344,7 @@ function readHelperConfiguration(configurationPath: string): FullPackageUpgradeC
     stagedPackage,
     electronPid: record.electronPid,
     appImagePath: appImagePath(record.appImagePath),
+    restartReceipt: receipt,
   };
 }
 
@@ -239,19 +361,34 @@ async function waitForParentExit(pid: number): Promise<void> {
 }
 
 function run(command: string, args: readonly string[]): UpgradeCommandResult {
-  const result = spawnSync(command, args, { stdio: 'ignore', windowsHide: true });
+  const result = spawnSync(command, args, { stdio: 'ignore', windowsHide: true, env: restartEnvironment() });
   return { status: result.status };
 }
 
-function startApplication(executable: string): Promise<void> {
+function restartEnvironment(): NodeJS.ProcessEnv {
+  const environment = { ...process.env };
+  delete environment.ELECTRON_RUN_AS_NODE;
+  return environment;
+}
+
+function startApplication(executable: string, args: readonly string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, [], { detached: true, stdio: 'ignore' });
+    const child = spawn(executable, args, { detached: true, stdio: 'ignore', env: restartEnvironment() });
     child.once('error', reject);
     child.once('spawn', () => {
       child.unref();
       resolve();
     });
   });
+}
+
+async function waitForRestartReceipt(receipt: UpgradeRestartReceiptRequest): Promise<void> {
+  const deadline = Date.now() + RESTART_RECEIPT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (restartReceiptMatches(receipt.receiptPath, receipt.token)) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 250));
+  }
+  fail('新版应用未在限定时间内完成启动');
 }
 
 export function copyMacosApplication(source: string, destination: string): Promise<void> {
@@ -267,6 +404,7 @@ export function copyMacosApplication(source: string, destination: string): Promi
 
 const defaultDependencies: UpgradeHelperDependencies = Object.freeze({
   waitForParentExit,
+  waitForRestartReceipt,
   run,
   startApplication,
   copyApplication: copyMacosApplication,
@@ -295,7 +433,14 @@ async function installWindows(
   dependencies: UpgradeHelperDependencies,
 ): Promise<void> {
   if (!commandSucceeded(dependencies.run(configuration.stagedPackage, []))) fail('Windows 安装器返回非零状态');
+  if (!configuration.windowsExecutable) fail('Windows 应用启动路径缺失');
+  await dependencies.startApplication(
+    configuration.windowsExecutable,
+    restartReceiptArguments(configuration.restartReceipt),
+  );
+  await dependencies.waitForRestartReceipt(configuration.restartReceipt);
   await fsPromises.rm(configuration.stagedPackage, { force: true });
+  await fsPromises.rm(configuration.restartReceipt.receiptPath, { force: true });
 }
 
 async function installMacos(
@@ -333,14 +478,20 @@ async function installMacos(
     originalMoved = true;
     fs.renameSync(replacement, application);
     replacement = null;
-    if (!commandSucceeded(dependencies.run('open', ['-n', application]))) fail('无法启动新的 macOS 应用');
+    if (!commandSucceeded(dependencies.run('open', ['-n', application, '--args', ...restartReceiptArguments(configuration.restartReceipt)])))
+      fail('无法启动新的 macOS 应用');
+    // 新应用已提交 generation 回执后，卸载卷和清理失败只保留诊断文件，不能否定已完成重启。
+    await dependencies.waitForRestartReceipt(configuration.restartReceipt);
     started = true;
-    if (!commandSucceeded(dependencies.run('hdiutil', ['detach', mountPoint]))) fail('无法卸载 macOS 安装卷');
+    dependencies.run('hdiutil', ['detach', mountPoint]);
     mounted = false;
-    await fsPromises.rm(backup, { recursive: true, force: true });
+    await fsPromises.rm(backup, { recursive: true, force: true }).catch(() => undefined);
     backup = null;
     originalMoved = false;
-    await fsPromises.rm(configuration.stagedPackage, { force: true });
+    await Promise.all([
+      fsPromises.rm(configuration.stagedPackage, { force: true }).catch(() => undefined),
+      fsPromises.rm(configuration.restartReceipt.receiptPath, { force: true }).catch(() => undefined),
+    ]);
   } catch (error) {
     if (!started && originalMoved && backup) {
       try {
@@ -378,11 +529,13 @@ async function installUbuntu(
     await dependencies.move(destination, backup);
     originalMoved = true;
     await dependencies.move(replacement, destination);
-    await dependencies.startApplication(destination);
+    await dependencies.startApplication(destination, restartReceiptArguments(configuration.restartReceipt));
+    await dependencies.waitForRestartReceipt(configuration.restartReceipt);
     newApplicationStarted = true;
     await fsPromises.rm(backup, { force: true });
     originalMoved = false;
     await fsPromises.rm(configuration.stagedPackage, { force: true });
+    await fsPromises.rm(configuration.restartReceipt.receiptPath, { force: true });
   } catch (error) {
     if (originalMoved && !newApplicationStarted) {
       try {

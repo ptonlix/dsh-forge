@@ -31,10 +31,22 @@ export type FullPackageUpdateCheck =
   | Readonly<{ readonly kind: 'unsupported' }>
   | Readonly<{ readonly kind: 'error'; readonly code: string }>;
 
+/** 下载器向主进程报告的私有进度事实；总长度未知时百分比为 null。 */
+export interface FullPackageDownloadProgress {
+  readonly receivedBytes: number;
+  readonly totalBytes: number | null;
+  readonly percent: number | null;
+}
+
+export interface FullPackageDownloadOptions {
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (progress: FullPackageDownloadProgress) => void;
+}
+
 export interface FullPackageUpdater {
   isSupported(): boolean;
   check(signal?: AbortSignal): Promise<FullPackageUpdateCheck>;
-  download(update: FullPackageUpdate, signal?: AbortSignal): Promise<string>;
+  download(update: FullPackageUpdate, options?: FullPackageDownloadOptions): Promise<string>;
   cancel(): void;
   discard(stagedPackage: string): Promise<void>;
 }
@@ -220,6 +232,11 @@ function removeIfPresent(file: string): Promise<void> {
   return fsPromises.rm(file, { force: true }).catch(() => undefined);
 }
 
+function downloadProgress(receivedBytes: number, totalBytes: number | null): FullPackageDownloadProgress {
+  const percent = totalBytes === null ? null : Math.min(100, Math.floor((receivedBytes * 100) / totalBytes));
+  return Object.freeze({ receivedBytes, totalBytes, percent });
+}
+
 /**
  * 私有 OTA 下载器只产生已关闭的受控暂存文件。Electron 确认、退出和安装器执行均由
  * apps/desktop 持有，避免把原生能力暴露给 Cordis bundle 或 renderer。
@@ -285,7 +302,10 @@ export function createFullPackageUpdater(options: FullPackageUpdaterOptions): Fu
     }
   };
 
-  const download = async (update: FullPackageUpdate, signal?: AbortSignal): Promise<string> => {
+  const download = async (
+    update: FullPackageUpdate,
+    downloadOptions: FullPackageDownloadOptions = {},
+  ): Promise<string> => {
     assertGenerationOpen(options.generation);
     assertDownloadTarget(update);
     const target = resolveUpdateTarget(options);
@@ -293,7 +313,7 @@ export function createFullPackageUpdater(options: FullPackageUpdaterOptions): Fu
     const controller = new AbortController();
     activeAborts.add(controller);
     const abortFromCaller = (): void => controller.abort();
-    signal?.addEventListener('abort', abortFromCaller, { once: true });
+    downloadOptions.signal?.addEventListener('abort', abortFromCaller, { once: true });
     const stagingDirectory = path.join(path.resolve(options.userData), 'dsh-forge', 'ota');
     const stagedPackage = path.join(stagingDirectory, controlledPackageName(update.platform));
     const partialPackage = `${stagedPackage}.partial`;
@@ -301,21 +321,30 @@ export function createFullPackageUpdater(options: FullPackageUpdaterOptions): Fu
       if (options.generation.closed) controller.abort();
     }, 100);
     try {
-      if (signal?.aborted) controller.abort();
+      if (downloadOptions.signal?.aborted) controller.abort();
       await fsPromises.mkdir(stagingDirectory, { recursive: true, mode: 0o700 });
       if (controller.signal.aborted) fail('完整安装包下载已取消', 'OTA_DOWNLOAD_CANCELLED');
       // GitHub Release 资产同样通过重定向交付到对象存储，必须允许 fetch 跟随该跳转。
       const response = await fetchImplementation(update.url, { redirect: 'follow', signal: controller.signal });
       if (!response.ok || !response.body) fail('完整安装包下载失败', 'OTA_DOWNLOAD_FAILED');
       const expectedLength = response.headers.get('content-length');
-      if (expectedLength && (!/^\d+$/.test(expectedLength) || Number(expectedLength) < 1))
+      const parsedLength = expectedLength ? Number(expectedLength) : null;
+      const invalidLength = expectedLength
+        && (!/^\d+$/.test(expectedLength)
+          || parsedLength === null
+          || !Number.isSafeInteger(parsedLength)
+          || parsedLength < 1);
+      if (invalidLength)
         fail('完整安装包响应长度无效', 'OTA_DOWNLOAD_FAILED');
+      const totalBytes = parsedLength;
       let received = 0;
+      downloadOptions.onProgress?.(downloadProgress(received, totalBytes));
       const source = Readable.fromWeb(response.body as never).on('data', (chunk: Buffer) => {
         received += chunk.length;
+        downloadOptions.onProgress?.(downloadProgress(received, totalBytes));
       });
       await pipeline(source, fs.createWriteStream(partialPackage, { flags: 'wx', mode: 0o600 }));
-      if (expectedLength && received !== Number(expectedLength)) fail('完整安装包下载不完整', 'OTA_DOWNLOAD_FAILED');
+      if (totalBytes !== null && received !== totalBytes) fail('完整安装包下载不完整', 'OTA_DOWNLOAD_FAILED');
       if (received < 1) fail('完整安装包为空', 'OTA_DOWNLOAD_FAILED');
       assertGenerationOpen(options.generation);
       await fsPromises.rename(partialPackage, stagedPackage);
@@ -329,7 +358,7 @@ export function createFullPackageUpdater(options: FullPackageUpdaterOptions): Fu
       fail('完整安装包下载失败', 'OTA_DOWNLOAD_FAILED');
     } finally {
       clearInterval(generationWatch);
-      signal?.removeEventListener('abort', abortFromCaller);
+      downloadOptions.signal?.removeEventListener('abort', abortFromCaller);
       activeAborts.delete(controller);
     }
   };

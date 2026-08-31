@@ -219,12 +219,26 @@ Ubuntu 22.04 or later and `APPIMAGE` is a writable absolute regular file. The up
 shows Electron UI nor exits the process or executes an installer. `apps/desktop` owns native
 confirmation and hands the closed staging file to its platform helper after confirmation.
 
+While the confirmed full package streams, the private coordinator projects only `receivedBytes`,
+`totalBytes`, and `percent` to the desktop layer. A valid `Content-Length` produces a determinate
+bar and percentage; an absent length produces an indeterminate bar with received bytes. The
+projection excludes the package URL, staging path, helper command, and restart token.
+
+After Electron exits, a controlled Windows staging `cmd.exe` runner waits before the installer can
+replace the application executable, then it explicitly starts the updated executable; the helper
+opens the updated macOS bundle with `open -n`, or starts the replacement Ubuntu
+AppImage. It considers the restart complete only when the new application, after Host, loopback,
+window, and renderer readiness, writes a one-time receipt carrying the helper-created random
+token. If that receipt is absent, the package remains for diagnosis and any replaced macOS or
+Ubuntu application is restored. Once macOS has submitted the receipt, DMG detachment and cleanup
+are best-effort and cannot change the completed restart into an install failure.
+
 After a generation is ready, the `UpgradeCoordinator` created by `apps/desktop` performs one silent
 check and schedules the next check 12 hours after each settlement; checks never show confirmation or
 download. `@dsh-forge/desktop-layer` registers an "Upgrade management" Settings page through the
 fixed no-argument Typert Remote methods `upgradeManager/status`, `upgradeManager/check`, and
 `upgradeManager/startUpgrade`, and renders a non-blocking orange badge on the Settings trigger when an
-update is available. The page displays the version, build, check time, state, and available version;
+update is available. The page displays the version, build, check time, state, available version, and download progress;
 "Upgrade now" causes native confirmation only after a fresh main-process check still finds an update.
 The trigger badge only leads users to that page and does not nest a direct upgrade control inside the
 outer Settings button. When the Settings panel is open, the "Upgrade management" navigation item also
@@ -265,5 +279,6 @@ pnpm run test:desktop-services-consumer
 Real loading, service teardown, generation invalidation, WAL, source drift, health failures, and
 managed process cancellation are covered by `tests/desktop-loader.test.ts` and
 `tests/runtime-services.test.ts`. OTA versioning, staging download, cancellation, platform
-eligibility, and helper rollback are covered by `tests/full-package-ota.test.ts` and
-`tests/desktop-upgrade-helper.test.ts`.
+eligibility, download progress, helper restart receipts, and rollback are covered by
+`tests/full-package-ota.test.ts`, `tests/desktop-upgrade-helper.test.ts`, and
+`tests/desktop-upgrade-restart-receipt.test.ts`.

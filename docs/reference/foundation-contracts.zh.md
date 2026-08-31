@@ -16,7 +16,11 @@
 
 根 `package.json` 的 `dshForgeBuild` 必须是正安全整数。打包脚本把它复制到应用的 `package.json`；同一 SemVer 重新发布时，维护者必须递增该值。已打包应用固定读取 `https://github.com/ptonlix/dsh-forge/releases/latest/download/version.json`，该 JSON 必须恰好包含 `windows`、`macos`、`ubuntu` 三个条目；每个条目包含精确 SemVer `version`、正安全整数 `build` 和 HTTPS `url`，扩展名依次为 `.exe`、`.dmg`、`.AppImage`。远端版本更高，或版本相同且远端 build 更高时才提供升级。
 
-Windows 与 macOS 直接使用各自条目。Linux 只发布 Ubuntu AppImage，且必须同时满足 Ubuntu 22.04+、可写绝对常规文件 `APPIMAGE` 才使用该条目；其他发行版和其他启动方式不会检查或执行 OTA。确认前不下载；确认后的文件只写入用户数据目录受控暂存区，并由 `apps/desktop/platform` helper 在当前 Electron 退出后执行。Windows 安装器零退出、macOS 替换并启动新应用、Ubuntu 原子替换并成功启动新 AppImage 后才删除完整包；Ubuntu 启动失败必须恢复旧 AppImage。
+Windows 与 macOS 直接使用各自条目。Linux 只发布 Ubuntu AppImage，且必须同时满足 Ubuntu 22.04+、可写绝对常规文件 `APPIMAGE` 才使用该条目；其他发行版和其他启动方式不会检查或执行 OTA。确认前不下载；确认后的文件只写入用户数据目录受控暂存区，并由 `apps/desktop/platform` helper 在当前 Electron 退出后执行。
+
+私有升级状态投影仅在下载期间报告 `receivedBytes`、`totalBytes` 和 `percent`。响应提供有效 `Content-Length` 时，设置页显示确定进度条和百分比；否则显示不确定进度条及已下载字节，不伪造百分比。页面不会获得更新 URL、暂存路径、命令或重启 token。
+
+Windows 使用受控暂存 `cmd.exe` runner 等待 Electron 退出，避免 NSIS 持有正在替换的应用可执行文件。安装器零退出后 runner 会显式启动更新后的可执行文件，macOS 通过 `open -n` 启动更新后的 bundle，Ubuntu 则启动替换后的 AppImage。只有新进程完成 Host、loopback、窗口和 renderer 的就绪序列，并写入携带 helper 随机 token 的一次性受控回执后，重启才算成功。未收到回执时保留完整安装包用于诊断；若 macOS 或 Ubuntu 已开始替换，必须恢复旧应用。新的 Windows 应用会在写入回执后最佳努力清理暂存文件。有效 macOS 回执写入后，DMG 卸载、备份删除和暂存清理均为最佳努力，不能将已完成的重启改判为失败。
 
 该清单和完整安装包没有摘要、签名或信任根校验。HTTPS、用户确认和 macOS 系统签名/公证不能替代可审计的通用更新信任通道；发布工作流会把三个平台安装包上传到同一 GitHub Release 的固定资产名，发布者仍需确认清单版本、build 与 Release tag 一致。
 

@@ -27,6 +27,7 @@ function status(snapshot: UpgradeManagerStatus): UpgradeManagerStatus {
   return Object.freeze({
     ...snapshot,
     available: snapshot.available ? Object.freeze({ ...snapshot.available }) : null,
+    download: snapshot.download ? Object.freeze({ ...snapshot.download }) : null,
   });
 }
 
@@ -50,6 +51,7 @@ export class UpgradeCoordinator implements UpgradeManagerCapability {
       phase: supported ? 'idle' : 'unsupported',
       lastCheckedAt: null,
       available: null,
+      download: null,
       errorCode: null,
     });
   }
@@ -68,7 +70,7 @@ export class UpgradeCoordinator implements UpgradeManagerCapability {
     if (this.checking) return this.checking;
     const controller = new AbortController();
     this.checkAbort = controller;
-    this.set({ phase: 'checking', available: null, errorCode: null });
+    this.set({ phase: 'checking', available: null, download: null, errorCode: null });
     let taskRef: Promise<UpgradeManagerStatus> | null = null;
     const task = (async () => {
       try {
@@ -81,17 +83,18 @@ export class UpgradeCoordinator implements UpgradeManagerCapability {
             phase: 'available',
             lastCheckedAt: checkedAt,
             available: { version: result.update.version, build: result.update.build },
+            download: null,
             errorCode: null,
           });
         } else if (result.kind === 'current') {
           this.candidate = null;
-          this.set({ phase: 'current', lastCheckedAt: checkedAt, available: null, errorCode: null });
+          this.set({ phase: 'current', lastCheckedAt: checkedAt, available: null, download: null, errorCode: null });
         } else if (result.kind === 'unsupported') {
           this.candidate = null;
-          this.set({ phase: 'unsupported', support: 'unsupported', lastCheckedAt: checkedAt, available: null, errorCode: null });
+          this.set({ phase: 'unsupported', support: 'unsupported', lastCheckedAt: checkedAt, available: null, download: null, errorCode: null });
         } else {
           this.candidate = null;
-          this.set({ phase: 'error', lastCheckedAt: checkedAt, available: null, errorCode: result.code });
+          this.set({ phase: 'error', lastCheckedAt: checkedAt, available: null, download: null, errorCode: result.code });
         }
       } catch (error: unknown) {
         if (!this.disposed) {
@@ -100,6 +103,7 @@ export class UpgradeCoordinator implements UpgradeManagerCapability {
             phase: 'error',
             lastCheckedAt: (this.options.now || (() => new Date()))().toISOString(),
             available: null,
+            download: null,
             errorCode: errorCode(error),
           });
         }
@@ -126,7 +130,7 @@ export class UpgradeCoordinator implements UpgradeManagerCapability {
       if (this.disposed || fresh.phase !== 'available' || !candidate) return this.snapshot;
       const controller = new AbortController();
       this.upgradeAbort = controller;
-      this.set({ phase: 'preparing', errorCode: null });
+      this.set({ phase: 'preparing', download: null, errorCode: null });
       try {
         const result = await offerFullPackageUpgrade({
           updater: this.options.updater,
@@ -134,11 +138,17 @@ export class UpgradeCoordinator implements UpgradeManagerCapability {
           confirm: this.options.confirm,
           requestExit: this.options.requestExit,
           signal: controller.signal,
+          onDownloadProgress: (download) => {
+            if (!this.disposed && !controller.signal.aborted) this.set({ phase: 'downloading', download, errorCode: null });
+          },
+          onPreparing: () => {
+            if (!this.disposed && !controller.signal.aborted) this.set({ phase: 'preparing', download: null, errorCode: null });
+          },
         });
         if (this.disposed) return this.snapshot;
-        if (result.kind === 'declined') this.set({ phase: 'available', errorCode: null });
-        else if (result.kind === 'failed') this.set({ phase: 'error', available: null, errorCode: result.code });
-        else if (result.kind === 'unavailable') this.set({ phase: 'current', available: null, errorCode: null });
+        if (result.kind === 'declined') this.set({ phase: 'available', download: null, errorCode: null });
+        else if (result.kind === 'failed') this.set({ phase: 'error', available: null, download: null, errorCode: result.code });
+        else if (result.kind === 'unavailable') this.set({ phase: 'current', available: null, download: null, errorCode: null });
         return this.snapshot;
       } finally {
         if (this.upgradeAbort === controller) this.upgradeAbort = null;

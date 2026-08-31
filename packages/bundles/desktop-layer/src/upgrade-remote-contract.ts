@@ -7,6 +7,7 @@ export type UpgradePhase =
   | 'checking'
   | 'available'
   | 'current'
+  | 'downloading'
   | 'preparing'
   | 'error'
   | 'unsupported';
@@ -16,6 +17,12 @@ export interface UpgradeVersion {
   readonly build: number;
 }
 
+export interface UpgradeDownloadProgress {
+  readonly receivedBytes: number;
+  readonly totalBytes: number | null;
+  readonly percent: number | null;
+}
+
 export interface UpgradeStatus {
   readonly version: string;
   readonly build: number | null;
@@ -23,6 +30,7 @@ export interface UpgradeStatus {
   readonly phase: UpgradePhase;
   readonly lastCheckedAt: string | null;
   readonly available: UpgradeVersion | null;
+  readonly download: UpgradeDownloadProgress | null;
   readonly errorCode: string | null;
 }
 
@@ -39,6 +47,7 @@ function isUpgradePhase(value: unknown): value is UpgradePhase {
     || value === 'checking'
     || value === 'available'
     || value === 'current'
+    || value === 'downloading'
     || value === 'preparing'
     || value === 'error'
     || value === 'unsupported';
@@ -48,6 +57,20 @@ function isUpgradeVersion(value: unknown): value is UpgradeVersion {
   return isRecord(value)
     && typeof value.version === 'string'
     && typeof value.build === 'number';
+}
+
+function isDownloadProgress(value: unknown): value is UpgradeDownloadProgress {
+  return isRecord(value)
+    && typeof value.receivedBytes === 'number'
+    && Number.isSafeInteger(value.receivedBytes)
+    && value.receivedBytes >= 0
+    && (value.totalBytes === null || (typeof value.totalBytes === 'number'
+      && Number.isSafeInteger(value.totalBytes)
+      && value.totalBytes > 0))
+    && (value.percent === null || (typeof value.percent === 'number'
+      && Number.isSafeInteger(value.percent)
+      && value.percent >= 0
+      && value.percent <= 100));
 }
 
 /** Remote 边界的轻量运行时校验，避免把安装路径或 Electron 对象带入 Client。 */
@@ -66,6 +89,9 @@ export const upgradeStatusSchema: UpgradeStatusSchema = Object.freeze({
     }
     if (value.available !== null && !isUpgradeVersion(value.available)) {
       throw new Error('升级状态候选版本无效');
+    }
+    if (value.download !== null && !isDownloadProgress(value.download)) {
+      throw new Error('升级下载进度无效');
     }
     if (value.errorCode !== null && typeof value.errorCode !== 'string') {
       throw new Error('升级状态错误代码无效');

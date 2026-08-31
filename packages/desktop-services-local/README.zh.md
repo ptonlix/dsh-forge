@@ -210,11 +210,21 @@ Windows 使用 `.exe`，macOS 使用 `.dmg`。Linux 仅在 `/etc/os-release` 为
 且 `APPIMAGE` 是可写的绝对常规文件时使用 AppImage 条目。更新器不显示 Electron UI、不退出进程，
 也不执行安装器；`apps/desktop` 持有原生确认，并在用户确认且下载文件已关闭后交给平台 helper。
 
+确认后的完整包流式下载时，私有协调器只向 desktop layer 投影 `receivedBytes`、`totalBytes` 和
+`percent`。存在有效 `Content-Length` 时显示确定进度条和百分比；不存在时显示不确定进度条及已下载
+字节。该投影不包含安装包 URL、暂存路径、helper 命令或重启 token。
+
+Electron 退出后，受控的 Windows 暂存 `cmd.exe` runner 会等待安装器可以替换应用可执行文件，随后显式启动
+更新后的可执行文件；helper 通过 `open -n` 启动更新后的 macOS bundle，或启动替换后的 Ubuntu AppImage。只有新应用完成 Host、loopback、窗口和 renderer
+就绪并写入携带 helper 随机 token 的一次性回执后，才算重启完成。没有该回执时保留完整包供诊断，并
+恢复已替换的 macOS 或 Ubuntu 应用。macOS 已提交回执后，DMG 卸载和清理均为最佳努力，不能将已完成
+的重启改判为安装失败。
+
 generation 就绪后，`apps/desktop` 创建的 `UpgradeCoordinator` 会静默检查一次，并在每次结算后
 12 小时再检查；检查不会弹出确认或下载。`@dsh-forge/desktop-layer` 通过固定的
 `upgradeManager/status`、`upgradeManager/check` 和 `upgradeManager/startUpgrade` 无参数 Typert
 Remote 注册“升级管理”设置页，并在设置入口发现可用版本时显示非阻塞的橙色提示。页面只显示版本、
-build、检查时间、状态和可用版本；“立即升级”会在主进程重新检查仍有更新后才显示原生确认。设置
+build、检查时间、状态、可用版本和下载进度；“立即升级”会在主进程重新检查仍有更新后才显示原生确认。设置
 入口提示只引导用户进入该页面，不会在外层按钮中嵌套直接升级控件。设置面板打开后，“升级管理”
 导航项也会显示同一枚橙色提示，帮助用户定位目标页面。generation 释放时会取消检查/下载并清理调度器。
 该导航项还会使用独立的更新/刷新图标替代通用设置齿轮，同时保留设置外壳的状态颜色和点击行为。
@@ -250,5 +260,5 @@ pnpm run test:desktop-services-consumer
 
 真实加载、service teardown、generation 失效、WAL、来源漂移、健康失败和受管进程取消
 覆盖在 `tests/desktop-loader.test.ts` 与 `tests/runtime-services.test.ts`。OTA 版本、暂存下载、
-取消、平台条件与 helper 回滚覆盖在 `tests/full-package-ota.test.ts` 和
-`tests/desktop-upgrade-helper.test.ts`。
+取消、平台条件、下载进度、helper 重启回执与回滚覆盖在 `tests/full-package-ota.test.ts`、
+`tests/desktop-upgrade-helper.test.ts` 和 `tests/desktop-upgrade-restart-receipt.test.ts`。

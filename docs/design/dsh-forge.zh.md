@@ -51,7 +51,7 @@ Renderer 固定使用 Chromium sandbox、context isolation 并关闭 Node integr
 
 发布门禁还检查安装包布局、动态导入、native 文件、SBOM 与许可证通知、平台证据和真实 smoke。tag 的 macOS universal 产物必须在 profile 闭包注入后完成 Developer ID 签名、Apple 公证、stapling 和本机验证；缺少凭据或任一步失败都会阻断汇总与 Release。未显式启用签名的本地、Windows 与 Linux 构建仍如实标记为 `unsigned-smoke`。Windows Authenticode 不属于当前流水线。
 
-完整安装包 OTA 由 `apps/desktop` 与私有的 `@dsh-forge/desktop-services-local/launcher` 协作实现。已打包应用从固定 GitHub Release `version.json` 读取 Windows、macOS 和 Ubuntu AppImage 条目，按 SemVer 优先、`build` 次级比较；generation 就绪后由 `UpgradeCoordinator` 静默检查并每 12 小时调度一次，只有设置页发起的重新检查仍有更新且用户确认后才下载完整包并有序退出，平台 helper 再执行安装或替换。升级状态通过 desktop layer 的固定 Typert Remote 投影，页面不接触 URL、路径或命令。Ubuntu 只发布并支持 Ubuntu 22.04+ 且可写 `APPIMAGE` 的 AppImage，其他 Linux 启动方式不受支持。该通道不校验安装包摘要、清单签名或信任根，不能称为通用可信更新通道。
+完整安装包 OTA 由 `apps/desktop` 与私有的 `@dsh-forge/desktop-services-local/launcher` 协作实现。已打包应用从固定 GitHub Release `version.json` 读取 Windows、macOS 和 Ubuntu AppImage 条目，按 SemVer 优先、`build` 次级比较；generation 就绪后由 `UpgradeCoordinator` 静默检查并每 12 小时调度一次，只有设置页发起的重新检查仍有更新且用户确认后才下载完整包并有序退出，平台 helper 再执行安装或替换。下载期间，固定 Typert Remote 只在响应给出有效总长度时投影字节数和百分比，使设置页能在不接触 URL、路径、命令或 token 的前提下显示确定或不确定进度。Windows 的受控暂存 `cmd.exe` runner 会等待 Electron 退出，使 NSIS 可以替换应用二进制；随后它显式启动更新后的 Windows 可执行文件、macOS bundle 或 Ubuntu AppImage，并等待仅在新 generation 完整就绪后写入的随机 token 回执；启动命令返回成功本身不代表升级完成。回执缺失时保留恢复证据，并恢复已替换的 macOS 或 Ubuntu 应用。macOS 仅在回执后执行最佳努力清理，因此 DMG 卸载失败不会把已完成的重启误报为失败。Ubuntu 只发布并支持 Ubuntu 22.04+ 且可写 `APPIMAGE` 的 AppImage，其他 Linux 启动方式不受支持。该通道不校验安装包摘要、清单签名或信任根，不能称为通用可信更新通道。
 
 ## Fork 契约
 

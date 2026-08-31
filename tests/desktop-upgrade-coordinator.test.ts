@@ -5,7 +5,7 @@ import { UpgradeCoordinator } from '../apps/desktop/platform/upgrade-coordinator
 
 function updater(
   check: (signal?: AbortSignal) => Promise<FullPackageUpdateCheck>,
-  download: () => Promise<string> = async () => '/tmp/package.exe',
+  download: FullPackageUpdater['download'] = async () => '/tmp/package.exe',
 ): FullPackageUpdater {
   return {
     isSupported: () => true,
@@ -121,4 +121,40 @@ test('释放会取消进行中的检查且迟到结果不能写回', async () =>
   await task;
   assert.equal(signal?.aborted, true);
   assert.equal(coordinator.status().phase, 'checking');
+});
+
+test('下载期间状态投影百分比，准备 helper 时清空进度', async () => {
+  let releaseDownload!: () => void;
+  const downloadStarted = new Promise<void>((resolve) => { releaseDownload = resolve; });
+  let receivedProgress: ((progress: {
+    readonly receivedBytes: number;
+    readonly totalBytes: number | null;
+    readonly percent: number | null;
+  }) => void) | undefined;
+  const coordinator = new UpgradeCoordinator({
+    updater: updater(
+      async () => ({
+        kind: 'available',
+        update: { platform: 'windows', version: '1.1.0', build: 2, url: 'https://example.com/app.exe' },
+      }),
+      async (_update, options) => {
+        receivedProgress = options?.onProgress;
+        receivedProgress?.({ receivedBytes: 50, totalBytes: 100, percent: 50 });
+        await downloadStarted;
+        receivedProgress?.({ receivedBytes: 100, totalBytes: 100, percent: 100 });
+        return '/tmp/package.exe';
+      },
+    ),
+    version: '1.0.0',
+    build: 1,
+    confirm: async () => true,
+    requestExit: async () => {},
+  });
+  const upgrading = coordinator.startUpgrade();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(coordinator.status().phase, 'downloading');
+  assert.deepEqual(coordinator.status().download, { receivedBytes: 50, totalBytes: 100, percent: 50 });
+  releaseDownload();
+  await upgrading;
+  coordinator.dispose();
 });

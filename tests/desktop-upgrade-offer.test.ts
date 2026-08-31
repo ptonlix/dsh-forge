@@ -120,3 +120,26 @@ test('helper 准备失败时删除本次完整包且不退出', async () => {
   });
   assert.deepEqual(calls, ['download', 'discard:/temporary/dsh-forge/ota/package.exe']);
 });
+
+test('确认后向协调器投影下载进度，并在 helper 准备前切换阶段', async () => {
+  const calls: string[] = [];
+  await offerFullPackageUpgrade({
+    updater: updater({
+      download: async (_update, options) => {
+        options?.onProgress?.({ receivedBytes: 0, totalBytes: 10, percent: 0 });
+        options?.onProgress?.({ receivedBytes: 10, totalBytes: 10, percent: 100 });
+        calls.push('download');
+        return '/temporary/dsh-forge/ota/package.exe';
+      },
+    }),
+    confirm: async () => true,
+    onDownloadProgress: (progress) => calls.push(`progress:${progress.percent}`),
+    onPreparing: () => calls.push('preparing'),
+    prepare: async () => {
+      calls.push('prepare');
+      return { configuration: '/temporary/dsh-forge/ota/upgrade.json' };
+    },
+    requestExit: async () => { calls.push('exit'); },
+  });
+  assert.deepEqual(calls, ['progress:0', 'progress:100', 'download', 'preparing', 'prepare', 'exit']);
+});

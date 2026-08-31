@@ -159,6 +159,8 @@ function builderConfig({
     };
   } else if (targetName === 'win32-x64' || (!targetName && process.platform === 'win32')) {
     config.win = { target: formats, icon: 'app-icon.png' };
+    // OTA runner 在安装器退出后携带随机回执参数启动新版；禁止 NSIS 抢先启动无参数实例。
+    config.nsis = { runAfterFinish: false };
   } else if (targetName === 'linux-x64' || (!targetName && process.platform === 'linux')) {
     config.linux = {
       target: formats,

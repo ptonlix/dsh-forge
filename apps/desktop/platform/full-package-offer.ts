@@ -19,6 +19,8 @@ export async function offerFullPackageUpgrade({
   requestExit,
   prepare = prepareFullPackageUpgrade,
   signal,
+  onDownloadProgress,
+  onPreparing,
 }: {
   readonly updater: FullPackageUpdater;
   readonly update?: FullPackageUpdate;
@@ -26,6 +28,12 @@ export async function offerFullPackageUpgrade({
   readonly requestExit: (reason: string) => Promise<void>;
   readonly prepare?: (request: FullPackageUpgradeRequest) => ReturnType<typeof prepareFullPackageUpgrade>;
   readonly signal?: AbortSignal;
+  readonly onDownloadProgress?: (progress: {
+    readonly receivedBytes: number;
+    readonly totalBytes: number | null;
+    readonly percent: number | null;
+  }) => void;
+  readonly onPreparing?: () => void;
 }): Promise<FullPackageUpgradeOfferResult> {
   let stagedPackage: string | null = null;
   let helperPrepared = false;
@@ -37,7 +45,8 @@ export async function offerFullPackageUpgrade({
       candidate = check.update;
     }
     if (!(await confirm(candidate))) return Object.freeze({ kind: 'declined' });
-    stagedPackage = await updater.download(candidate, signal);
+    stagedPackage = await updater.download(candidate, { signal, onProgress: onDownloadProgress });
+    onPreparing?.();
     await prepare({
       platform: candidate.platform,
       stagedPackage,

@@ -12,6 +12,11 @@ import { packagedProfileName, profileFromArguments, selectDesktopProfile } from 
 import { createElectronRuntime } from '../native-runtime.ts';
 import { createDesktopLauncher, ensureDistributionProfile, listProfiles, probeLoopback, startDshHost } from '../main.ts';
 import { UpgradeCoordinator } from '../platform/upgrade-coordinator.ts';
+import {
+  parseUpgradeRestartReceiptRequest,
+  scheduleUpgradeStagingCleanup,
+  writeUpgradeRestartReceipt,
+} from '../platform/upgrade-restart-receipt.ts';
 import { scheduleSmokeExit, writeSmokeReport } from './smoke.ts';
 
 /** Electron 公共启动编排：应用就绪、profile、Host、窗口和 generation 必须顺序完成。 */
@@ -41,6 +46,7 @@ export async function startDesktop() {
   writeSmokeReport('starting', 'process-start');
   if (process.env.DSH_FORGE_SMOKE_USER_DATA)
     app.setPath('userData', path.resolve(process.env.DSH_FORGE_SMOKE_USER_DATA));
+  const restartReceipt = parseUpgradeRestartReceiptRequest(process.argv, app.getPath('userData'));
   const runtime = createElectronRuntime();
   if (!runtime.acquired) {
     writeSmokeReport('failed', 'single-instance', '未获得 Electron 单实例锁');
@@ -172,6 +178,10 @@ export async function startDesktop() {
   reportDevelopmentPhase('启动 deepseek-harness Host 并等待 renderer 健康握手');
   writeSmokeReport('starting', 'generation-starting');
   const generation = await launcher.start();
+  if (restartReceipt) {
+    await writeUpgradeRestartReceipt(restartReceipt);
+    scheduleUpgradeStagingCleanup(restartReceipt.stagingCleanupPaths);
+  }
   process.stdout.write(`DSH Forge Desktop 已就绪（profile: ${generation.profile}）\n`);
   writeSmokeReport('passed', 'generation-ready');
   scheduleSmokeExit(requestExit);

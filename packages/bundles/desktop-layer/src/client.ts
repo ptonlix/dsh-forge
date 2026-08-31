@@ -206,6 +206,23 @@ window.__ModuleLoader__.load({
         font-size: 12px;
         line-height: 18px;
       }
+      [data-upgrade-settings] [data-upgrade-progress] {
+        align-items: center;
+        gap: 8px;
+        min-width: 180px;
+        display: inline-flex;
+      }
+      [data-upgrade-settings] [data-upgrade-progress] progress {
+        accent-color: var(--dsw-alias-state-brand-primary, #2563eb);
+        height: 6px;
+        width: 120px;
+      }
+      [data-upgrade-settings] [data-upgrade-progress-text] {
+        color: var(--dsw-alias-label-tertiary);
+        font-size: 12px;
+        line-height: 18px;
+        min-width: 36px;
+      }
       [data-upgrade-settings] [data-upgrade-inline-error] {
         color: var(--dsw-alias-state-error-primary);
         margin: -4px 0 0;
@@ -313,6 +330,12 @@ window.__ModuleLoader__.load({
       return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
     }
 
+    function formatBytes(value: number): string {
+      if (value < 1_024) return `${value} B`;
+      if (value < 1_024 * 1_024) return `${(value / 1_024).toFixed(1)} KB`;
+      return `${(value / (1_024 * 1_024)).toFixed(1)} MB`;
+    }
+
     type Operation = 'status' | 'check' | 'startUpgrade';
     type StatusState = 'ongoing' | 'warning' | 'done' | 'error';
 
@@ -320,8 +343,10 @@ window.__ModuleLoader__.load({
       snapshot: UpgradeStatus | null,
       operation: Operation | null,
     ): { readonly label: string; readonly state: StatusState } {
+      if (snapshot?.phase === 'downloading') return { label: '正在下载…', state: 'ongoing' };
+      if (snapshot?.phase === 'preparing') return { label: '正在准备重启…', state: 'ongoing' };
       if (operation === 'check' || snapshot?.phase === 'checking') return { label: '正在检查…', state: 'ongoing' };
-      if (operation === 'startUpgrade' || snapshot?.phase === 'preparing') return { label: '正在升级…', state: 'ongoing' };
+      if (operation === 'startUpgrade') return { label: '正在升级…', state: 'ongoing' };
       if (snapshot?.phase === 'available') return { label: '发现新版本', state: 'warning' };
       if (snapshot?.phase === 'current') return { label: '已是最新版本', state: 'done' };
       if (snapshot?.phase === 'unsupported') return { label: '不支持 OTA', state: 'warning' };
@@ -330,6 +355,7 @@ window.__ModuleLoader__.load({
     }
 
     const UPGRADE_TRIGGER_POLL_INTERVAL_MS = 30_000;
+    const UPGRADE_OPERATION_POLL_INTERVAL_MS = 500;
     const UPGRADE_SETTINGS_LABEL = '升级管理';
     const UPGRADE_NAV_MARKER = 'data-dsh-forge-upgrade-nav';
     const UPGRADE_NAV_BADGE_MARKER = 'data-dsh-forge-upgrade-nav-badge';
@@ -428,7 +454,7 @@ window.__ModuleLoader__.load({
         catch (error) {
           const errorCode = errorCodeOf(error);
           setSnapshot((current) => current ? { ...current, phase: 'error', errorCode } : {
-            version: '未知', build: null, support: 'supported', phase: 'error', lastCheckedAt: null, available: null, errorCode,
+            version: '未知', build: null, support: 'supported', phase: 'error', lastCheckedAt: null, available: null, download: null, errorCode,
           });
         }
         finally {
@@ -437,12 +463,30 @@ window.__ModuleLoader__.load({
         }
       }, [api]);
       React.useEffect(() => { void refresh('status'); }, [refresh]);
+      React.useEffect(() => {
+        if (!api || operation !== 'startUpgrade') return;
+        let active = true;
+        const poll = async (): Promise<void> => {
+          try {
+            const result = await api.status();
+            if (active) setSnapshot(readResult(result));
+          } catch {
+            // 升级结束时主进程会退出；轮询失败不覆盖已显示的下载事实。
+          }
+        };
+        void poll();
+        const timer = setInterval(() => void poll(), UPGRADE_OPERATION_POLL_INTERVAL_MS);
+        return () => {
+          active = false;
+          clearInterval(timer);
+        };
+      }, [api, operation]);
       const loading = !snapshot || typeof snapshot.version !== 'string';
       const unsupported = snapshot?.support === 'unsupported' || snapshot?.phase === 'unsupported';
       const available: UpgradeVersion | null = snapshot?.phase === 'available' ? snapshot.available : null;
       const status = statusCopy(snapshot, operation);
       const checking = operation === 'check' || snapshot?.phase === 'checking';
-      const upgrading = operation === 'startUpgrade' || snapshot?.phase === 'preparing';
+      const upgrading = operation === 'startUpgrade' || snapshot?.phase === 'downloading' || snapshot?.phase === 'preparing';
       const actionLabel = checking ? '正在检查…' : upgrading ? '正在升级…' : available ? '立即升级' : '检查更新';
       const actionMethod = available ? 'startUpgrade' : 'check';
       const actionVariant = available ? 'primary' : 'outline';
@@ -464,6 +508,18 @@ window.__ModuleLoader__.load({
             ),
             React.createElement('div', { 'data-upgrade-value': true },
               React.createElement('span', { 'data-upgrade-status': true }, React.createElement(StateDot, { state: status.state, size: 8 }), status.label),
+              snapshot.download ? React.createElement('span', { 'data-upgrade-progress': true },
+                React.createElement('progress', {
+                  'aria-label': '下载进度',
+                  max: 100,
+                  value: snapshot.download.percent === null ? undefined : snapshot.download.percent,
+                }),
+                React.createElement('span', { 'data-upgrade-progress-text': true },
+                  snapshot.download.percent === null
+                    ? `${formatBytes(snapshot.download.receivedBytes)} 已下载`
+                    : `${snapshot.download.percent}%`,
+                ),
+              ) : null,
               snapshot.errorCode ? React.createElement('span', { 'data-upgrade-code': true }, `错误代码：${snapshot.errorCode}`) : null,
             ),
           ),

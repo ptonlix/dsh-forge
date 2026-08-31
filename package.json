@@ -35,7 +35,7 @@
     "build:core": "tsx scripts/clean-build-output.ts dist && tsc -p tsconfig.build.json && tsx scripts/rewrite-emitted-requires.ts",
     "build:desktop-services": "pnpm --filter @dsh-forge/desktop-services build && pnpm --filter @dsh-forge/profile-toolchain build && pnpm --filter @dsh-forge/desktop-services-local build",
     "test:desktop-services-consumer": "pnpm --filter @dsh-forge/desktop-services build && tsc -p tests/fixtures/desktop-services-consumer/tsconfig.json --noEmit",
-    "test:desktop-services-local": "pnpm run build:desktop-layer && pnpm exec vitest run tests/runtime-services.test.ts tests/full-package-ota.test.ts tests/desktop-upgrade-helper.test.ts tests/desktop-upgrade-offer.test.ts tests/desktop-upgrade-coordinator.test.ts tests/desktop-upgrade-remote.test.ts",
+    "test:desktop-services-local": "pnpm run build:desktop-layer && pnpm exec vitest run tests/runtime-services.test.ts tests/full-package-ota.test.ts tests/desktop-upgrade-helper.test.ts tests/desktop-upgrade-restart-receipt.test.ts tests/desktop-upgrade-offer.test.ts tests/desktop-upgrade-coordinator.test.ts tests/desktop-upgrade-remote.test.ts",
     "test": "pnpm run build && vitest run",
     "test:node": "pnpm run build && node --import tsx --test tests/*.test.ts",
     "typecheck": "pnpm run build:desktop-layer && pnpm run build:desktop-services && tsc -p tsconfig.json --noEmit",

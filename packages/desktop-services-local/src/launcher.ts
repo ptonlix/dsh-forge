@@ -16,12 +16,19 @@ export {
   readDshForgeBuild,
   type FullPackageUpdate,
   type FullPackageUpdateCheck,
+  type FullPackageDownloadOptions,
+  type FullPackageDownloadProgress,
   type FullPackageUpdatePlatform,
   type FullPackageUpdater,
   type FullPackageUpdaterOptions,
 } from './full-package-ota.ts';
 
-export type { DesktopHostCapability, UpgradeManagerCapability, UpgradeManagerStatus } from './types.ts';
+export type {
+  DesktopHostCapability,
+  UpgradeDownloadProgress,
+  UpgradeManagerCapability,
+  UpgradeManagerStatus,
+} from './types.ts';
 
 export interface DesktopHostCapabilityOptions extends ProfileMutationHooks {
   readonly generation: GenerationLike;
@@ -48,6 +55,7 @@ const unavailableUpgradeManager: UpgradeManagerCapability = Object.freeze({
       phase: 'unsupported',
       lastCheckedAt: null,
       available: null,
+      download: null,
       errorCode: 'OTA_UNSUPPORTED',
     }),
   check: async () => unavailableUpgradeManager.status(),

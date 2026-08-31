@@ -10,14 +10,22 @@ export interface GenerationLike {
   readonly closed: boolean;
 }
 
+/** 升级管理页可读取的下载进度；不包含下载地址或暂存文件位置。 */
+export interface UpgradeDownloadProgress {
+  readonly receivedBytes: number;
+  readonly totalBytes: number | null;
+  readonly percent: number | null;
+}
+
 /** 升级管理页可读取的主进程快照；绝不向 Host 或 renderer 泄露安装包位置。 */
 export interface UpgradeManagerStatus {
   readonly version: string;
   readonly build: number | null;
   readonly support: 'supported' | 'unsupported';
-  readonly phase: 'idle' | 'checking' | 'available' | 'current' | 'preparing' | 'error' | 'unsupported';
+  readonly phase: 'idle' | 'checking' | 'available' | 'current' | 'downloading' | 'preparing' | 'error' | 'unsupported';
   readonly lastCheckedAt: string | null;
   readonly available: Readonly<{ readonly version: string; readonly build: number }> | null;
+  readonly download: UpgradeDownloadProgress | null;
   readonly errorCode: string | null;
 }
 
