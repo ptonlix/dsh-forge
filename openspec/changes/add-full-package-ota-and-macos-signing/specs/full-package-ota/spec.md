@@ -62,8 +62,10 @@ generation 关闭或取消时 MUST 停止下载并以稳定错误结束。
 
 平台安装逻辑 MUST 仅位于 `apps/desktop/platform`，并只接受内部创建的绝对暂存路径。Windows helper
 MUST 等待当前 Electron PID 退出、运行完整 NSIS `.exe` 并等待其退出码；只有退出码为零才删除该
-`.exe`。macOS helper MUST 等待当前 PID 退出、挂载 `.dmg`、定位唯一 `.app`、替换当前安装位置、启动
-新应用、卸载卷并删除 `.dmg`。Ubuntu helper MUST 等待当前 PID 退出，将完整 `.AppImage` 复制到
+`.exe`。macOS helper MUST 等待当前 PID 退出、挂载 `.dmg`、定位唯一 `.app`，使用保留 bundle 符号
+链接的 macOS 复制方式复制到受控临时目录，并在替换前通过 `codesign --verify --deep --strict` 和
+`spctl --assess --type execute` 验证；验证通过后才替换当前安装位置、启动新应用、卸载卷并删除
+`.dmg`。Ubuntu helper MUST 等待当前 PID 退出，将完整 `.AppImage` 复制到
 `APPIMAGE` 同目录的受控临时文件、设置可执行位、保留旧文件备份后原子替换并启动新 AppImage；只有
 新版本成功启动后才删除备份和下载文件。
 
@@ -90,3 +92,8 @@ MUST 等待当前 Electron PID 退出、运行完整 NSIS `.exe` 并等待其退
 - **WHEN** 安装器返回非零，macOS 的挂载、替换、启动或卸载失败，或 Ubuntu 的复制、替换或启动失败
 - **THEN** helper 返回失败状态，完整安装包保留；Ubuntu 替换后的启动失败必须恢复旧 AppImage，且不得
   报告成功
+
+#### Scenario: macOS bundle 复制或验证失败
+
+- **WHEN** macOS `.app` 复制失败，或复制结果未通过代码签名/Gatekeeper 验证
+- **THEN** helper 不移动旧应用，保留完整 DMG，并返回失败状态

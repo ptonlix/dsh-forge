@@ -14,7 +14,8 @@
 - [x] 2.1 在 `apps/desktop` 接入原生升级确认，确保只有当前 generation 就绪、用户确认和完整下载后
   才准备平台 helper；失败时继续现有应用。
 - [x] 2.2 实现受控 Windows NSIS、macOS DMG 和 Ubuntu AppImage helper，覆盖 PID 等待、成功后删除包、
-  Ubuntu 原子替换与回滚、失败保留包和受控参数；为 helper 输入、退出顺序与失败清理添加 fake 测试。
+  Ubuntu 原子替换与回滚、macOS bundle 符号链接保留与签名/Gatekeeper 前置验证、失败保留包和受控参数；
+  为 helper 输入、退出顺序与失败清理添加 fake 测试。
 - [x] 2.3 更新 local provider README 与桌面架构/工程边界文档，说明私有所有权、无摘要/签名更新
   限制、平台范围和实际验证命令。
 

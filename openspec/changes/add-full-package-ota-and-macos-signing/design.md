@@ -98,8 +98,10 @@ renderer IPC、第三方 bundle 或自动确认入口。
 不会把 URL、文件名或用户文本拼入 shell。准备 helper 失败时删除本次暂存文件并保留当前应用。
 
 Windows helper 等待 Electron PID 退出后以正常交互方式运行下载的 NSIS `.exe`，等待其正常返回；
-返回码为零才删除 `.exe`。macOS helper 等待 PID 退出后挂载 DMG、定位唯一 `.app`、替换当前安装
-位置、启动新应用、卸载卷并删除 DMG。Ubuntu helper 等待 PID 退出后，将下载的 `.AppImage` 完整复制
+返回码为零才删除 `.exe`。macOS helper 等待 PID 退出后挂载 DMG、定位唯一 `.app`，使用 macOS
+`ditto` 保留 Electron framework 的相对符号链接、资源叉和 ACL，并在移动旧应用前执行
+`codesign --verify --deep --strict` 与 `spctl --assess --type execute` 验证；验证通过后才替换当前安装
+位置、启动新应用、卸载卷并删除 DMG。复制或验证失败时旧应用不被移动，完整包保留。Ubuntu helper 等待 PID 退出后，将下载的 `.AppImage` 完整复制
 到与 `APPIMAGE` 同目录的受控临时文件、设置可执行位、保留旧文件备份后原子替换目标并启动新版本；
 新版本成功启动后才删除备份和下载文件。任何复制、安装器、卸载或删除失败必须返回非零状态并留下
 可诊断暂存文件；替换后的启动失败必须恢复旧 AppImage。当前 generation 在 helper 准备好后才按受控

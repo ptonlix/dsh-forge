@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  copyMacosApplication,
   createFullPackageUpgradeConfiguration,
   runFullPackageUpgrade,
   type UpgradeHelperDependencies,
@@ -20,6 +21,13 @@ function dependencies(overrides: Partial<UpgradeHelperDependencies> = {}): Upgra
     waitForParentExit: async () => {},
     run: () => ({ status: 0 }),
     startApplication: async () => {},
+    copyApplication: async (source, destination) => {
+      if (process.platform === 'darwin') {
+        await copyMacosApplication(source, destination);
+        return;
+      }
+      fs.cpSync(source, destination, { recursive: true });
+    },
     move: async (source, destination) => {
       fs.renameSync(source, destination);
     },
@@ -160,9 +168,116 @@ test('macOS helper 替换唯一 .app、启动、卸载 DMG 后删除完整包', 
       }),
     );
     assert.deepEqual(result, { success: true, code: null });
-    assert.deepEqual(calls, ['wait:102', 'run:hdiutil:attach', 'run:open:-n', 'run:hdiutil:detach']);
+    assert.deepEqual(calls, [
+      'wait:102',
+      'run:hdiutil:attach',
+      'run:codesign:--verify',
+      'run:spctl:--assess',
+      'run:open:-n',
+      'run:hdiutil:detach',
+    ]);
     assert.equal(fs.readFileSync(path.join(application, 'Contents', 'version.txt'), 'utf8'), 'new');
     assert.equal(fs.existsSync(installer), false);
+    assert.equal(fs.readdirSync(directory).some((name) => name.includes('dsh-forge-backup')), false);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('macOS bundle 复制保留 Electron Framework 的相对符号链接', { skip: process.platform !== 'darwin' }, async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-helper-macos-ditto-'));
+  const source = path.join(directory, 'Source.app');
+  const destination = path.join(directory, 'Destination.app');
+  const framework = path.join(source, 'Contents', 'Frameworks', 'Electron Framework.framework');
+  try {
+    fs.mkdirSync(path.join(framework, 'Versions', 'A'), { recursive: true });
+    fs.writeFileSync(path.join(framework, 'Versions', 'A', 'Electron Framework'), 'framework');
+    fs.symlinkSync('A', path.join(framework, 'Versions', 'Current'));
+    fs.symlinkSync('Versions/Current/Electron Framework', path.join(framework, 'Electron Framework'));
+    await copyMacosApplication(source, destination);
+    assert.equal(
+      fs.readlinkSync(path.join(destination, 'Contents', 'Frameworks', 'Electron Framework.framework', 'Electron Framework')),
+      'Versions/Current/Electron Framework',
+    );
+    assert.equal(
+      fs.existsSync(path.join(destination, 'Contents', 'Frameworks', 'Electron Framework.framework', 'Electron Framework')),
+      true,
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('macOS 新 bundle 验证失败时不覆盖旧应用且保留完整包', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-helper-macos-verify-fail-'));
+  const application = path.join(directory, 'Jiying.app');
+  const installer = path.join(directory, 'package.dmg');
+  fs.mkdirSync(path.join(application, 'Contents'), { recursive: true });
+  fs.writeFileSync(path.join(application, 'Contents', 'version.txt'), 'old');
+  fs.writeFileSync(installer, 'dmg');
+  const file = configurationFile(directory, {
+    schema: 'dsh-forge/full-package-upgrade@1',
+    platform: 'macos',
+    stagedPackage: installer,
+    electronPid: 102,
+    macosApplication: application,
+  });
+  try {
+    const result = await runFullPackageUpgrade(
+      file,
+      dependencies({
+        run: (command, args) => {
+          if (command === 'hdiutil' && args[0] === 'attach') {
+            const mountPoint = args.at(-1);
+            if (!mountPoint) throw new Error('缺少 DMG 挂载点');
+            fs.mkdirSync(path.join(mountPoint, 'Jiying.app', 'Contents'), { recursive: true });
+            fs.writeFileSync(path.join(mountPoint, 'Jiying.app', 'Contents', 'version.txt'), 'new');
+          }
+          return { status: command === 'codesign' ? 1 : 0 };
+        },
+      }),
+    );
+    assert.deepEqual(result, { success: false, code: 'OTA_INSTALL_FAILED' });
+    assert.equal(fs.readFileSync(path.join(application, 'Contents', 'version.txt'), 'utf8'), 'old');
+    assert.equal(fs.existsSync(installer), true);
+    assert.equal(fs.readdirSync(directory).some((name) => name.includes('dsh-forge-backup')), false);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('macOS 新应用启动命令失败时恢复旧应用并保留完整包', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-helper-macos-launch-fail-'));
+  const application = path.join(directory, 'Jiying.app');
+  const installer = path.join(directory, 'package.dmg');
+  fs.mkdirSync(path.join(application, 'Contents'), { recursive: true });
+  fs.writeFileSync(path.join(application, 'Contents', 'version.txt'), 'old');
+  fs.writeFileSync(installer, 'dmg');
+  const file = configurationFile(directory, {
+    schema: 'dsh-forge/full-package-upgrade@1',
+    platform: 'macos',
+    stagedPackage: installer,
+    electronPid: 102,
+    macosApplication: application,
+  });
+  try {
+    const result = await runFullPackageUpgrade(
+      file,
+      dependencies({
+        run: (command, args) => {
+          if (command === 'hdiutil' && args[0] === 'attach') {
+            const mountPoint = args.at(-1);
+            if (!mountPoint) throw new Error('缺少 DMG 挂载点');
+            fs.mkdirSync(path.join(mountPoint, 'Jiying.app', 'Contents'), { recursive: true });
+            fs.writeFileSync(path.join(mountPoint, 'Jiying.app', 'Contents', 'version.txt'), 'new');
+          }
+          return { status: command === 'open' ? 1 : 0 };
+        },
+      }),
+    );
+    assert.deepEqual(result, { success: false, code: 'OTA_INSTALL_FAILED' });
+    assert.equal(fs.readFileSync(path.join(application, 'Contents', 'version.txt'), 'utf8'), 'old');
+    assert.equal(fs.existsSync(installer), true);
     assert.equal(fs.readdirSync(directory).some((name) => name.includes('dsh-forge-backup')), false);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

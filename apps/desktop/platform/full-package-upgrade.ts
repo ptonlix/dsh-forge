@@ -37,6 +37,8 @@ export interface UpgradeHelperDependencies {
   waitForParentExit(pid: number): Promise<void>;
   run(command: string, args: readonly string[]): UpgradeCommandResult;
   startApplication(executable: string): Promise<void>;
+  /** 复制 macOS bundle 时必须保留 framework 的符号链接、资源叉和 ACL。 */
+  copyApplication(source: string, destination: string): Promise<void>;
   move(source: string, destination: string): Promise<void>;
 }
 
@@ -252,10 +254,22 @@ function startApplication(executable: string): Promise<void> {
   });
 }
 
+export function copyMacosApplication(source: string, destination: string): Promise<void> {
+  const result = spawnSync(
+    '/usr/bin/ditto',
+    ['--rsrc', '--extattr', '--acl', source, destination],
+    { stdio: 'ignore', windowsHide: true },
+  );
+  if (result.error || result.status !== 0)
+    return Promise.reject(new Error(`ditto 复制 macOS 应用失败: status=${result.status ?? 'null'}`));
+  return Promise.resolve();
+}
+
 const defaultDependencies: UpgradeHelperDependencies = Object.freeze({
   waitForParentExit,
   run,
   startApplication,
+  copyApplication: copyMacosApplication,
   move: (source: string, destination: string) => fsPromises.rename(source, destination),
 });
 
@@ -294,6 +308,7 @@ async function installMacos(
   let mounted = false;
   let backup: string | null = null;
   let replacement: string | null = null;
+  let originalMoved = false;
   let started = false;
   try {
     if (!commandSucceeded(dependencies.run('hdiutil', ['attach', configuration.stagedPackage, '-nobrowse', '-readonly', '-mountpoint', mountPoint])))
@@ -305,8 +320,17 @@ async function installMacos(
     const basename = path.basename(application);
     backup = path.join(parent, `.${basename}.dsh-forge-backup-${randomUUID()}`);
     replacement = path.join(parent, `.${basename}.dsh-forge-new-${randomUUID()}`);
+    // 先在旧应用仍然存在时复制并验证新 bundle；Electron Framework 使用的符号链接
+    // 不能通过 fs.cpSync 复制，否则会变成指向 DMG 挂载点的绝对链接并破坏签名。
+    await dependencies.copyApplication(candidates[0]!, replacement);
+    if (!fs.existsSync(replacement) || !fs.statSync(replacement).isDirectory())
+      fail('macOS 新应用复制结果无效');
+    if (!commandSucceeded(dependencies.run('codesign', ['--verify', '--deep', '--strict', replacement])))
+      fail('macOS 新应用代码签名验证失败');
+    if (!commandSucceeded(dependencies.run('spctl', ['--assess', '--type', 'execute', replacement])))
+      fail('macOS 新应用 Gatekeeper 验证失败');
     fs.renameSync(application, backup);
-    fs.cpSync(candidates[0]!, replacement, { recursive: true, dereference: true });
+    originalMoved = true;
     fs.renameSync(replacement, application);
     replacement = null;
     if (!commandSucceeded(dependencies.run('open', ['-n', application]))) fail('无法启动新的 macOS 应用');
@@ -315,13 +339,15 @@ async function installMacos(
     mounted = false;
     await fsPromises.rm(backup, { recursive: true, force: true });
     backup = null;
+    originalMoved = false;
     await fsPromises.rm(configuration.stagedPackage, { force: true });
   } catch (error) {
-    if (!started && backup) {
+    if (!started && originalMoved && backup) {
       try {
         await fsPromises.rm(application, { recursive: true, force: true });
         await fsPromises.rename(backup, application);
         backup = null;
+        originalMoved = false;
       } catch {
         // 回滚失败时保留备份，供人工恢复。
       }
