@@ -21,7 +21,7 @@
 
 ### 使用独立 Pages workflow
 
-新增 `.github/workflows/docs-pages.yml`，而不是把部署步骤加入桌面发布 workflow。文档和桌面发行包触发条件、权限和失败边界不同，独立 workflow 能避免桌面发布失败或凭据影响文档站。
+新增 `.github/workflows/docs-pages.yml`，而不是把部署步骤加入桌面发布 workflow。文档和桌面发行包触发条件、权限和失败边界不同，独立 workflow 能避免桌面发布失败或凭据影响文档站。由于 `docs:check` 会编译公开 desktop services consumer fixture，build job 先生成 `@dsh-forge/desktop-services` 的类型输出，再执行文档检查。
 
 曾考虑提交构建产物到 `gh-pages` 分支，但该方式会产生第二套生成物分支，并绕过现有构建检查，因此不采用。GitHub 官方 Pages artifact 流程与当前 `.dist` 输出直接匹配。
 

@@ -1,7 +1,7 @@
 ## 1. GitHub Pages workflow
 
 - [x] 1.1 新增 `.github/workflows/docs-pages.yml`，在 `main` 推送和手动触发时运行，并固定 Node.js `22.14.0`、pnpm `11.7.0`；用 workflow 文件审查触发条件和版本
-- [x] 1.2 在 build job 中执行 `pnpm install --frozen-lockfile`、`pnpm run docs:check`、带 `DOCS_BASE` 的 `pnpm run docs:build`，并上传 `website/.dist` Pages artifact；用本地等价命令和 artifact 路径检查验证
+- [x] 1.2 在 build job 中执行 `pnpm install --frozen-lockfile`、构建 `@dsh-forge/desktop-services`、`pnpm run docs:check`、带 `DOCS_BASE` 的 `pnpm run docs:build`，并上传 `website/.dist` Pages artifact；用本地等价命令和 artifact 路径检查验证
 - [x] 1.3 在独立 deploy job 中配置 `github-pages` environment、`pages: write`、`id-token: write` 和 `needs: build`，调用 `actions/deploy-pages`；用 workflow YAML 静态检查确认构建失败不会部署
 
 ## 2. 仓库身份与站点链接

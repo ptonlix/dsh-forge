@@ -75,7 +75,7 @@ compiler、composer、acceptance 和 profile selection 测试在该事实冲突�
 
 ## GitHub Pages 自动部署接入（2026-08-31）
 
-新增 `.github/workflows/docs-pages.yml`，在 `main` 分支推送或手动触发时执行锁定版本的依赖安装、`docs:check`、`docs:build` 和 Pages artifact 部署。构建 job 仅拥有 `contents: read`，deploy job 才拥有 `pages: write` 与 `id-token: write`，并通过 `github-pages` environment 发布 `website/.dist`。
+新增 `.github/workflows/docs-pages.yml`，在 `main` 分支推送或手动触发时执行锁定版本的依赖安装、公开 `@dsh-forge/desktop-services` contract 构建、`docs:check`、`docs:build` 和 Pages artifact 部署。构建 job 仅拥有 `contents: read`，deploy job 才拥有 `pages: write` 与 `id-token: write`，并通过 `github-pages` environment 发布 `website/.dist`。
 
 workflow 使用 `actions/configure-pages` 的 `base_path` 设置 `DOCS_BASE`：当前项目站点生成 `/dsh-forge/` 前缀，自定义域名生成 `/`。本地已用 `DOCS_BASE=/dsh-forge/ pnpm run docs:build` 验证 14 个双语路由、raw Markdown twin 和 `llms.txt`。
 

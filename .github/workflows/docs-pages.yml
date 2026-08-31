@@ -38,6 +38,9 @@ jobs:
         id: pages
         uses: actions/configure-pages@v5
 
+      - name: Build public desktop services contract
+        run: pnpm --filter @dsh-forge/desktop-services build
+
       - name: Check documentation
         run: pnpm run docs:check
 
