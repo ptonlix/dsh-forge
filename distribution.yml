@@ -3,7 +3,7 @@ id: dsh-forge-official
 name: DSH Forge
 packageScope: '@dsh-forge'
 applicationId: ai.dshforge.desktop
-version: 0.2.3
+version: 0.2.4
 defaultProfile: dsh-forge-official
 channel: stable
 platforms:
