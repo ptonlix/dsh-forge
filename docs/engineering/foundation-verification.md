@@ -73,6 +73,14 @@ compiler、composer、acceptance 和 profile selection 测试在该事实冲突�
 
 本次没有执行 GitHub Pages 实际部署、token/凭据验证、平台签名、公证、Authenticode 或生产发布 smoke；这些能力不属于本变更的授权范围。
 
+## GitHub Pages 自动部署接入（2026-08-31）
+
+新增 `.github/workflows/docs-pages.yml`，在 `main` 分支推送或手动触发时执行锁定版本的依赖安装、`docs:check`、`docs:build` 和 Pages artifact 部署。构建 job 仅拥有 `contents: read`，deploy job 才拥有 `pages: write` 与 `id-token: write`，并通过 `github-pages` environment 发布 `website/.dist`。
+
+workflow 使用 `actions/configure-pages` 的 `base_path` 设置 `DOCS_BASE`：当前项目站点生成 `/dsh-forge/` 前缀，自定义域名生成 `/`。本地已用 `DOCS_BASE=/dsh-forge/ pnpm run docs:build` 验证 14 个双语路由、raw Markdown twin 和 `llms.txt`。
+
+本次仅完成仓库内 workflow 和本地构建验证；尚未在 GitHub Actions 中执行真实 Pages 部署、环境权限验证或远程 HTTP/browser smoke。首次远程运行成功后，必须在本节补充 workflow run、发布 URL、检查日期和未覆盖平台，不得以本地构建结果代替远程部署证据。
+
 该次文档站变更没有配置 macOS 代码签名/公证身份或 Windows Authenticode 身份；本次 Electron
 产物明确标记为 `unsigned-smoke`。后续 tag macOS 签名/公证与完整安装包 OTA 要求见本记录的
 GitHub Desktop Release CI 章节；Windows 目标、native ABI 和真实发布链路仍需由对应平台构建机验证。

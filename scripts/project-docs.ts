@@ -1,10 +1,17 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { docsPages, routeForSource, counterpartSource, publishedSources, type DocsPage } from '../website/docs.ts';
+import {
+  canonicalRepositoryBranch,
+  canonicalRepositoryUrl,
+  docsPages,
+  routeForSource,
+  counterpartSource,
+  publishedSources,
+  type DocsPage,
+} from '../website/docs.ts';
 
 const root = path.resolve(__dirname, '..');
 const generated = path.join(root, 'website', '.generated');
-const repositoryUrl = 'https://github.com/dsh-forge/dsh-forge';
 
 function sitePath(route: string): string {
   const clean = route.replace(/\.md$/, '');
@@ -36,7 +43,7 @@ function routeLink(page: DocsPage, source: string, target: string): string | und
     return counterpart === undefined ? undefined : `${sitePath(counterpart.route)}${suffix}`;
   }
   if (targetPage === undefined) {
-    return `${repositoryUrl}/blob/master/${resolved}${suffix}`;
+    return `${canonicalRepositoryUrl}/blob/${canonicalRepositoryBranch}/${resolved}${suffix}`;
   }
   const localized = routeForSource(resolved, page.locale);
   return localized === undefined ? undefined : `${sitePath(localized)}${suffix}`;

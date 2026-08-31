@@ -1,5 +1,8 @@
 export type DocsLocale = 'root' | 'en';
 
+export const canonicalRepositoryUrl = 'https://github.com/ptonlix/dsh-forge';
+export const canonicalRepositoryBranch = 'main';
+
 export interface DocsPage {
   readonly locale: DocsLocale;
   readonly contentLocale: 'zh-CN' | 'en-US';

@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitepress';
 import { resolve } from 'node:path';
-import { sections } from '../docs.ts';
+import { canonicalRepositoryUrl, sections } from '../docs.ts';
 
 const base = process.env.DOCS_BASE ?? '/';
 if (!base.startsWith('/') || !base.endsWith('/')) throw new Error('DOCS_BASE 必须以 / 开始并以 / 结束');
@@ -64,6 +64,6 @@ export default defineConfig({
       '/': nav('root'),
       '/en/': nav('en'),
     },
-    socialLinks: [{ icon: 'github', link: 'https://github.com/deepseek-ai/dsh-forge' }],
+    socialLinks: [{ icon: 'github', link: canonicalRepositoryUrl }],
   },
 });

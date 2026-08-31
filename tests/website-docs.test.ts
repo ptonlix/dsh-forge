@@ -1,4 +1,9 @@
-import { docsPages, validatePublicationManifest } from '../website/docs.ts';
+import {
+  canonicalRepositoryBranch,
+  canonicalRepositoryUrl,
+  docsPages,
+  validatePublicationManifest,
+} from '../website/docs.ts';
 import { rewriteMarkdown } from '../scripts/project-docs.ts';
 import { fragmentExists } from '../scripts/verify-site.ts';
 
@@ -27,7 +32,7 @@ describe('文档站发布清单', () => {
       page!,
     );
     expect(projected).toContain('(/en/reference/foundation-contracts#trust)');
-    expect(projected).toContain('https://github.com/dsh-forge/dsh-forge/blob/master/docs/engineering/foundation-verification.md');
+    expect(projected).toContain(`${canonicalRepositoryUrl}/blob/${canonicalRepositoryBranch}/docs/engineering/foundation-verification.md`);
   });
 
   it('检查 HTML fragment 是否真实存在', () => {
