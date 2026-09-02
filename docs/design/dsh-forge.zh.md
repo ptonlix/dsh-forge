@@ -4,7 +4,7 @@
 
 ## 范围
 
-本文是 DSH Forge 桌面发行版的架构唯一权威来源，说明本仓库如何围绕上游 DeepSeek Harness（DSH）组合可审计 Electron 应用。DSH 负责 agent loop、会话协议、模型运行时、Host、Web Client 和 Cordis 语义；本仓库负责发行版身份、profile 组合、桌面宿主和发布证据。
+本文是 DSH Forge 桌面发行版的架构唯一权威来源，说明本仓库如何围绕上游 DeepSeek Harness（DSH）组合可审计 Electron 应用。项目提供两条发行路径：仓库维护者将经过审核的 bundle 和桌面专属能力组合为官方 profile 并发布，Fork 维护者则以同一套源码为底座加入其他或自定义插件并重新构建。桌面专属能力以 bundle/plugin 接入 DSH Host；当前包含升级管理，存储空间管理等能力须通过后续独立变更交付。DSH 负责 agent loop、会话协议、模型运行时、Host、Web Client 和 Cordis 语义；本仓库负责发行版身份、profile 组合、桌面宿主和发布证据。
 
 当前实现使用 Electron。Tauri、应用内插件市场、运行时 profile 切换和在线下载插件不属于本发行版；在写成产品能力前必须通过独立变更实现。
 

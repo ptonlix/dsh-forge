@@ -1,0 +1,32 @@
+name: Update Star History
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  watch:
+    types: [started]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: star-history
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 生成并发布 Star 历史曲线
+        uses: xpzouying/star-history@8b1f26dc5e9a17caa75da9351b688509ef312811
+        with:
+          branch: star-history
+          out-light: assets/star-history.svg
+          out-dark: assets/star-history-dark.svg
+          commit-message: "chore: update star history chart [skip ci]"

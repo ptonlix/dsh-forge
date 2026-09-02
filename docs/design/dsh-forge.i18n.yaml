@@ -1,4 +1,4 @@
 # 已确认中英文内容的 Git blob hash。修改任一侧后，必须同步对侧并重新生成。
 # pnpm run docs:pair --write docs/design/dsh-forge.md
-dsh-forge.md: e030559d30edac54b87f733d3fed625debb6e012
-dsh-forge.zh.md: 46407bd08769199e5a84509a5b64b4191e6f5626
+dsh-forge.md: 3c6451b6e1dcbfe8d25c53d7b172b0743cfc7ad5
+dsh-forge.zh.md: 18cf741976047ccbf60884e52416bd8004aef5e7

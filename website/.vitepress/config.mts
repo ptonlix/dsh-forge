@@ -14,11 +14,21 @@ function nav(locale: 'root' | 'en') {
 
 export default defineConfig({
   title: 'DSH Forge',
-  description: 'Auditable desktop distributions around DeepSeek Harness',
+  description: 'Build your own or install the official DeepSeek Harness desktop app',
   lang: 'zh-CN',
   locales: {
-    root: { label: '中文', lang: 'zh-CN', link: '/' },
-    en: { label: 'English', lang: 'en-US', link: '/en/' },
+    root: {
+      label: '中文',
+      lang: 'zh-CN',
+      link: '/',
+      description: '方便快捷地构建自己的 DeepSeek Harness 桌面端，也可直接使用官方发行版',
+    },
+    en: {
+      label: 'English',
+      lang: 'en-US',
+      link: '/en/',
+      description: 'Build your own or install the official DeepSeek Harness desktop app',
+    },
   },
   base,
   outDir: resolve(__dirname, '..', '.dist'),

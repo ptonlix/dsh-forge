@@ -1,0 +1,4 @@
+interface:
+  display_name: "DSH Forge 插件引入"
+  short_description: "审核并引入 npm 或 GitHub DSH bundle"
+  default_prompt: "使用 $dsh-forge-add-plugin 将指定 npm 包或 GitHub bundle 引入目标 profile；未指定时使用 dsh-forge-official。"

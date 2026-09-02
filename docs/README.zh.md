@@ -2,11 +2,11 @@
 
 中文 | [English](README.md)
 
-本地图将读者指向每个公开 DSH Forge 事实的唯一所有者。它只覆盖当前 Electron 发行版；不描述应用插件市场、运行时 profile UI 或在线安装流程。
+本地图将读者指向每个公开 DSH Forge 事实的唯一所有者。项目的入口是“直接安装官方发行版”或“Fork 后构建自己的 Harness”；首页 README 说明这两条路径，架构页说明桌面专属能力如何以插件化方式接入。本文档地图只覆盖当前 Electron 发行版；不描述应用插件市场、运行时 profile UI 或在线安装流程。
 
 ## 从这里开始
 
-- [`../README.zh.md`](../README.zh.md)：项目范围、环境要求和常用命令。
+- [`../README.zh.md`](../README.zh.md)：项目概览、环境要求、插件引入 Skill 和常用命令。
 - [`design/dsh-forge.zh.md`](design/dsh-forge.zh.md)：发行版架构、所有权和运行时生命周期。
 - [`reference/foundation-contracts.zh.md`](reference/foundation-contracts.zh.md)：配置和公开桌面 service contract。
 - [`engineering/foundation-boundaries.zh.md`](engineering/foundation-boundaries.zh.md)：源/派生文件、恢复、安装和发布边界。

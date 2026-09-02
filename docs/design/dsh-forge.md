@@ -4,7 +4,7 @@ English | [中文](dsh-forge.zh.md)
 
 ## Scope
 
-This document is the canonical architecture description for the DSH Forge desktop distribution. It describes how this repository composes an auditable Electron application around upstream DeepSeek Harness (DSH). DSH owns the agent loop, session protocol, model runtime, Host, Web Client, and Cordis semantics; this repository owns distribution identity, profile composition, desktop hosting, and release evidence.
+This document is the canonical architecture description for the DSH Forge desktop distribution. It describes how this repository composes an auditable Electron application around upstream DeepSeek Harness (DSH). The project has two distribution paths: maintainers compose reviewed bundles and desktop-specific capabilities into the official profile and publish it, while fork maintainers use the same source base to add other or custom plugins and rebuild. Desktop-specific capabilities enter the DSH Host as bundles/plugins; upgrade management is included today, while storage management and similar capabilities require a future standalone change. DSH owns the agent loop, session protocol, model runtime, Host, Web Client, and Cordis semantics; this repository owns distribution identity, profile composition, desktop hosting, and release evidence.
 
 The current implementation uses Electron. Tauri, an in-app plugin marketplace, runtime profile switching, and online plugin downloads are outside this release and require separate changes before they can be documented as product capabilities.
 

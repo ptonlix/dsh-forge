@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   canonicalRepositoryBranch,
+  canonicalRepositoryRawUrl,
   canonicalRepositoryUrl,
   docsPages,
   routeForSource,
@@ -32,7 +33,7 @@ function resolveSource(source: string, target: string): string | undefined {
   return absolute.startsWith('../') ? undefined : absolute;
 }
 
-function routeLink(page: DocsPage, source: string, target: string): string | undefined {
+function routeLink(page: DocsPage, source: string, target: string, isImage = false): string | undefined {
   const resolved = resolveSource(source, target);
   if (resolved === undefined) return undefined;
   const { suffix } = splitTarget(target);
@@ -43,17 +44,24 @@ function routeLink(page: DocsPage, source: string, target: string): string | und
     return counterpart === undefined ? undefined : `${sitePath(counterpart.route)}${suffix}`;
   }
   if (targetPage === undefined) {
-    return `${canonicalRepositoryUrl}/blob/${canonicalRepositoryBranch}/${resolved}${suffix}`;
+    return isImage
+      ? `${canonicalRepositoryRawUrl}/${canonicalRepositoryBranch}/${resolved}${suffix}`
+      : `${canonicalRepositoryUrl}/blob/${canonicalRepositoryBranch}/${resolved}${suffix}`;
   }
   const localized = routeForSource(resolved, page.locale);
   return localized === undefined ? undefined : `${sitePath(localized)}${suffix}`;
 }
 
 export function rewriteMarkdown(content: string, page: DocsPage): string {
-  return content.replace(/(!?\[[^\]]*\])\(([^)]+)\)/g, (full, label: string, target: string) => {
-    const rewritten = routeLink(page, page.source, target);
-    return rewritten === undefined ? full : `${label}(${rewritten})`;
-  });
+  return content
+    .replace(/(!?\[[^\]]*\])\(([^)]+)\)/g, (full, label: string, target: string) => {
+      const rewritten = routeLink(page, page.source, target, label.startsWith('!'));
+      return rewritten === undefined ? full : `${label}(${rewritten})`;
+    })
+    .replace(/(<img\b[^>]*?\bsrc=")([^"]+)(")/g, (full, prefix: string, src: string, suffix: string) => {
+      const rewritten = routeLink(page, page.source, src, true);
+      return rewritten === undefined ? full : `${prefix}${rewritten}${suffix}`;
+    });
 }
 
 function writePage(page: DocsPage): void {

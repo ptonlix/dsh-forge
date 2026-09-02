@@ -2,11 +2,11 @@
 
 English | [中文](README.zh.md)
 
-This map points readers to the single owner of each public DSH Forge fact. It covers the current Electron distribution only; it does not describe an application plugin marketplace, runtime profile UI, or online installation flow.
+This map points readers to the single owner of each public DSH Forge fact. The project starts from two paths: install the official distribution directly, or fork the repository and build your own Harness. The home README explains both paths, while the architecture page explains how desktop-specific capabilities enter through plugins. This map covers the current Electron distribution only; it does not describe an application plugin marketplace, runtime profile UI, or online installation flow.
 
 ## Start Here
 
-- [`../README.md`](../README.md): project scope, prerequisites, and common commands.
+- [`../README.md`](../README.md): project overview, prerequisites, the plugin-import Skill, and common commands.
 - [`design/dsh-forge.md`](design/dsh-forge.md): distribution architecture, ownership, and runtime lifecycle.
 - [`reference/foundation-contracts.md`](reference/foundation-contracts.md): configuration and public desktop service contract.
 - [`engineering/foundation-boundaries.md`](engineering/foundation-boundaries.md): source/derived files, recovery, installation, and release boundaries.
