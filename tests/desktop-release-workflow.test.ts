@@ -194,7 +194,10 @@ describe('Desktop Release workflow', () => {
     expect(packagingSource).toContain("'--os=darwin'");
     expect(packagingSource).toContain("'--cpu=arm64'");
     expect(packagingSource).toContain("'--cpu=x64'");
+    expect(packagingSource).toContain("'--config.minimum-release-age=0'");
     expect(packagingSource).toContain('createDesktopAppStaging');
+    expect(packagingSource).toContain('prunePackagedProfileClosure');
+    expect(packagingSource).toContain('copyPackagedProfileClosure(compiled, appStagingDir, application, target)');
     expect(packagingSource).toContain("directory !== 'packages' || path.basename(candidate) !== 'node_modules'");
     expect(packagingSource).toContain('PROFILE_ONLY_RUNTIME_PREFIXES');
     expect(packagingSource).toContain('installUniversalNodePtyPrebuilds');
@@ -269,7 +272,7 @@ describe('Desktop Release workflow', () => {
     const mainSource = packagingSource.slice(packagingSource.indexOf('function main(): void'));
     const gitignore = readFileSync(join(process.cwd(), '.gitignore'), 'utf8');
     const unpacked = "runBuilder(root, unpackedConfigFile, targetName, ['dir'])";
-    const closure = 'copyPackagedProfileClosure(compiled, appStagingDir, application)';
+    const closure = 'copyPackagedProfileClosure(compiled, appStagingDir, application, target)';
     const distributable = 'distributableBuild = runBuilder(';
     expect(gitignore).toContain('.desktop-work/');
     expect(packagingSource).toContain('prepareDesktopWorkDirectory');

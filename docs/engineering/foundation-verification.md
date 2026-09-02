@@ -91,8 +91,8 @@ GitHub Desktop Release CI 章节；Windows 目标、native ABI 和真实发布�
 dump、catalog 验证、`package:desktop`、`package:inspect` 和 `package:smoke`。当前方案先生成
 独立 `desktop-deploy` staging，只复制 Electron 主进程所需的 production closure；profile 配置在
 builder 阶段进入资源，`node_modules` 仅在最终应用生成后复制一次。产物中的
-`Contents/Resources/dsh-forge/profile/node_modules` 是 profile 的完整闭包；Windows 产物对应路径为
-可执行文件同级的 `resources/dsh-forge/profile/node_modules`。package inspect
+`Contents/Resources/dsh-forge/profile/node_modules` 是 profile 的依赖闭包；Windows 产物对应路径为
+可执行文件同级的 `resources/dsh-forge/profile/node_modules`。后续按目标裁剪非运行时文件的规则见本记录的 profile 闭包运行时裁剪章节。package inspect
 在打包 Electron runtime 中通过 Cordis Loader 导入每个 profile entry，覆盖
 `dsh-better-sidebar` 对 `@deepseek-ai/dsh-llm` 等 peer 的动态解析链。
 
@@ -238,7 +238,7 @@ profile，且在成功、失败或超时后清理临时目录。该修复不改�
 
 profile 闭包注入发生在 electron-builder 生成已解包应用之后；若此时才生成 NSIS、ZIP、DMG 或
 AppImage，安装包不会遗漏 `dsh-forge/profile/node_modules`。脚本现先以 `dir` 目标在
-仓库 `.desktop-work/<target>/unpacked` 中生成已解包应用，再在该短路径写入完整 profile 闭包、
+仓库 `.desktop-work/<target>/unpacked` 中生成已解包应用，再在该短路径写入 profile 闭包并按目标裁剪非运行时文件，随后生成
 runtime manifest 和 package evidence，最后以 electron-builder `--prepackaged` 封装请求的
 分发格式。该目录对 Windows 的 ConPTY `OpenConsole.exe` 等深层 helper 保持在安全路径预算内，
 并在当前 runner 中保留至 `package:inspect`、`package:smoke` 完成。
@@ -313,3 +313,15 @@ Mach-O 切片报告为 `x86_64`；此前 inspect 直接比较两者，因而把�
 `NATIVE_ARCHITECTURE_MISMATCH`。现在 Darwin inspect 仅在调用 lipo 时做该名称映射，仍逐一验证
 每个预构建的摘要、相对路径、声明平台和实际切片。该修复须由下一次 macOS Universal CI 的
 package inspect 与 smoke 验收。
+
+### Profile 闭包运行时裁剪（2026-09-02）
+
+安装树仍包含 lockfile 锁定的包集合，但 `copyPackagedProfileClosure` 在复制之后、生成 runtime
+manifest 之前按打包目标删除非运行时文件：source map、PDB、名为 `demo` 的目录、非许可证
+Markdown，以及非当前 `os-arch` 的 `node-pty/prebuilds`。与 hoist 的 `node-pty` 名称和版本相同的
+嵌套副本也会删除。`LICENSE`/`LICENCE`/`COPYING` 及其 `.md`/`.txt` 变体保留。SBOM、catalog 与
+lockfile 仍按包名、版本和 integrity 记录完整集合。
+
+本机已用 fixture 覆盖 darwin-arm64、darwin-universal、异版本嵌套副本和缺失 prebuild 失败路径。
+未在本变更中重新运行 `package:desktop` 或 `package:smoke`；裁剪后的真实安装树须由下一次本机或
+CI 打包验收。

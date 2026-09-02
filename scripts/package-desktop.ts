@@ -18,6 +18,7 @@ import {
 import { errorCode, errorMessage } from '@dsh-forge/profile-toolchain/types';
 import type { CompiledProfile } from '@dsh-forge/profile-toolchain/compiler';
 import type { Distribution, RuntimePlatform } from '@dsh-forge/profile-toolchain/schema';
+import { prunePackagedProfileClosure } from './prune-packaged-profile-closure.ts';
 
 /** Electron 目录产物构建脚本；构建前必须已有已验证 profile 和 config dump。 */
 
@@ -526,6 +527,8 @@ function installUniversalProfileDependencies(root: string, profileDir: string): 
   // pnpm 11 已将 supportedArchitectures 从 package.json 迁移为 CLI 选项；重复
   // --cpu 会让同一份 profile 同时保留 arm64 与 x64 的 optionalDependencies。不得使用
   // --force，它会绕过 OS/CPU 条件并把其他平台的 optionalDependencies 一并安装。
+  // profile 产物目录不继承根 workspace 的 minimumReleaseAgeExclude；与 compiler
+  // runPnpm 一样，只对这份已审核 frozen lockfile 关闭发布年龄窗口。
   const installArgs = [
     binary,
     'install',
@@ -534,6 +537,7 @@ function installUniversalProfileDependencies(root: string, profileDir: string): 
     '--os=darwin',
     '--cpu=arm64',
     '--cpu=x64',
+    '--config.minimum-release-age=0',
   ];
   let result: SpawnSyncReturns<string>;
   try {
@@ -990,11 +994,12 @@ function signMacosApplication(application: string): boolean {
   }
 }
 
-/** 在最终应用生成后只复制一次完整 profile node_modules 闭包。 */
+/** 在最终应用生成后只复制一次 profile node_modules，再按目标裁剪非运行时文件。 */
 function copyPackagedProfileClosure(
   compiled: CompiledProfile,
   appStagingDir: string,
   application: string,
+  target: RuntimePlatform,
 ): string {
   const source = path.join(compiled.profileDir, 'node_modules');
   if (!fs.existsSync(source) || !fs.statSync(source).isDirectory())
@@ -1033,6 +1038,7 @@ function copyPackagedProfileClosure(
     fs.cpSync(stagedPackage, profilePackage, { recursive: true, dereference: true });
   }
   assertNoSymbolicLinks(destination);
+  prunePackagedProfileClosure(destination, target);
   const anchor = path.join(profile, 'package.json');
   for (const dependency of compiled.dependencyClosure) {
     if (!packageDirectoryFromAnchor(anchor, dependency.name))
@@ -1112,7 +1118,7 @@ function main(): void {
   const unpackedBuild = runBuilder(root, unpackedConfigFile, targetName, ['dir']);
   const application = findApplication(unpackedOutputDir, distribution.branding.productName);
   if (targetName === 'darwin-universal') assertUniversalApplication(application);
-  const profileClosure = copyPackagedProfileClosure(compiled, appStagingDir, application);
+  const profileClosure = copyPackagedProfileClosure(compiled, appStagingDir, application, target);
   if (process.env.DSH_FORGE_MACOS_SIGNING === '1' && targetName !== 'darwin-universal')
     fail('macOS 签名模式只能构建最终 universal 应用', 'MACOS_SIGNING_TARGET');
   const macosSigned = signMacosApplication(application);
