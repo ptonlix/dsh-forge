@@ -121,6 +121,13 @@ function hasAllowedPrebuild(directory: string, allowed: ReadonlySet<string>): bo
   });
 }
 
+/** node-pty loader 从 prebuilds/<os>-<arch> 或 electron-rebuild 的 build/Release 解析 addon。 */
+function hasCurrentTargetNative(directory: string, allowed: ReadonlySet<string>): boolean {
+  if (hasAllowedPrebuild(directory, allowed)) return true;
+  const rebuilt = path.join(directory, 'build', 'Release', 'pty.node');
+  return fs.existsSync(rebuilt) && fs.statSync(rebuilt).isFile();
+}
+
 function removeDuplicateNestedNodePty(nodeModules: string): void {
   const hoisted = path.join(nodeModules, 'node-pty');
   const hoistedIdentity = readPackageIdentity(hoisted);
@@ -146,9 +153,9 @@ export function prunePackagedProfileClosure(nodeModules: string, target: Profile
   const allowed = allowedPrebuildDirectoryNames(target);
   for (const directory of nodePtyPackageDirectories(nodeModules)) {
     pruneNodePtyPrebuilds(directory, allowed);
-    if (!hasAllowedPrebuild(directory, allowed))
+    if (!hasCurrentTargetNative(directory, allowed))
       fail(
-        `最终应用缺少当前目标的 node-pty prebuild: ${[...allowed].join(',')}`,
+        `最终应用缺少当前目标的 node-pty native: ${[...allowed].join(',')}`,
         'PACKAGE_PROFILE_PTY_PREBUILD_MISSING',
         { directory, allowed: [...allowed] },
       );

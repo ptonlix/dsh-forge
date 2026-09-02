@@ -37,7 +37,7 @@
 
 ### Requirement: 只保留当前目标的 node-pty prebuilds
 
-对每个 `node-pty` 包目录中的 `prebuilds/<os>-<arch>`，打包流程 SHALL 只保留当前打包目标声明的操作系统与架构组合。`darwin-universal` SHALL 同时保留 `darwin-arm64` 与 `darwin-x64`。其他 `os-arch` 目录 MUST 删除。当前目标若因此没有任何 `prebuilds/<os>-<arch>` 目录，打包 MUST 失败。
+对每个 `node-pty` 包目录中的 `prebuilds/<os>-<arch>`，打包流程 SHALL 只保留当前打包目标声明的操作系统与架构组合。`darwin-universal` SHALL 同时保留 `darwin-arm64` 与 `darwin-x64`。其他 `os-arch` 目录 MUST 删除。当前目标若既没有匹配的 `prebuilds/<os>-<arch>`，也没有 `build/Release/pty.node`，打包 MUST 失败。Linux 与 Windows 的 Electron rebuild 把 addon 写到 `build/Release`，不得仅因缺少 prebuild 目录而失败。
 
 #### Scenario: 打包 darwin-arm64
 
@@ -50,6 +50,12 @@
 - **WHEN** 目标是 `darwin` + `arm64` 与 `x64`
 - **THEN** 同时保留 `prebuilds/darwin-arm64` 与 `prebuilds/darwin-x64`
 - **AND** 删除非 Darwin 的 prebuild 目录
+
+#### Scenario: 打包 linux-x64 且只有 rebuild 输出
+
+- **WHEN** 目标是 `linux` + `x64`，且 `node-pty` 只有 `build/Release/pty.node`、没有 `prebuilds/linux-x64`
+- **THEN** 打包成功
+- **AND** 异架构 `prebuilds` 目录仍被删除
 
 ### Requirement: 删除与 hoist 副本相同的嵌套 node-pty
 

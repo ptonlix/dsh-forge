@@ -8,7 +8,7 @@
 
 - 在打包脚本内对已复制的 profile `node_modules` 做确定性、按目标的文件删除。
 - 把裁剪规则抽成可单测的纯文件系统函数，不依赖完整 Electron 打包。
-- 保持当前目标的 `node-pty` 仍从 `prebuilds/<os>-<arch>` 加载。
+- 保持当前目标的 `node-pty` 仍可从 `prebuilds/<os>-<arch>` 或 `build/Release` 加载。
 - 更新工程文档中“完整闭包”的含义，避免读者以为 map/PDB 也必须上船。
 
 **Non-Goals:**
@@ -35,8 +35,8 @@
 5. **许可证白名单按文件名，不按目录。**
    保留 `LICENSE`、`LICENCE`、`COPYING` 及其 `.md`/`.txt` 变体（大小写不敏感）。其他 `.md` 删除。不保留 `README.md`。
 
-6. **当前目标缺少 `node-pty` prebuild 目录则失败。**
-   使用稳定错误 code（例如 `PACKAGE_PROFILE_PTY_PREBUILD_MISSING`），避免默默交出不能加载 addon 的包。只在闭包确实包含 `node-pty` 时检查。
+6. **当前目标既没有匹配 prebuild、也没有 `build/Release/pty.node` 则失败。**
+   Linux/Windows 的 `@electron/rebuild` 把 addon 写到 `build/Release`；Darwin Universal 才把输出放进 `prebuilds/darwin-*`。使用稳定错误 code `PACKAGE_PROFILE_PTY_PREBUILD_MISSING`。只在闭包确实包含 `node-pty` 时检查。
 
 ## Risks / Trade-offs
 

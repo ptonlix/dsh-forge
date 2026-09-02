@@ -100,6 +100,22 @@ test('嵌套 node-pty 版本不同时两份都保留并各自裁剪 prebuilds', 
   }
 });
 
+test('linux-x64 仅有 build/Release 时通过，并删除异架构 prebuilds', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-prune-'));
+  try {
+    writePackage(path.join(root, 'node-pty'), 'node-pty', '1.1.0');
+    writeFile(path.join(root, 'node-pty', 'build', 'Release', 'pty.node'));
+    writePrebuild(path.join(root, 'node-pty'), 'win32-x64', 'conpty.exe');
+    writePrebuild(path.join(root, 'node-pty'), 'darwin-arm64', 'pty.node');
+    prunePackagedProfileClosure(root, { os: 'linux', architectures: ['x64'] });
+    assert.equal(exists(root, 'node-pty/build/Release/pty.node'), true);
+    assert.equal(exists(root, 'node-pty/prebuilds/win32-x64'), false);
+    assert.equal(exists(root, 'node-pty/prebuilds/darwin-arm64'), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('当前目标没有任何 node-pty prebuild 时失败', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-forge-prune-'));
   try {
