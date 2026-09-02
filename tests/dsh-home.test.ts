@@ -2,8 +2,18 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createShippedAgentPresetsPatch, resolveShippedAgentPresetsRoot, resolveStartupProfile } from '../apps/desktop/main.ts';
-import { resolveDesktopDshHome } from '../apps/desktop/runtime/dsh-home.ts';
+import {
+  createShippedAgentPresetsPatch,
+  resolveAuthenticatedLoopbackUrl,
+  resolveShippedAgentPresetsRoot,
+  resolveStartupProfile,
+} from '../apps/desktop/main.ts';
+import {
+  isIncompatibleSessionProjectionCache,
+  quarantineIncompatibleSessionProjectionCache,
+  reconcileDshHomeWriterLocks,
+  resolveDesktopDshHome,
+} from '../apps/desktop/runtime/dsh-home.ts';
 import { ensureManagedProfile } from '../apps/desktop/runtime/managed-profile.ts';
 import { ProfileStateStore } from '../apps/desktop/runtime/state-store.ts';
 
@@ -54,10 +64,51 @@ describe('Desktop DSH Home', () => {
     });
   });
 
+  it('删除死进程留下的 credentials 写锁，并拒绝抢占仍存活的锁',
+    () => {
+      const home = temporaryDirectory('dsh-forge-home-locks-');
+      const lock = path.join(home, '.credentials.yaml.lock');
+      const staleTemp = path.join(home, '.credentials.yaml.dead.tmp');
+      fs.writeFileSync(lock, '999999\n', { encoding: 'utf8', mode: 0o600 });
+      fs.writeFileSync(staleTemp, '', { encoding: 'utf8', mode: 0o600 });
+      const recovered = reconcileDshHomeWriterLocks(home);
+      expect(recovered.busyPid).toBeNull();
+      expect(recovered.removed).toHaveLength(2);
+      expect(recovered.removed).toEqual(expect.arrayContaining([lock, staleTemp]));
+      expect(fs.existsSync(lock)).toBe(false);
+      expect(fs.existsSync(staleTemp)).toBe(false);
+
+      fs.writeFileSync(lock, `${process.pid}\n`, { encoding: 'utf8', mode: 0o600 });
+      expect(reconcileDshHomeWriterLocks(home)).toEqual({
+        removed: [],
+        busyPid: process.pid,
+      });
+      expect(fs.existsSync(lock)).toBe(true);
+    },
+  );
+
+  it('识别 session_projcache schema 失败并隔离缓存目录',
+    () => {
+      const home = temporaryDirectory('dsh-forge-home-projcache-');
+      const cache = path.join(home, 'storages', 'session_projcache');
+      const meta = path.join(home, 'storages', 'session_projcache.json');
+      writeFile(path.join(cache, 'sessions', 'session.json'), '{}\n');
+      writeFile(meta, '{}\n');
+      const error = new Error("domain 'session_projcache': stored record 'x' in table 'sessions' does not match its schema");
+      expect(isIncompatibleSessionProjectionCache(error)).toBe(true);
+      expect(isIncompatibleSessionProjectionCache(new Error('unrelated'))).toBe(false);
+      const moved = quarantineIncompatibleSessionProjectionCache(home);
+      expect(moved).toHaveLength(2);
+      expect(fs.existsSync(cache)).toBe(false);
+      expect(fs.existsSync(meta)).toBe(false);
+      expect(moved.every((file) => fs.existsSync(file))).toBe(true);
+    },
+  );
+
   it('从 runtime 应用包注入官方预设根，并保留既有 roster 配置', () => {
     const runtime = temporaryDirectory('dsh-forge-runtime-presets-');
     const packageFile = path.join(runtime, 'package.json');
-    const root = path.join(runtime, 'config', 'agent-presets');
+    const root = path.join(runtime, 'presets');
     writeFile(packageFile, '{}\n');
     writeFile(path.join(root, 'standard', 'agent.cordis.yml'), '[]\n');
 
@@ -72,6 +123,43 @@ describe('Desktop DSH Home', () => {
         roots: [{ path: root, trust: 'system' }],
       },
     });
+  });
+
+  it('把 Host connection 的 token 绑到当前 loopback origin', () => {
+    const ctx = {
+      fiber: { dispose: async () => undefined },
+      provide() {},
+      get(name: string) {
+        if (name !== 'connection') return undefined;
+        return {
+          authenticatedUrl(base: string) {
+            const url = new URL(base);
+            url.searchParams.set('token', 'launch-token');
+            return url.href;
+          },
+        };
+      },
+    };
+    expect(resolveAuthenticatedLoopbackUrl(ctx, 39123)).toBe('http://127.0.0.1:39123/?token=launch-token');
+  });
+
+  it('拒绝缺少 token 或离开 loopback 的 authenticatedUrl', () => {
+    const missing = {
+      fiber: { dispose: async () => undefined },
+      provide() {},
+      get() {
+        return { authenticatedUrl: () => 'http://127.0.0.1:39123/' };
+      },
+    };
+    expect(() => resolveAuthenticatedLoopbackUrl(missing, 39123)).toThrow(/缺少 token/);
+    const drifted = {
+      fiber: { dispose: async () => undefined },
+      provide() {},
+      get() {
+        return { authenticatedUrl: () => 'http://127.0.0.1:9/?token=launch-token' };
+      },
+    };
+    expect(() => resolveAuthenticatedLoopbackUrl(drifted, 39123)).toThrow(/离开当前 loopback origin/);
   });
 
   it('拒绝缺少 standard 组合文件的 runtime', () => {

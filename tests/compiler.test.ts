@@ -66,8 +66,8 @@ test('发行版与官方 profile 能生成确定性上游 profile 产物', () =>
   const profilePackage = JSON.parse(fs.readFileSync(path.join(compiled.profileDir, 'package.json'), 'utf8')) as {
     dependencies: Record<string, string>;
   };
-  assert.equal(profilePackage.dependencies['dsh-better-sidebar'], '0.14.0');
-  assert.equal(profilePackage.dependencies['dsh-dream-skin'], '8.28.0');
+  assert.equal(profilePackage.dependencies['dsh-better-sidebar'], '0.18.0-alpha.0');
+  assert.equal(profilePackage.dependencies['dsh-dream-skin'], '8.30.1');
   assert.ok(fs.existsSync(path.join(compiled.profileDir, 'node_modules', 'dsh-better-sidebar', 'package.json')));
   assert.ok(fs.existsSync(path.join(compiled.profileDir, 'node_modules', 'dsh-dream-skin', 'package.json')));
   const workspace = fs.readFileSync(path.join(compiled.profileDir, 'pnpm-workspace.yaml'), 'utf8');
@@ -80,11 +80,11 @@ test('发行版与官方 profile 能生成确定性上游 profile 产物', () =>
   const external = compiled.resolved.bundles.find((bundle) => bundle.name === 'dsh-better-sidebar') as {
     source?: { integrity?: string };
   } | undefined;
-  assert.equal(external?.source?.integrity, lock.packages['dsh-better-sidebar@0.14.0']?.resolution?.integrity);
+  assert.equal(external?.source?.integrity, lock.packages['dsh-better-sidebar@0.18.0-alpha.0']?.resolution?.integrity);
   const dreamSkin = compiled.resolved.bundles.find((bundle) => bundle.name === 'dsh-dream-skin') as {
     source?: { integrity?: string };
   } | undefined;
-  assert.equal(dreamSkin?.source?.integrity, lock.packages['dsh-dream-skin@8.28.0']?.resolution?.integrity);
+  assert.equal(dreamSkin?.source?.integrity, lock.packages['dsh-dream-skin@8.30.1']?.resolution?.integrity);
   assert.match(compiled.resolved.pnpmEvidence.materialized, /--offline --frozen-lockfile/);
   assert.equal(verifyProfile({ root }).verified, true);
 });
@@ -158,7 +158,7 @@ test('bundle 缺少 patch 与浮动 Git 来源被拒绝', () => {
 test('profile 不得持久化 launcher 所有的 desktop layer', () => {
   const fixture = tempFile(
     'profile.yml',
-    'schema: dsh-forge/profile@1\nname: desktop\nruntime:\n  dshPackageFamily: "@deepseek-ai/dsh"\n  dshVersion: 0.1.1-rc.2\n  cordisVersion: 4.0.1\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: ">=20.0.0"\nbundles: ["@dsh-forge/desktop-layer"]\n',
+    'schema: dsh-forge/profile@1\nname: desktop\nruntime:\n  dshPackageFamily: "@deepseek-ai/dsh"\n  dshVersion: 0.1.2-alpha.4\n  cordisVersion: 4.0.2\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: ">=20.0.0"\nbundles: ["@dsh-forge/desktop-layer"]\n',
   );
   throwsCode(() => parseProfile(fixture.file), 'DESKTOP_LAYER_OWNERSHIP');
   fs.rmSync(fixture.dir, { recursive: true, force: true });
@@ -183,7 +183,7 @@ test('发行版身份投影不可变，并校验更新信任根输入', () => {
 test('解析器拒绝非法 profile 名', () => {
   const invalid = tempFile(
     'profile.yml',
-    'schema: dsh-forge/profile@1\nname: INVALID\nruntime:\n  dshPackageFamily: "@deepseek-ai/dsh"\n  dshVersion: 0.1.1-rc.2\n  cordisVersion: 4.0.1\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: ">=20.0.0"\nbundles: ["@fixture/dsh-base"]\n',
+    'schema: dsh-forge/profile@1\nname: INVALID\nruntime:\n  dshPackageFamily: "@deepseek-ai/dsh"\n  dshVersion: 0.1.2-alpha.4\n  cordisVersion: 4.0.2\n  desktopProtocol: 1\n  electronVersion: 43.4.0\n  nodeEngine: ">=20.0.0"\nbundles: ["@fixture/dsh-base"]\n',
   );
   throwsCode(() => parseProfile(invalid.file), 'SCHEMA_IDENTIFIER');
   fs.rmSync(invalid.dir, { recursive: true, force: true });

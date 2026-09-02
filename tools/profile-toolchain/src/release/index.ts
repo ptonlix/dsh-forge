@@ -37,7 +37,7 @@ const DSH_BOOT_RUNTIME_PACKAGES = Object.freeze([
   '@deepseek-ai/dsh-launch-environment',
 ]);
 
-const SHIPPED_STANDARD_PRESET = path.join('config', 'agent-presets', 'standard', 'agent.cordis.yml');
+const SHIPPED_STANDARD_PRESET = path.join('presets', 'standard', 'agent.cordis.yml');
 
 interface RuntimePaths {
   readonly application: string;
@@ -493,8 +493,10 @@ const packageDirectory = (name) => {
 
 /** 检查打包 runtime 是否带有恢复会话所需的官方 standard 预设。 */
 function shippedStandardPresetExists(paths: RuntimePaths | null): boolean {
-  const dshPackage = resolveRuntimePackage(paths, '@deepseek-ai/dsh');
-  return dshPackage !== null && fs.existsSync(path.join(path.dirname(dshPackage), SHIPPED_STANDARD_PRESET));
+  const presetsPackage = resolveRuntimePackage(paths, '@deepseek-ai/dsh-agent-presets');
+  return (
+    presetsPackage !== null && fs.existsSync(path.join(path.dirname(presetsPackage), SHIPPED_STANDARD_PRESET))
+  );
 }
 
 /** 使用平台工具检查 native 文件是否包含声明的目标架构。 */

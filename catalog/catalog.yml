@@ -26,13 +26,13 @@ entries:
     id: dsh-better-sidebar
     tier: L1
     packageName: dsh-better-sidebar
-    version: 0.14.0
+    version: 0.18.0-alpha.0
     source:
       kind: npm
       registry: https://registry.npmjs.org
-      tarball: https://registry.npmjs.org/dsh-better-sidebar/-/dsh-better-sidebar-0.14.0.tgz
+      tarball: https://registry.npmjs.org/dsh-better-sidebar/-/dsh-better-sidebar-0.18.0-alpha.0.tgz
       package: dsh-better-sidebar
-    integrity: sha512-bEjHvHnlNnKXkud+/A/kZ4VJvPt79ggHy/mKqEKfODPqLFpvdz7ZcoMCI3K4naPOw/0Wlqp6J3UDR9h2Wm6w4w==
+    integrity: sha512-XcJLX6IaZecJ1mKebgTE52/sB/QIvVBmDfR77Wos0jnjtj2cZEUEDlFixySzwyiVMvVJfy5qQlsITpAps5pd4w==
     license: MIT
     maintainer: huanlin, menghuan1918
     dependencies:
@@ -49,6 +49,7 @@ entries:
       - '@codemirror/lang-python'
       - '@codemirror/lang-rust'
       - '@codemirror/lang-sql'
+      - '@codemirror/lang-vue'
       - '@codemirror/lang-xml'
       - '@codemirror/lang-yaml'
       - '@codemirror/language'
@@ -58,17 +59,19 @@ entries:
       - '@codemirror/view'
       - '@lezer/highlight'
       - clsx
+      - dompurify
       - mermaid
       - node-pty
+      - react-icons
       - rxjs
       - schemastery
       - ws
     scripts: []
     capabilities: [file-read-write, file-upload, git, http, websocket, terminal, model-terminal-tools]
     verifiedOn: [darwin-arm64]
-    verifiedAt: 2026-08-21
+    verifiedAt: 2026-09-02
     executionMode: trusted-in-process
-    hostSupport: [dsh-web-rc.8]
+    hostSupport: [dsh-web-alpha.4]
     pluginRequest: []
     grant: static-official-profile
     audit: manual-source-and-capability-review
@@ -77,23 +80,23 @@ entries:
     id: dsh-dream-skin
     tier: L1
     packageName: dsh-dream-skin
-    version: 8.28.0
+    version: 8.30.1
     source:
       kind: npm
       registry: https://registry.npmjs.org
-      tarball: https://registry.npmjs.org/dsh-dream-skin/-/dsh-dream-skin-8.28.0.tgz
+      tarball: https://registry.npmjs.org/dsh-dream-skin/-/dsh-dream-skin-8.30.1.tgz
       package: dsh-dream-skin
-    integrity: sha512-1Nmnp3nXDI9xw7XiVTN82wyRFe4mc4oVhoG23VobXFiSHrN1nzRgWjWJX+fNzm+9/r389eygAv1jrsC0Sbes0g==
+    integrity: sha512-o+s7EHUAtqCAeaYkhIFvGc5RyaqFv5yQxw/Qw8F2iHooGFmc9gOdYjsBYOejlNGu8nphdJHojCV1uZDXwyNXMw==
     license: MIT
     maintainer: lllaaa
     dependencies: []
     scripts: []
     capabilities: [browser-storage, user-selected-file-read, dsh-home-file-write, loopback-http-route, theme-registration]
     verifiedOn: [darwin-arm64]
-    verifiedAt: 2026-08-28
+    verifiedAt: 2026-09-02
     executionMode: trusted-in-process
-    hostSupport: [dsh-web-rc.2, desktop-protocol-1]
-    pluginRequest: [webServer, webRuntime, theme, slots, locale]
+    hostSupport: [dsh-web-alpha.4, desktop-protocol-1]
+    pluginRequest: [webServer, webRuntime, theme, slots, locale, store]
     grant: static-official-profile
     audit: manual-source-and-lifecycle-review
     enforcement: unavailable

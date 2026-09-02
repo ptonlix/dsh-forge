@@ -81,7 +81,7 @@ npx skills add ptonlix/dsh-forge --skill dsh-forge-add-plugin
 The CLI asks you to choose the agent you use and a project-level installation method. Then tell the agent the npm package or GitHub URL to add, with an optional target profile:
 
 ```text
-Use $dsh-forge-add-plugin to add dsh-better-sidebar@0.14.0 to developer.
+Use $dsh-forge-add-plugin to add dsh-better-sidebar@0.18.0-alpha.0 to developer.
 Use $dsh-forge-add-plugin to add https://github.com/example/dsh-plugin to developer.
 ```
 

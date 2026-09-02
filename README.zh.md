@@ -89,7 +89,7 @@ CLI 会提示你选择已使用的 agent 与项目级安装方式。随后直接
 GitHub 地址，以及可选目标 profile：
 
 ```text
-使用 $dsh-forge-add-plugin 将 dsh-better-sidebar@0.14.0 引入 developer。
+使用 $dsh-forge-add-plugin 将 dsh-better-sidebar@0.18.0-alpha.0 引入 developer。
 使用 $dsh-forge-add-plugin 将 https://github.com/example/dsh-plugin 引入 developer。
 ```
 

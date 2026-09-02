@@ -575,7 +575,8 @@ function pnpmCommand(root: string): string {
 }
 
 function runPnpm(root: string, cwd: string, args: readonly string[], { ignoreScripts = true } = {}): PnpmResult {
-  const result = spawnSync(process.execPath, [pnpmCommand(root), ...args], {
+  // 编译/物化使用已审核锁文件；profile 目录不会继承根 minimumReleaseAgeExclude。
+  const result = spawnSync(process.execPath, [pnpmCommand(root), ...args, '--config.minimum-release-age=0'], {
     cwd,
     encoding: 'utf8',
     timeout: PROFILE_PNPM_TIMEOUT_MS,
@@ -689,13 +690,13 @@ function projectPnpmLock(root: string, profileDir: string): void {
     if (!resolved) fail(`根 lockfile 未锁定 profile 依赖: ${name}`, 'PROFILE_LOCK_SOURCE_MISSING');
     lockedDependencies[name] = resolved;
   }
-  writeText(
-    path.join(profileDir, 'pnpm-lock.yaml'),
-    `${stringifyYaml({
-      ...source,
-      importers: { '.': { dependencies: lockedDependencies } },
-    })}\n`,
-  );
+  const projected = {
+    ...source,
+    importers: { '.': { dependencies: lockedDependencies } },
+  };
+  // 产物不是工作区；根 overrides 只用于解析，不能作为 profile frozen install 的配置指纹。
+  delete (projected as { overrides?: unknown }).overrides;
+  writeText(path.join(profileDir, 'pnpm-lock.yaml'), `${stringifyYaml(projected)}\n`);
 }
 
 function rootAutoInstallPeers(root: string): boolean {

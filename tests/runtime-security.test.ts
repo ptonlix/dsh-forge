@@ -16,6 +16,9 @@ describe('桌面 renderer 导航策略', () => {
     expect(isAllowedLoopbackNavigation('http://127.0.0.1:39124/other', authority)).toBe(false);
     expect(isAllowedLoopbackNavigation('https://127.0.0.1:39123/other', authority)).toBe(false);
     expect(isAllowedLoopbackNavigation('http://localhost:39123/other', authority)).toBe(false);
+    const authed = loopbackAuthority('http://127.0.0.1:39123/?token=launch-token');
+    expect(authed).toEqual({ protocol: 'http:', hostname: '127.0.0.1', port: '39123' });
+    expect(isAllowedLoopbackNavigation('http://127.0.0.1:39123/', authed)).toBe(true);
   });
 
   it('外部 HTTP、HTTPS 和 mail 只交给系统处理程序', () => {

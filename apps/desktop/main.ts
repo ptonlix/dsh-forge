@@ -14,6 +14,11 @@ import type {
   UpgradeManagerCapability,
 } from '@dsh-forge/desktop-services-local/launcher';
 import { GenerationManager } from './runtime/generation.ts';
+import {
+  isIncompatibleSessionProjectionCache,
+  quarantineIncompatibleSessionProjectionCache,
+  reconcileDshHomeWriterLocks,
+} from './runtime/dsh-home.ts';
 import { ensureManagedProfile } from './runtime/managed-profile.ts';
 import { ProfileStateStore } from './runtime/state-store.ts';
 import { errorMessage } from './runtime/types.ts';
@@ -51,6 +56,11 @@ interface LoadedProfile {
 interface HostContext {
   readonly fiber: { dispose(): Promise<void> };
   provide(name: string, value: unknown): void;
+  get?(name: string): unknown;
+}
+
+interface HostConnection {
+  authenticatedUrl(baseUrl: string): string;
 }
 
 interface DshAppBoot {
@@ -318,14 +328,13 @@ function isPatchConfig(value: unknown): value is PatchConfig {
 }
 
 /**
- * 解析当前 DSH 安装随包发布的官方预设根目录。
+ * 解析 `@deepseek-ai/dsh-agent-presets` 随包发布的官方预设根目录。
  *
- * 预设由 `@deepseek-ai/dsh` 应用包维护，不复制到 DSH Forge；`standard`
- * 组合文件缺失时必须在 Host 启动前失败，避免服务启动后才以空 roster
- * 拒绝恢复会话。
+ * 预设不再随 `@deepseek-ai/dsh` 应用包交付；`standard` 组合文件缺失时
+ * 必须在 Host 启动前失败，避免服务启动后才以空 roster 拒绝恢复会话。
  */
-export function resolveShippedAgentPresetsRoot(dshPackageFile: string): string {
-  const root = path.join(path.dirname(dshPackageFile), 'config', 'agent-presets');
+export function resolveShippedAgentPresetsRoot(presetsPackageFile: string): string {
+  const root = path.join(path.dirname(presetsPackageFile), 'presets');
   const standardComposition = path.join(root, 'standard', 'agent.cordis.yml');
   if (!fs.existsSync(standardComposition) || !fs.statSync(standardComposition).isFile()) {
     fail(`DSH runtime 缺少官方 agent preset: ${standardComposition}`, 'DSH_PRESET_ASSETS_MISSING');
@@ -336,16 +345,17 @@ export function resolveShippedAgentPresetsRoot(dshPackageFile: string): string {
 /**
  * 创建覆盖在 profile 与用户层之上的官方预设 patch。
  *
- * 上游 Web bundle 只注册 `agent-presets` 服务；官方预设目录属于应用
- * 安装资源，必须由启动器作为最后一层注入。保留已有配置以便设置的默认
- * 预设和用户根目录继续生效，系统根始终来自当前 runtime。
+ * 上游 Web bundle 只注册 `agent-presets` 服务；官方预设目录属于
+ * `@deepseek-ai/dsh-agent-presets` 安装资源，必须由启动器作为最后一层
+ * 注入。保留已有配置以便设置的默认预设和用户根目录继续生效，系统根
+ * 始终来自当前 runtime。
  */
-export function createShippedAgentPresetsPatch(dshPackageFile: string, config: PatchConfig): Patch {
+export function createShippedAgentPresetsPatch(presetsPackageFile: string, config: PatchConfig): Patch {
   return {
     id: 'agent-presets',
     config: {
       ...config,
-      roots: [{ path: resolveShippedAgentPresetsRoot(dshPackageFile), trust: 'system' }],
+      roots: [{ path: resolveShippedAgentPresetsRoot(presetsPackageFile), trust: 'system' }],
     },
   };
 }
@@ -361,6 +371,36 @@ function describeBootError(error: unknown, depth = 0): string {
   }
   if (record.cause) lines.push(`${'  '.repeat(depth + 1)}cause: ${describeBootError(record.cause, depth + 1)}`);
   return lines.join('\n');
+}
+
+function readHostConnection(ctx: HostContext): HostConnection {
+  const record = ctx as HostContext & { readonly connection?: unknown };
+  const connection = record.get?.('connection') ?? record.connection;
+  if (!connection || typeof connection !== 'object') fail('DSH Host 缺少 connection 服务', 'HOST_CONNECTION_MISSING');
+  if (typeof (connection as HostConnection).authenticatedUrl !== 'function')
+    fail('DSH Host connection 缺少 authenticatedUrl', 'HOST_CONNECTION_MISSING');
+  return connection as HostConnection;
+}
+
+/**
+ * 把 loopback origin 换成 Host 签发的带 token 根 URL。
+ * 无 token 的 `/` 会被 dsh web 鉴权成 401，窗口只能加载这段 URL。
+ */
+export function resolveAuthenticatedLoopbackUrl(ctx: HostContext, port: number): string {
+  const origin = `http://127.0.0.1:${port}`;
+  const href = readHostConnection(ctx).authenticatedUrl(origin);
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    fail('DSH Host authenticatedUrl 无效', 'HOST_URL_INVALID');
+  }
+  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.port !== String(port) || url.pathname !== '/')
+    fail('DSH Host authenticatedUrl 离开当前 loopback origin', 'HOST_URL_INVALID');
+  const tokens = url.searchParams.getAll('token');
+  if (tokens.length !== 1 || tokens[0] === undefined || tokens[0].length === 0)
+    fail('DSH Host authenticatedUrl 缺少 token', 'HOST_URL_UNAUTHENTICATED');
+  return href;
 }
 
 /** 申请一个未占用的 loopback 端口；探测 server 关闭后才返回端口号。 */
@@ -589,11 +629,31 @@ export async function startDshHost({
   if (agentPresets === undefined || !isPatchConfig(agentPresets.config)) {
     fail('desktop profile 缺少有效的 agent-presets 配置', 'DESKTOP_AGENT_PRESETS_MISSING');
   }
-  patches.push(createShippedAgentPresetsPatch(installAnchor, agentPresets.config));
-  const port = await allocatePort();
-  let ctx: HostContext;
+  let presetsAnchor: string;
   try {
-    ctx = await appBoot.boot(
+    presetsAnchor = profileRequire.resolve('@deepseek-ai/dsh-agent-presets/package.json');
+  } catch {
+    fail('DSH runtime 缺少 @deepseek-ai/dsh-agent-presets', 'DSH_PRESET_ASSETS_MISSING');
+  }
+  patches.push(createShippedAgentPresetsPatch(presetsAnchor, agentPresets.config));
+  const writerLocks = reconcileDshHomeWriterLocks(home);
+  if (writerLocks.busyPid !== null) {
+    fail(
+      `DSH Home credentials 正被进程 ${writerLocks.busyPid} 写入，无法启动 Host`,
+      'DSH_HOME_BUSY',
+      { pid: writerLocks.busyPid, home },
+    );
+  }
+  const port = await allocatePort();
+  // 上游 dshHomePath 只读 DSH_HOME / ~/.dsh，必须与本 generation 的 home 对齐。
+  const previousDshHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  const restoreDshHome = (): void => {
+    if (previousDshHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previousDshHome;
+  };
+  const bootHost = async (): Promise<HostContext> =>
+    appBoot.boot(
       'dsh-forge-desktop',
       path.join(profile.dir, 'cordis.yml'),
       patches,
@@ -606,17 +666,42 @@ export async function startDshHost({
       },
       pathToFileURL(profileAnchor).href,
     );
+  let ctx: HostContext;
+  try {
+    ctx = await bootHost();
   } catch (error) {
-    throw new Error(`DSH Host boot 失败:\n${describeBootError(error)}`, { cause: error });
+    if (isIncompatibleSessionProjectionCache(error)) {
+      const moved = quarantineIncompatibleSessionProjectionCache(home);
+      if (moved.length > 0) {
+        try {
+          ctx = await bootHost();
+        } catch (retryError) {
+          restoreDshHome();
+          throw new Error(`DSH Host boot 失败:\n${describeBootError(retryError)}`, { cause: retryError });
+        }
+      } else {
+        restoreDshHome();
+        throw new Error(`DSH Host boot 失败:\n${describeBootError(error)}`, { cause: error });
+      }
+    } else {
+      restoreDshHome();
+      throw new Error(`DSH Host boot 失败:\n${describeBootError(error)}`, { cause: error });
+    }
   }
-  const url = `http://127.0.0.1:${port}`;
+  const url = resolveAuthenticatedLoopbackUrl(ctx, port);
   return Object.freeze({
     generationId,
     profileDir: profile.dir,
     url: async () => url,
     entriesSettled: async () => appBoot.assertEntriesActivated(ctx, 'dsh-forge-desktop'),
     registerInteractiveCommands: async () => {},
-    dispose: async () => ctx.fiber.dispose(),
+    dispose: async () => {
+      try {
+        await ctx.fiber.dispose();
+      } finally {
+        restoreDshHome();
+      }
+    },
   });
 }
 

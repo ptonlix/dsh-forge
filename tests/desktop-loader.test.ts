@@ -115,6 +115,7 @@ test(
       });
       try {
         await host.entriesSettled();
+        assert.match(await host.url(), /^http:\/\/127\.0\.0\.1:\d+\/\?token=/);
         assert.equal(bundles.filter((bundle) => bundle === 'dsh-better-sidebar').length, 1);
         assert.equal(bundles.filter((bundle) => bundle === 'dsh-dream-skin').length, 1);
         assert.equal(bundles.includes('@dsh-forge/desktop-layer'), false);
@@ -132,5 +133,5 @@ test(
       fs.rmSync(home, { recursive: true, force: true });
     }
   },
-  55_000,
+  60_000,
 );
