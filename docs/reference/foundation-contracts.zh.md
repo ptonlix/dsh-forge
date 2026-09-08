@@ -32,6 +32,12 @@ generation 就绪后会静默检查更新；当状态为 `available` 时，设�
 
 发布前可运行 `pnpm run release:prepare -- 0.2.0`。命令会校验并同步根 `distribution.yml` 的 `version`、根 `package.json` 的 `version` 与 `dshForgeBuild`：目标版本高于当前版本时将 build 重置为 `1`，同一版本重发时自动递增 build。两个版本源不一致、输入非法或版本降级会在写入前失败；命令不会创建 tag 或发布 Release。准备完成后提交变更并创建匹配的 annotated tag（例如 `v0.2.0`），CI 会继续校验 tag 与 `distribution.yml` 一致。
 
+## 桌面存储空间
+
+「存储空间」设置页展示应用在 DSH Home 与 Electron `userData` 中管理的磁盘占用：缓存、会话、其他三类字节与 DSH Home 所在卷的容量对比条。这是私有能力，不进入公开 desktop service、协议版本或 consumer fixture。扫描只由打开设置页或显式刷新触发，与清理共享 generation lease，并发请求以 `STORAGE_BUSY` 失败；generation 关闭或取消会停止遍历与删除，迟到结果不写回。
+
+快照只含字节、卷容量、阶段与跨卷布尔标记，不含路径、文件名或目录候选。缓存清理只删除投影缓存、Electron 缓存目录与固定 OTA 暂存残留（OTA 下载或准备中跳过暂存目录）；会话清理只删除 DSH Home `sessions/` 正文，确认文案必须警告共享 Home 且删除不可从本页恢复；其他数据（含凭据与当前受管 profile）没有任何删除入口。确认对话框由主进程弹出，页面只调用无参数的 `storageManager/refresh`、`storageManager/cleanCache` 与 `storageManager/cleanSessions` Remote 方法。
+
 ## 公开导入
 
 `@dsh-forge/desktop-services` 是唯一公开的桌面 import。它为 Cordis `Context` 声明 `desktopProfiles`、`desktopPnpm` 和 `desktopServices`；consumer 必须在使用前调用 `assertDesktopServicesProtocol()`。当前协议是 `1`。

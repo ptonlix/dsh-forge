@@ -88,6 +88,7 @@ the provider, preventing the provider or third-party code from mutating launcher
 | `spawn` | No | Process-tree launcher supplied by tests or the host; production uses managed `spawnTree`. |
 | `initializeProfile` | No | Hook that initializes the profile before starting a package operation. |
 | `upgradeManager` | No | Generation-owned upgrade coordinator; an unavailable snapshot is used when omitted and only the desktop layer consumes it. |
+| `storageManager` | No | Generation-owned storage coordinator; it does not scan or clean when omitted and only the desktop layer consumes it. |
 
 `createDesktopHostCapability()` only freezes and forwards facts. It does not validate catalog
 business correctness or change the generation; the launcher and profile-toolchain complete
@@ -103,6 +104,7 @@ The provider publishes these services within one Cordis generation:
 - `desktopPnpm`: `DesktopPnpmProvider` owns the profile directory, catalog, process lease, and recovery state;
 - `desktopServices`: frozen descriptor with protocol `1`, execution mode `trusted-in-process`, and the three service names.
 - `upgradeManager`: private Typert Remote gateway exposing only the no-argument `status`, `check`, and `startUpgrade` methods.
+- `storageManager`: private Typert Remote gateway exposing only the no-argument `status`, `refresh`, `cleanCache`, and `cleanSessions` methods.
 
 When the fiber unloads, the provider first marks the package service closed, cancels the managed
 process tree, waits for the current operation's `done` to settle completely, and then removes
@@ -188,6 +190,12 @@ than error text. Common codes include:
 | `INSTALL_SOURCE_DRIFT` | Lockfile source or integrity differs from the confirmed facts. |
 | `INSTALL_LOCKFILE_UNKNOWN` | Lockfile is missing, has an unknown format, or has no target package. |
 | `INSTALL_MANUAL_RECOVERY` | Reconcile, source verification, or health check cannot prove the installed profile is usable. |
+| `STORAGE_BUSY` | A storage scan or cleanup is already running. |
+| `STORAGE_UNAVAILABLE` | The launcher did not inject a storage capability. |
+| `STORAGE_CANCELLED` | A storage scan or cleanup was cancelled. |
+| `STORAGE_SCAN_INCOMPLETE` | Some directories could not be read, so the snapshot is incomplete. |
+| `STORAGE_CLEAN_INCOMPLETE` | Some allow-listed targets could not be deleted. |
+| `STORAGE_CLEAN_NOT_ALLOWED` | Cleanup was requested for data outside the allow list (for example, `other`). |
 
 `dispose()` closes the provider, cancels the current operation, and waits for its `done`; it does
 not fabricate a successful result or delete manual recovery records.
@@ -251,6 +259,32 @@ packages intentionally have no digest, manifest signature, or runtime trust root
 HTTPS, user confirmation, and macOS system signing/notarization are the only protections in this
 flow. A cancelled, failed, or closed-generation download removes its incomplete staging file.
 
+## Storage-space accounting and cleanup
+
+The "Storage space" Settings page is driven by `@dsh-forge/desktop-layer` through the private Typert
+Remote. `apps/desktop` creates a `StorageCoordinator` per generation and injects it as the
+`storageManager` capability through the launcher; it scans exactly the launcher-resolved DSH Home
+and Electron `userData` roots, uses `lstat` without following symlinks, and never counts the
+application package itself. The application-used bytes always equal the sum of the three classes:
+
+| Class | Counted | Cleanable |
+|---|---|---|
+| `cache` | `storages/session_projcache` and same-directory incompatible-quarantine residues, Electron cache directories, inactive `<userData>/dsh-forge/ota` staging | Deleted by allow list after native confirmation |
+| `sessions` | DSH Home `sessions/` session bodies | Deleted after native confirmation that warns about the shared DSH Home |
+| `other` | Remaining app-managed data (credentials, managed profile, state files, and so on) | No deletion entry point |
+
+The disk share is based on the DSH Home volume; when `userData` lives on another volume the snapshot
+only flags it and the page explains the bar's scope. It never adds the two volumes' capacities.
+Scanning runs only when the Settings page opens or an explicit refresh is requested; startup and
+generation readiness never traverse these directories. Scans and cleanup share one generation lease:
+concurrent requests fail with `STORAGE_BUSY`, generation shutdown or cancellation stops traversal and
+deletion, and late results are not written back. Cache cleanup skips the OTA staging directory while
+OTA is downloading or preparing, so it never contends with the upgrade flow for the same file; session
+cleanup never deletes credentials, the managed profile, or anything outside the cache allow list.
+The main process owns the confirmation dialogs, and neither snapshots nor the page receive paths,
+file names, or directory candidates. This capability is not a public desktop service, and third-party
+bundles cannot obtain scan or delete authority.
+
 ## Known limitations and deferred work
 
 - **Private provider, not an extension point**: Third-party bundles cannot depend on this package; its API serves only the launcher and desktop layer.
@@ -261,6 +295,8 @@ flow. A cancelled, failed, or closed-generation download removes its incomplete 
 - **Execution mode is not isolation**: Under `trusted-in-process`, Node plugins still share process permissions with the Host.
 - **No package integrity verification**: Full-package OTA validates URL shape and HTTPS but does not verify a package digest or a signed manifest.
 - **Linux scope is AppImage only**: The release produces only the Ubuntu AppImage. Non-Ubuntu Linux, non-writable `APPIMAGE`, and other distribution methods do not support OTA.
+- **Storage cleanup is not a backup**: Deleted session bodies cannot be restored from this page, and deleting from a shared DSH Home affects the sessions of other DSH processes such as the CLI.
+- **First scans can be slow**: The managed profile's dependency closure makes the first traversal slow; the page shows a scanning state, and usage updates only after the scan finishes.
 
 ## Maintenance verification
 
@@ -281,4 +317,6 @@ managed process cancellation are covered by `tests/desktop-loader.test.ts` and
 `tests/runtime-services.test.ts`. OTA versioning, staging download, cancellation, platform
 eligibility, download progress, helper restart receipts, and rollback are covered by
 `tests/full-package-ota.test.ts`, `tests/desktop-upgrade-helper.test.ts`, and
-`tests/desktop-upgrade-restart-receipt.test.ts`.
+`tests/desktop-upgrade-restart-receipt.test.ts`. Storage classification, symlinks, cross-volume
+flags, concurrency, generation shutdown, confirmation refusal, and cleanup boundaries are covered
+by `tests/desktop-storage-coordinator.test.ts` and `tests/desktop-storage-remote.test.ts`.

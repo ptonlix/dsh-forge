@@ -11,6 +11,7 @@
   "include": [
     "src/index.ts",
     "src/typert.remote-client.ts",
-    "src/upgrade-remote-contract.ts"
+    "src/upgrade-remote-contract.ts",
+    "src/storage-remote-contract.ts"
   ]
 }

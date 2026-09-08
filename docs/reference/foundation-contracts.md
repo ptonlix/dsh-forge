@@ -35,6 +35,12 @@ generic Settings gear, while retaining the shell's state colors and click behavi
 
 Before a release, run `pnpm run release:prepare -- 0.2.0`. The command validates and synchronizes the root `distribution.yml` `version`, root `package.json` `version`, and `dshForgeBuild`: a higher target version resets the build to `1`, while rebuilding the same version increments the build automatically. Mismatched version sources, invalid input, or lower versions fail before writing; the command does not create a tag or publish a Release. After preparation, commit the changes and create a matching annotated tag (for example, `v0.2.0`); CI continues to verify that the tag matches `distribution.yml`.
 
+## Desktop Storage Space
+
+The "Storage space" Settings page shows the disk usage managed by the application under DSH Home and Electron `userData`: cache, sessions, and other byte totals with a capacity bar for the DSH Home volume. This is a private capability and never enters a public desktop service, the protocol version, or consumer fixtures. A scan runs only when the Settings page opens or an explicit refresh is requested, shares one generation lease with cleanup, and concurrent requests fail with `STORAGE_BUSY`; generation shutdown or cancellation stops traversal and deletion, and late results are not written back.
+
+A snapshot contains only bytes, volume capacity, phase, and the cross-volume boolean; it never contains paths, file names, or directory candidates. Cache cleanup deletes only projection caches, Electron cache directories, and fixed OTA staging residues (skipping the staging directory while OTA is downloading or preparing); session cleanup deletes only the DSH Home `sessions/` bodies and its confirmation must warn about a shared Home and that deletion is not recoverable from this page. Other data, including credentials and the managed profile, has no deletion entry point. The main process owns the confirmation dialogs, and the page calls only the parameter-less `storageManager/refresh`, `storageManager/cleanCache`, and `storageManager/cleanSessions` Remote methods.
+
 ## Public Import
 
 `@dsh-forge/desktop-services` is the only public desktop import. It augments Cordis `Context` with `desktopProfiles`, `desktopPnpm`, and `desktopServices`; consumers call `assertDesktopServicesProtocol()` before using the services. The current protocol is `1`.

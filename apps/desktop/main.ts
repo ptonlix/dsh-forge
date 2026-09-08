@@ -11,6 +11,7 @@ import { createDesktopHostCapability } from '@dsh-forge/desktop-services-local/l
 import type { DesktopProfileSummary } from '@dsh-forge/desktop-services';
 import type {
   DesktopHostCapability,
+  StorageManagerCapability,
   UpgradeManagerCapability,
 } from '@dsh-forge/desktop-services-local/launcher';
 import { GenerationManager } from './runtime/generation.ts';
@@ -100,12 +101,18 @@ interface HostInstance {
 interface LauncherGenerationState {
   readonly host: HostInstance;
   readonly upgradeManager?: UpgradeManagerLifecycle;
+  readonly storageManager?: StorageManagerLifecycle;
   url?: string;
 }
 
 /** generation 生命周期由 launcher 驱动，Remote 只看到 UpgradeManagerCapability。 */
 export interface UpgradeManagerLifecycle extends UpgradeManagerCapability {
   start(): void;
+  dispose(): void;
+}
+
+/** generation 生命周期由 launcher 驱动，Remote 只看到 StorageManagerCapability。 */
+export interface StorageManagerLifecycle extends StorageManagerCapability {
   dispose(): void;
 }
 
@@ -124,6 +131,7 @@ interface LauncherOptions {
   readonly pnpmEnv?: NodeJS.ProcessEnv;
   readonly catalog: readonly CatalogEntry[];
   readonly createUpgradeManager?: (generation: GenerationLike) => UpgradeManagerLifecycle;
+  readonly createStorageManager?: (generation: GenerationLike) => StorageManagerLifecycle;
 }
 
 export interface HostStartOptions {
@@ -720,6 +728,7 @@ export function createDesktopLauncher({
   pnpmEnv,
   catalog,
   createUpgradeManager,
+  createStorageManager,
 }: LauncherOptions) {
   if (!userData || !host || !windowFactory || !probe) fail('桌面启动器缺少运行时提供方', 'LAUNCHER_CONFIG');
   let windowRef: RendererWindow | null = null;
@@ -740,6 +749,7 @@ export function createDesktopLauncher({
         const profile = profiles.find((candidate) => candidate.name === generation.profile);
         if (!profile) fail(`profile 不存在: ${generation.profile}`, 'PROFILE_UNSELECTABLE');
         const upgradeManager = createUpgradeManager?.(generation);
+        const storageManager = createStorageManager?.(generation);
         const capability = createDesktopHostCapability({
           generation,
           manager,
@@ -752,12 +762,14 @@ export function createDesktopLauncher({
           reconcile: async () => {},
           verifyNextGeneration: async () => Boolean(generationStates.get(generation)?.host),
           upgradeManager,
+          storageManager,
         });
         try {
           const hostInstance = await host.start({ profile, generationId: generation.id, capability });
-          generationStates.set(generation, { host: hostInstance, upgradeManager });
+          generationStates.set(generation, { host: hostInstance, upgradeManager, storageManager });
         } catch (error) {
           upgradeManager?.dispose();
+          storageManager?.dispose();
           throw error;
         }
       },
@@ -808,6 +820,7 @@ export function createDesktopLauncher({
         const state = generationStates.get(generation);
         generationStates.delete(generation);
         state?.upgradeManager?.dispose();
+        state?.storageManager?.dispose();
         await state?.host.dispose();
       },
     },

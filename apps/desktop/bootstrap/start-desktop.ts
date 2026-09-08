@@ -7,11 +7,13 @@ import {
   createFullPackageUpdater,
   readDshForgeBuild,
 } from '@dsh-forge/desktop-services-local/launcher';
+import { UpgradeCoordinator } from '../platform/upgrade-coordinator.ts';
+import { StorageCoordinator } from '../platform/storage-coordinator.ts';
 import { resolveDesktopDshHome } from '../runtime/dsh-home.ts';
+import { pruneManagedProfileBackups } from '../runtime/managed-profile.ts';
 import { packagedProfileName, profileFromArguments, selectDesktopProfile } from '../runtime/profile-selection.ts';
 import { createElectronRuntime } from '../native-runtime.ts';
 import { createDesktopLauncher, ensureDistributionProfile, listProfiles, probeLoopback, startDshHost } from '../main.ts';
-import { UpgradeCoordinator } from '../platform/upgrade-coordinator.ts';
 import {
   parseUpgradeRestartReceiptRequest,
   scheduleUpgradeStagingCleanup,
@@ -103,6 +105,9 @@ export async function startDesktop() {
   reportDevelopmentPhase(`使用 DSH Home: ${dshHome.source === 'default' ? '~/.dsh' : '$DSH_HOME'}`);
   reportDevelopmentPhase(`使用 profile: ${managedProfile.profileName}`);
   let quitting = false;
+  // OTA 协调器与存储协调器在 launcher.start() 时按顺序创建；升级下载阶段
+  // 需要让缓存清理跳过活动暂存，因此先保存升级协调器的引用供存储侧查询。
+  let upgradeCoordinator: UpgradeCoordinator | null = null;
   // launcher.start() 才会创建 coordinator；函数声明提前以便 coordinator 的闭包
   // 复用同一条原生退出路径，而不会在启动阶段弹出确认框。
   async function requestExit(reason: string): Promise<void> {
@@ -156,14 +161,27 @@ export async function startDesktop() {
         appVersion: app.getVersion(),
         packageJsonPath: path.join(root, 'package.json'),
       });
-      return new UpgradeCoordinator({
+      upgradeCoordinator = new UpgradeCoordinator({
         updater,
         version: app.getVersion(),
         build: readDshForgeBuild(path.join(root, 'package.json')),
         confirm: (update) => runtime.confirmFullPackageUpgrade(update),
         requestExit: (reason) => requestExit(reason),
       });
+      return upgradeCoordinator;
     },
+    // 存储清理与 OTA 共享同一个 generation；暂存文件正在被下载或 helper 使用时跳过。
+    createStorageManager: (generation) => new StorageCoordinator({
+      generation,
+      dshHome: dshHome.path,
+      userData: runtime.userDataPath,
+      confirmCacheClean: () => runtime.confirmStorageCacheClean(),
+      confirmSessionsClean: () => runtime.confirmStorageSessionsClean(),
+      otaStagingBusy: () => {
+        const phase = upgradeCoordinator?.status().phase;
+        return phase === 'downloading' || phase === 'preparing';
+      },
+    }),
   });
   writeSmokeReport('starting', 'launcher-ready');
   runtime.setSecondInstanceHandler(() => launcher.show());
@@ -178,6 +196,7 @@ export async function startDesktop() {
   reportDevelopmentPhase('启动 deepseek-harness Host 并等待 renderer 健康握手');
   writeSmokeReport('starting', 'generation-starting');
   const generation = await launcher.start();
+  pruneManagedProfileBackups(dshHome.path);
   if (restartReceipt) {
     await writeUpgradeRestartReceipt(restartReceipt);
     scheduleUpgradeStagingCleanup(restartReceipt.stagingCleanupPaths);

@@ -85,6 +85,7 @@ provider 或第三方代码反向修改 launcher 状态。
 | `spawn` | 否 | 测试或宿主提供的进程树启动器；生产默认使用受管 `spawnTree`。 |
 | `initializeProfile` | 否 | 启动 package operation 前初始化 profile 的 hook。 |
 | `upgradeManager` | 否 | 当前 generation 的升级协调器；未注入时为不可用快照，仅由 desktop layer 使用。 |
+| `storageManager` | 否 | 当前 generation 的存储协调器；未注入时不扫描、不可清理，仅由 desktop layer 使用。 |
 
 `createDesktopHostCapability()` 只负责冻结和转交事实，不验证 catalog 业务正确性，也不
 改变 generation；profile、来源和平台验证由 launcher 与 profile-toolchain 在更早阶段完成。
@@ -99,6 +100,7 @@ provider 在同一个 Cordis generation 内发布：
 - `desktopPnpm`：由 `DesktopPnpmProvider` 持有 profile 目录、catalog、进程 lease 和恢复状态；
 - `desktopServices`：协议 `1`、执行模式 `trusted-in-process` 及三个 service 名称的冻结 descriptor。
 - `upgradeManager`：私有 Typert Remote gateway，仅暴露 `status`、`check`、`startUpgrade` 三个无参数方法。
+- `storageManager`：私有 Typert Remote gateway，仅暴露 `status`、`refresh`、`cleanCache`、`cleanSessions` 四个无参数方法。
 
 fiber 卸载时，provider 先将 package service 标记为关闭，取消受管进程树，等待当前
 operation 的 `done` 完整结算，再移除 service。已关闭 generation 的旧引用不能访问或
@@ -182,6 +184,12 @@ provider 使用 profile-toolchain 的 `ForgeError`，调用方应按稳定 code 
 | `INSTALL_SOURCE_DRIFT` | lockfile 来源或完整性与确认事实不一致。 |
 | `INSTALL_LOCKFILE_UNKNOWN` | lockfile 缺失、格式未知或没有目标 package。 |
 | `INSTALL_MANUAL_RECOVERY` | 安装后 reconcile、来源复核或健康检查无法证明 profile 可用。 |
+| `STORAGE_BUSY` | 已有存储扫描或清理正在进行。 |
+| `STORAGE_UNAVAILABLE` | launcher 未注入存储能力。 |
+| `STORAGE_CANCELLED` | 存储扫描或清理被取消。 |
+| `STORAGE_SCAN_INCOMPLETE` | 部分目录无法读取，快照不完整。 |
+| `STORAGE_CLEAN_INCOMPLETE` | 部分允许清单目标未能删除。 |
+| `STORAGE_CLEAN_NOT_ALLOWED` | 请求清理允许清单之外的数据（如 `other`）。 |
 
 `dispose()` 会关闭 provider、取消当前 operation 并等待其 `done`；它不会伪造成功结果，
 也不会删除人工恢复记录。
@@ -233,6 +241,27 @@ build、检查时间、状态、可用版本和下载进度；“立即升级”
 信任根；本流程仅依赖 HTTPS、用户确认以及 macOS 系统签名/公证。下载取消、失败或 generation 关闭时，
 会删除未完成的暂存文件。
 
+## 存储空间占用与清理
+
+「存储空间」设置页由 `@dsh-forge/desktop-layer` 通过私有 Typert Remote 读取。`apps/desktop` 在
+generation 内创建 `StorageCoordinator` 并通过 launcher 注入 `storageManager` capability；它只扫描
+启动器已解析的 DSH Home 与 Electron `userData` 两个固定根目录，`lstat` 不跟随符号链接，不统计
+安装包本体。应用已用字节恒等于三类之和：
+
+| 分类 | 计入 | 可清理 |
+|---|---|---|
+| `cache` | `storages/session_projcache` 及同目录不兼容隔离残留、Electron 缓存目录、`userData/dsh-forge/ota` 非活动暂存 | 原生确认后按允许清单删除 |
+| `sessions` | DSH Home `sessions/` 会话正文 | 含共享 DSH Home 警告的原生确认后删除 |
+| `other` | 其余本应用管理数据（凭据、受管 profile、状态文件等） | 无删除入口 |
+
+磁盘占比以 DSH Home 所在卷为准；`userData` 与 DSH Home 跨卷时快照只标记，页面说明对比条范围，
+绝不把两卷容量相加。扫描只在打开设置页或显式刷新时进行，应用启动与 generation 就绪不遍历目录。
+扫描与清理共享 generation lease：并发请求以 `STORAGE_BUSY` 失败，generation 关闭或取消会停止
+遍历与删除，迟到结果不写回。缓存清理在 OTA 下载或准备中跳过暂存目录，避免与升级管理争用同一
+文件；会话清理不删除凭据、当前受管 profile 或缓存允许清单以外的目录。确认对话框由主进程显示，
+快照与页面都不接收路径、文件名或目录候选。该能力不是公开 desktop service，第三方 bundle 不能
+获得扫描或删除权限。
+
 ## 已知限制与暂缓事项
 
 - **私有 provider，不是扩展点**：第三方 bundle 不能依赖本包；其 API 只服务 launcher 和 desktop layer。
@@ -243,6 +272,8 @@ build、检查时间、状态、可用版本和下载进度；“立即升级”
 - **执行模式不是隔离边界**：`trusted-in-process` 下的 Node 插件仍与 Host 共用进程权限。
 - **不校验安装包完整性**：完整安装包 OTA 只校验 HTTPS URL 形状，不校验安装包摘要或签名清单。
 - **Linux 仅支持 AppImage**：发行版只生成 Ubuntu AppImage；非 Ubuntu Linux、不可写 `APPIMAGE` 和其他分发方式不支持 OTA。
+- **存储清理不是备份**：会话正文删除后无法从本页恢复；共享 DSH Home 下删除会影响 CLI 等其他 DSH 进程的会话。
+- **首次扫描可能较慢**：受管 profile 的依赖闭包使首次遍历耗时较长，页面显示扫描中；占用只在扫描完成后更新。
 
 ## 维护验证
 
@@ -262,3 +293,5 @@ pnpm run test:desktop-services-consumer
 覆盖在 `tests/desktop-loader.test.ts` 与 `tests/runtime-services.test.ts`。OTA 版本、暂存下载、
 取消、平台条件、下载进度、helper 重启回执与回滚覆盖在 `tests/full-package-ota.test.ts`、
 `tests/desktop-upgrade-helper.test.ts` 和 `tests/desktop-upgrade-restart-receipt.test.ts`。
+存储分类、符号链接、跨卷、并发、generation 关闭、确认拒绝与清理边界覆盖在
+`tests/desktop-storage-coordinator.test.ts` 与 `tests/desktop-storage-remote.test.ts`。

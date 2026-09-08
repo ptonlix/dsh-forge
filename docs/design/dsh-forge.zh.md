@@ -4,7 +4,7 @@
 
 ## 范围
 
-本文是 DSH Forge 桌面发行版的架构唯一权威来源，说明本仓库如何围绕上游 DeepSeek Harness（DSH）组合可审计 Electron 应用。项目提供两条发行路径：仓库维护者将经过审核的 bundle 和桌面专属能力组合为官方 profile 并发布，Fork 维护者则以同一套源码为底座加入其他或自定义插件并重新构建。桌面专属能力以 bundle/plugin 接入 DSH Host；当前包含升级管理，存储空间管理等能力须通过后续独立变更交付。DSH 负责 agent loop、会话协议、模型运行时、Host、Web Client 和 Cordis 语义；本仓库负责发行版身份、profile 组合、桌面宿主和发布证据。
+本文是 DSH Forge 桌面发行版的架构唯一权威来源，说明本仓库如何围绕上游 DeepSeek Harness（DSH）组合可审计 Electron 应用。项目提供两条发行路径：仓库维护者将经过审核的 bundle 和桌面专属能力组合为官方 profile 并发布，Fork 维护者则以同一套源码为底座加入其他或自定义插件并重新构建。桌面专属能力以 bundle/plugin 接入 DSH Host；当前包含升级管理与存储空间管理。DSH 负责 agent loop、会话协议、模型运行时、Host、Web Client 和 Cordis 语义；本仓库负责发行版身份、profile 组合、桌面宿主和发布证据。
 
 当前实现使用 Electron。Tauri、应用内插件市场、运行时 profile 切换和在线下载插件不属于本发行版；在写成产品能力前必须通过独立变更实现。
 
@@ -33,6 +33,8 @@ distribution.yml + profile.yml + bundle + catalog
 Electron 启动器拥有单实例锁、原生运行时、窗口、profile 绑定和进程 teardown。Host Cordis generation 拥有所选 profile 的 DSH service 和 loopback Web surface。Desktop layer 在 generation 内发布类型化 service。第三方 bundle 使用公开的 [`@dsh-forge/desktop-services`](../reference/foundation-contracts.zh.md) contract，不能获得原始 Electron 对象、启动器路径或任意 package manager 参数。
 
 Renderer 固定使用 Chromium sandbox、context isolation 并关闭 Node integration。导航仅允许当前 generation 的 loopback authority；支持的 HTTP(S) 和 mail 外链交给操作系统。插件执行模式为 `trusted-in-process`：catalog 审核和用户确认属于审计与授权控制，不是 Node 或 Electron 进程沙箱。
+
+「存储空间」设置页只展示当前 generation 存储能力投影的只读事实。存储能力是私有 capability，第三方 bundle 不能获得：主进程只扫描启动器已解析的 DSH Home 与 Electron `userData` 两个固定根目录，把占用归入缓存、会话、其他三类并汇总应用已用字节；磁盘占比取 DSH Home 所在卷容量，`userData` 跨卷时快照只标记不合并。扫描只在打开设置页或显式刷新时进行，与清理共享同一 generation lease。缓存与会话清理由主进程原生确认后按固定允许清单执行；会话确认必须警告 DSH Home 可能与其他 DSH 进程共享，凭据与当前受管 profile 永不在可删范围。页面通过固定、无路径参数的 Typert Remote 读取快照并请求清理，不接收绝对路径、文件名或目录候选。
 
 ## Generation 生命周期
 

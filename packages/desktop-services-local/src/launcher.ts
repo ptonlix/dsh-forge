@@ -6,6 +6,8 @@ import type {
   ProfileManager,
   ProfileMutationHooks,
   SpawnFunction,
+  StorageManagerCapability,
+  StorageSnapshot,
   UpgradeManagerCapability,
 } from './types.ts';
 
@@ -25,6 +27,10 @@ export {
 
 export type {
   DesktopHostCapability,
+  StorageManagerCapability,
+  StorageSnapshot,
+  StorageSnapshotPhase,
+  StorageVolumeUsage,
   UpgradeDownloadProgress,
   UpgradeManagerCapability,
   UpgradeManagerStatus,
@@ -44,6 +50,8 @@ export interface DesktopHostCapabilityOptions extends ProfileMutationHooks {
   readonly initializeProfile?: (profileDir: string) => void;
   /** 未配置时使用不可用快照；真实 launcher 会注入 generation-owned coordinator。 */
   readonly upgradeManager?: UpgradeManagerCapability;
+  /** 未配置时使用不扫描、不可清理的安全快照；真实 launcher 会注入 storage coordinator。 */
+  readonly storageManager?: StorageManagerCapability;
 }
 
 const unavailableUpgradeManager: UpgradeManagerCapability = Object.freeze({
@@ -60,6 +68,29 @@ const unavailableUpgradeManager: UpgradeManagerCapability = Object.freeze({
     }),
   check: async () => unavailableUpgradeManager.status(),
   startUpgrade: async () => unavailableUpgradeManager.status(),
+});
+
+const unavailableStorageSnapshot: StorageSnapshot = Object.freeze({
+  phase: 'error',
+  cacheBytes: 0,
+  sessionsBytes: 0,
+  otherBytes: 0,
+  appUsedBytes: 0,
+  volume: null,
+  userDataOnDifferentVolume: false,
+  scannedAt: null,
+  errorCode: 'STORAGE_UNAVAILABLE',
+});
+
+/**
+ * 缺省存储能力：不扫描任何目录，也不清理任何文件；真实 launcher 总是注入
+ * generation-owned StorageCoordinator，此缺省只服务测试与未接线的主机。
+ */
+const unavailableStorageManager: StorageManagerCapability = Object.freeze({
+  status: () => unavailableStorageSnapshot,
+  refresh: async () => unavailableStorageSnapshot,
+  cleanCache: async () => unavailableStorageSnapshot,
+  cleanSessions: async () => unavailableStorageSnapshot,
 });
 
 /**
@@ -82,6 +113,7 @@ export function createDesktopHostCapability(options: DesktopHostCapabilityOption
     spawn: options.spawn,
     initializeProfile: options.initializeProfile,
     upgradeManager: options.upgradeManager || unavailableUpgradeManager,
+    storageManager: options.storageManager || unavailableStorageManager,
     reconcile: options.reconcile,
     verifyNextGeneration: options.verifyNextGeneration,
   });

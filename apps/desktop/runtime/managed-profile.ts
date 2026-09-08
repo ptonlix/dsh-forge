@@ -237,6 +237,69 @@ function backupPath(dshHome: string, profileName: string): string {
   );
 }
 
+/** generation 成功成为 last-known-good 后，每个受管 profile 只保留最近一份备份。 */
+export const MANAGED_PROFILE_BACKUP_KEEP = 1;
+
+const MANAGED_PROFILE_BACKUP_ENTRY =
+  /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface PruneManagedProfileBackupsResult {
+  readonly kept: readonly string[];
+  readonly removed: readonly string[];
+}
+
+/**
+ * 删除 `.dsh-forge/managed-profile-backups/<profile>/` 下超出保留份数的时间戳快照。
+ * 只删除符合启动器命名的普通目录，不跟随符号链接，也不触碰 `profiles/`。
+ */
+export function pruneManagedProfileBackups(
+  dshHome: string,
+  { keep = MANAGED_PROFILE_BACKUP_KEEP }: { readonly keep?: number } = {},
+): PruneManagedProfileBackupsResult {
+  if (!Number.isInteger(keep) || keep < 1) throw new Error('受管 profile 备份保留份数无效');
+  const root = path.join(path.resolve(dshHome), '.dsh-forge', 'managed-profile-backups');
+  if (!pathExists(root)) return Object.freeze({ kept: [], removed: [] });
+  const rootStat = fs.lstatSync(root);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return Object.freeze({ kept: [], removed: [] });
+
+  const kept: string[] = [];
+  const removed: string[] = [];
+  for (const profileName of fs.readdirSync(root).sort()) {
+    const profileDir = path.join(root, profileName);
+    if (!inside(root, profileDir)) continue;
+    let profileStat: fs.Stats;
+    try {
+      profileStat = fs.lstatSync(profileDir);
+    } catch {
+      continue;
+    }
+    if (!profileStat.isDirectory() || profileStat.isSymbolicLink()) continue;
+    const entries = fs
+      .readdirSync(profileDir)
+      .filter((name) => MANAGED_PROFILE_BACKUP_ENTRY.test(name))
+      .sort((left, right) => right.localeCompare(left));
+    const retain = entries.slice(0, keep);
+    const drop = entries.slice(keep);
+    for (const name of retain) kept.push(path.join(profileDir, name));
+    for (const name of drop) {
+      const target = path.join(profileDir, name);
+      if (!inside(profileDir, target)) continue;
+      try {
+        const entryStat = fs.lstatSync(target);
+        if (entryStat.isSymbolicLink() || !entryStat.isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      fs.rmSync(target, { recursive: true, force: true });
+      removed.push(target);
+    }
+  }
+  return Object.freeze({
+    kept: Object.freeze(kept),
+    removed: Object.freeze(removed),
+  });
+}
+
 /**
  * 将发行版 profile 安装到共享 DSH Home 中独占的命名空间。
  *
@@ -244,7 +307,8 @@ function backupPath(dshHome: string, profileName: string): string {
  * `~/.dsh/profiles/developer`。发行版 ID、来源 profile 和模板摘要记录安装版本；
  * 因此已有缺少当前 marker、归属其他发行版或来源不一致的同名目录一律拒绝覆盖。
  * 升级前的受管 profile 会保留到 Home 下的备份目录，确保写入失败或发布回退时
- * 仍可人工恢复。
+ * 仍可人工恢复。generation 成功成为 last-known-good 后，启动器只保留每个
+ * profile 最近一份备份。
  */
 export function ensureManagedProfile({
   source,

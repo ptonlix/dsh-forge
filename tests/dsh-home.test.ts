@@ -14,7 +14,7 @@ import {
   reconcileDshHomeWriterLocks,
   resolveDesktopDshHome,
 } from '../apps/desktop/runtime/dsh-home.ts';
-import { ensureManagedProfile } from '../apps/desktop/runtime/managed-profile.ts';
+import { ensureManagedProfile, pruneManagedProfileBackups } from '../apps/desktop/runtime/managed-profile.ts';
 import { ProfileStateStore } from '../apps/desktop/runtime/state-store.ts';
 
 const temporaryDirectories: string[] = [];
@@ -382,6 +382,44 @@ describe('发行版受管 profile', () => {
         sourceProfile: 'dsh-forge-official',
       }),
     ).toThrow(/链接越出闭包/);
+  });
+
+  it('成功启动后每个 profile 只保留最近一份备份，不删除当前 profile',
+    () => {
+      const root = temporaryDirectory('dsh-forge-profile-backup-prune-');
+      const dshHome = path.join(root, 'home');
+      const live = path.join(dshHome, 'profiles', 'dsh-forge-official');
+      writeProfile(live, 'live');
+      const official = path.join(dshHome, '.dsh-forge', 'managed-profile-backups', 'dsh-forge-official');
+      const developer = path.join(dshHome, '.dsh-forge', 'managed-profile-backups', 'developer');
+      const oldest = '2026-08-21T10-34-38.425Z-14102d5d-7c81-479a-89e4-759c43c0dc2d';
+      const middle = '2026-08-29T09-11-42.299Z-2cc22698-da12-4ed6-9f52-0a012aa3741d';
+      const newest = '2026-09-08T02-16-58.380Z-f1c47fdb-ec39-479d-8102-c849f67a2c36';
+      const otherNewest = '2026-09-01T00-00-00.000Z-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      const otherOlder = '2026-08-01T00-00-00.000Z-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+      for (const name of [oldest, middle, newest]) {
+        writeFile(path.join(official, name, 'cordis.yml'), `# ${name}\n`);
+      }
+      writeFile(path.join(developer, otherNewest, 'cordis.yml'), '# developer-new\n');
+      writeFile(path.join(developer, otherOlder, 'cordis.yml'), '# developer-old\n');
+      writeFile(path.join(official, 'not-a-backup'), 'ignore\n');
+
+      const pruned = pruneManagedProfileBackups(dshHome);
+      expect(fs.existsSync(path.join(official, newest))).toBe(true);
+      expect(fs.existsSync(path.join(official, middle))).toBe(false);
+      expect(fs.existsSync(path.join(official, oldest))).toBe(false);
+      expect(fs.existsSync(path.join(official, 'not-a-backup'))).toBe(true);
+      expect(fs.existsSync(path.join(developer, otherNewest))).toBe(true);
+      expect(fs.existsSync(path.join(developer, otherOlder))).toBe(false);
+      expect(fs.existsSync(path.join(live, 'package.json'))).toBe(true);
+      expect(pruned.kept.map((entry) => path.basename(entry)).sort()).toEqual([newest, otherNewest].sort());
+      expect(pruned.removed).toHaveLength(3);
+    },
+  );
+
+  it('备份目录不存在时裁剪为空操作', () => {
+    const dshHome = temporaryDirectory('dsh-forge-profile-backup-missing-');
+    expect(pruneManagedProfileBackups(dshHome)).toEqual({ kept: [], removed: [] });
   });
 });
 

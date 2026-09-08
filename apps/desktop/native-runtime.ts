@@ -13,6 +13,8 @@ export interface DesktopRuntime {
     readonly onClose: (event: { preventDefault(): void }, window: BrowserWindow) => void;
   }): ReturnType<typeof createSecureWindowFactory>;
   confirmFullPackageUpgrade(update: { readonly version: string; readonly build: number }): Promise<boolean>;
+  confirmStorageCacheClean(): Promise<boolean>;
+  confirmStorageSessionsClean(): Promise<boolean>;
   openExternal(url: string): Promise<void>;
   exit(code: number): void;
 }
@@ -43,6 +45,32 @@ export function createElectronRuntime(): DesktopRuntime {
         noLink: true,
         title: '发现新版本',
         message: `可升级到 ${update.version}（build ${update.build}）`,
+      });
+      return result.response === 0;
+    },
+    async confirmStorageCacheClean(): Promise<boolean> {
+      const result = await dialog.showMessageBox({
+        type: 'warning',
+        buttons: ['清理缓存', '暂不清理'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        title: '清理缓存',
+        message: '将删除可重建的投影缓存、Electron 缓存和 OTA 暂存残留。',
+        detail: '清理不影响会话正文、凭据或当前受管 profile。',
+      });
+      return result.response === 0;
+    },
+    async confirmStorageSessionsClean(): Promise<boolean> {
+      const result = await dialog.showMessageBox({
+        type: 'warning',
+        buttons: ['删除会话数据', '暂不删除'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        title: '删除会话数据',
+        message: '将删除 DSH Home 中的会话记录正文。',
+        detail: 'DSH Home 可能与 CLI 或其他 DSH 进程共享，删除后无法从本页恢复；凭据和当前受管 profile 不受影响。',
       });
       return result.response === 0;
     },
